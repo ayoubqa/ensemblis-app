@@ -46,39 +46,50 @@ export default function TaskDetailPage() {
     }
   }
 
-  if (!task) return <p className="max-w-3xl mx-auto px-6 py-14 text-gray-400">Loading…</p>;
+  if (!task) return <p className="max-w-3xl mx-auto px-6 py-14 text-muted">Loading…</p>;
+
+  const statusTag: Record<string, string> = {
+    COMPLETED: "tag ok",
+    RUNNING: "tag",
+    PLANNING: "tag gray",
+    FAILED: "tag bad",
+    REFUNDED: "tag gray",
+  };
 
   return (
     <section className="max-w-3xl mx-auto px-6 py-14">
-      <h1 className="text-2xl font-semibold mb-2">{task.title}</h1>
-      <p className="text-sm text-gray-500 mb-8">
-        Status: <span className="text-accent">{task.status}</span>
-        {task.agent && ` · ${task.agent.name}`}
+      <h1 className="serif text-2xl mb-3">{task.title}</h1>
+      <p className="text-sm text-muted mb-8 flex items-center gap-2">
+        <span className={statusTag[task.status] || "tag gray"}>{task.status}</span>
+        {task.agent && <span>· {task.agent.name}</span>}
       </p>
 
       {(task.status === "PLANNING" || task.status === "RUNNING") && (
-        <div className="card text-gray-400">Working on it — this calls a real model, so it may take a bit.</div>
+        <div className="card text-muted flex items-center gap-3">
+          <span className="pulse-dot" />
+          Working on it — this calls a real model, so it may take a bit.
+        </div>
       )}
 
       {task.status === "FAILED" && (
-        <div className="card border-red-900 text-red-400">
+        <div className="card border-bad text-bad">
           This task failed: {task.errorMessage}. Your credits were refunded.
         </div>
       )}
 
       {task.status === "COMPLETED" && (
         <>
-          <article className="card prose prose-invert max-w-none mb-8">
+          <article className="card prose max-w-none mb-8">
             <ReactMarkdown remarkPlugins={[remarkGfm]}>{task.result}</ReactMarkdown>
           </article>
 
           <div className="card">
             <h3 className="font-medium mb-3">Did this achieve what you needed?</h3>
-            <div className="flex gap-3">
+            <div className="flex gap-3 flex-wrap">
               {(["Achieved", "Partially", "Not achieved"] as const).map((o) => (
                 <button
                   key={o}
-                  className={`btn ${task.outcome === o ? "btn-primary" : ""}`}
+                  className={`btn ${task.outcome === o ? "p" : ""}`}
                   disabled={sendingFeedback}
                   onClick={() => sendFeedback(o)}
                 >

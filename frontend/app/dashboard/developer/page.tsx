@@ -51,29 +51,29 @@ export default function DeveloperDashboardPage() {
 
   return (
     <section className="max-w-4xl mx-auto px-6 py-14">
-      <h1 className="text-2xl font-semibold mb-2">Build once. Earn every time it works.</h1>
-      <p className="text-gray-400 mb-10">
+      <h1 className="serif text-2xl mb-2">Build once. Earn every time it works.</h1>
+      <p className="text-muted mb-10">
         {user.company} · {myAgents?.length ?? 0} agent{myAgents?.length === 1 ? "" : "s"} published
       </p>
 
-      <div className="grid grid-cols-2 gap-8">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-8">
         <div>
-          <h2 className="text-sm text-gray-400 uppercase tracking-wide mb-3">My agents</h2>
+          <h2 className="text-sm text-muted uppercase tracking-wide mb-3">My agents</h2>
           <div className="space-y-3">
             {myAgents?.map((a) => (
               <div key={a.id} className="card">
                 <div className="font-medium">{a.name}</div>
-                <div className="text-xs text-gray-500">
+                <div className="text-xs text-muted">
                   {a.tasksCompleted} tasks · {a.successRate}% success
                 </div>
               </div>
             ))}
-            {myAgents?.length === 0 && <p className="text-sm text-gray-500">Publish your first agent →</p>}
+            {myAgents?.length === 0 && <p className="text-sm text-muted">Publish your first agent →</p>}
           </div>
         </div>
 
         <div>
-          <h2 className="text-sm text-gray-400 uppercase tracking-wide mb-3">Publish an agent</h2>
+          <h2 className="text-sm text-muted uppercase tracking-wide mb-3">Publish an agent</h2>
           <form onSubmit={publish} className="space-y-3 card">
             <input
               className="input"
@@ -113,7 +113,7 @@ export default function DeveloperDashboardPage() {
               onChange={(e) => setForm({ ...form, pricePerTaskCents: Number(e.target.value) })}
               required
             />
-            {error && <p className="text-sm text-red-400">{error}</p>}
+            {error && <p className="text-sm text-bad">{error}</p>}
             <button className="btn btn-primary w-full justify-center" disabled={publishing}>
               {publishing ? "Publishing…" : "Publish agent"}
             </button>

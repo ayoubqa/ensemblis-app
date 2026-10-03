@@ -30,10 +30,10 @@ export default function LoginPage() {
 
   return (
     <section className="max-w-md mx-auto px-6 py-20">
-      <h1 className="text-2xl font-semibold mb-6">Log in</h1>
+      <h1 className="serif text-2xl mb-6">Log in</h1>
       <form onSubmit={submit} className="space-y-4">
         <div>
-          <label className="text-sm text-gray-400">Email</label>
+          <label className="text-sm text-muted">Email</label>
           <input
             className="input mt-1"
             type="email"
@@ -43,7 +43,7 @@ export default function LoginPage() {
           />
         </div>
         <div>
-          <label className="text-sm text-gray-400">Password</label>
+          <label className="text-sm text-muted">Password</label>
           <input
             className="input mt-1"
             type="password"
@@ -52,7 +52,7 @@ export default function LoginPage() {
             required
           />
         </div>
-        {error && <p className="text-sm text-red-400">{error}</p>}
+        {error && <p className="text-sm text-bad">{error}</p>}
         <button className="btn btn-primary w-full justify-center" disabled={loading}>
           {loading ? "Signing in…" : "Log in"}
         </button>

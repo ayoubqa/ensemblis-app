@@ -6,12 +6,12 @@ import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 
-const statusColor: Record<string, string> = {
-  COMPLETED: "text-green-400",
-  RUNNING: "text-accent",
-  PLANNING: "text-gray-400",
-  FAILED: "text-red-400",
-  REFUNDED: "text-gray-500",
+const statusTag: Record<string, string> = {
+  COMPLETED: "tag ok",
+  RUNNING: "tag",
+  PLANNING: "tag gray",
+  FAILED: "tag bad",
+  REFUNDED: "tag gray",
 };
 
 export default function DashboardPage() {
@@ -32,24 +32,28 @@ export default function DashboardPage() {
   return (
     <section className="max-w-4xl mx-auto px-6 py-14">
       <div className="flex justify-between items-center mb-8">
-        <h1 className="text-2xl font-semibold">Good to see you, {user.name.split(" ")[0]}.</h1>
-        <Link href="/new" className="btn btn-primary">
+        <h1 className="serif text-2xl">Good to see you, {user.name.split(" ")[0]}.</h1>
+        <Link href="/new" className="btn p">
           + New task
         </Link>
       </div>
 
-      {!tasks && <p className="text-gray-400">Loading…</p>}
+      {!tasks && <p className="text-muted">Loading…</p>}
       {tasks?.length === 0 && (
-        <p className="text-gray-400">Nothing here yet — start your first task to see it appear.</p>
+        <p className="text-muted">Nothing here yet — start your first task to see it appear.</p>
       )}
       <div className="space-y-3">
         {tasks?.map((t) => (
-          <Link href={`/tasks/${t.id}`} key={t.id} className="card flex justify-between items-center block">
+          <Link
+            href={`/tasks/${t.id}`}
+            key={t.id}
+            className="card flex justify-between items-center block hover:border-ink transition-colors"
+          >
             <div>
               <div className="font-medium">{t.title}</div>
-              <div className="text-xs text-gray-500">{new Date(t.createdAt).toLocaleString()}</div>
+              <div className="text-xs text-muted">{new Date(t.createdAt).toLocaleString()}</div>
             </div>
-            <span className={`text-sm ${statusColor[t.status] || ""}`}>{t.status}</span>
+            <span className={`${statusTag[t.status] || "tag gray"} text-xs`}>{t.status}</span>
           </Link>
         ))}
       </div>

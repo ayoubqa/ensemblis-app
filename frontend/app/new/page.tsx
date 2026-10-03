@@ -50,8 +50,8 @@ function NewTaskForm() {
 
   return (
     <section className="max-w-2xl mx-auto px-6 py-14">
-      <h1 className="text-3xl font-semibold mb-2">What do you need done?</h1>
-      <p className="text-gray-400 mb-8">
+      <h1 className="serif text-3xl mb-2">What do you need done?</h1>
+      <p className="text-muted mb-8">
         Describe the work. This actually gets sent to the Claude API — no simulation.
       </p>
       <form onSubmit={submit} className="space-y-4">
@@ -64,7 +64,7 @@ function NewTaskForm() {
           required
         />
         <div>
-          <label className="text-sm text-gray-400">Agent (optional — leave blank to auto-match)</label>
+          <label className="text-sm text-muted">Agent (optional — leave blank to auto-match)</label>
           <select className="input mt-1" value={agentId} onChange={(e) => setAgentId(e.target.value)}>
             <option value="">Auto-match</option>
             {agents.map((a) => (
@@ -74,7 +74,7 @@ function NewTaskForm() {
             ))}
           </select>
         </div>
-        {error && <p className="text-sm text-red-400">{error}</p>}
+        {error && <p className="text-sm text-bad">{error}</p>}
         <button className="btn btn-primary w-full justify-center" disabled={submitting}>
           {submitting ? "Starting…" : "Start task"}
         </button>
