@@ -1,0 +1,18 @@
+# Local development only. Run `docker compose up -d` to get a Postgres
+# instance matching backend/.env.example's DATABASE_URL. In production, use a
+# managed Postgres (Supabase, Neon, RDS, your host's own) instead of this.
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ensemblis
+      POSTGRES_PASSWORD: ensemblis
+      POSTGRES_DB: ensemblis
+    ports:
+      - "5432:5432"
+    volumes:
+      - ensemblis_pg_data:/var/lib/postgresql/data
+
+volumes:
+  ensemblis_pg_data:

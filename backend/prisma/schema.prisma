@@ -1,0 +1,98 @@
+// Ensemblis data model.
+// This replaces the prototype's in-memory `S` object with real, persisted tables.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum AccountType {
+  COMPANY
+  DEVELOPER
+}
+
+enum TaskStatus {
+  PLANNING
+  RUNNING
+  COMPLETED
+  FAILED
+  REFUNDED
+}
+
+model User {
+  id           String      @id @default(cuid())
+  email        String      @unique
+  passwordHash String
+  name         String
+  company      String      @default("")
+  role         String      @default("")
+  accountType  AccountType @default(COMPANY)
+  builds       String      @default("") // developer persona: what they build, optional
+  credits      Int         @default(10000) // stored in cents to avoid float issues
+  createdAt    DateTime    @default(now())
+
+  tasks     Task[]
+  agents    Agent[] // agents this user has published (developer persona)
+  workflows Workflow[]
+  seats     TeamSeat[]
+}
+
+model TeamSeat {
+  id        String   @id @default(cuid())
+  owner     User     @relation(fields: [ownerId], references: [id])
+  ownerId   String
+  name      String
+  role      String
+  createdAt DateTime @default(now())
+}
+
+// Agents available in the marketplace. Seeded with the demo roster; developers can publish more.
+model Agent {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  category    String
+  description String
+  systemPrompt String  @db.Text // the real instructions sent to Claude for this agent's persona
+  pricePerTaskCents Int @default(1500)
+  successRate Float    @default(95)
+  tasksCompleted Int    @default(0)
+  isLive      Boolean  @default(true)
+  owner       User?    @relation(fields: [ownerId], references: [id])
+  ownerId     String?
+  createdAt   DateTime @default(now())
+
+  tasks Task[]
+}
+
+model Task {
+  id          String     @id @default(cuid())
+  user        User       @relation(fields: [userId], references: [id])
+  userId      String
+  agent       Agent?     @relation(fields: [agentId], references: [id])
+  agentId     String?
+  title       String
+  description String     @db.Text
+  status      TaskStatus @default(PLANNING)
+  costCents   Int        @default(0)
+  result      String?    @db.Text // the actual Claude-generated deliverable (markdown)
+  errorMessage String?
+  outcome     String?    // 'Achieved' | 'Partially' | 'Not achieved', set by user feedback
+  createdAt   DateTime   @default(now())
+  completedAt DateTime?
+}
+
+model Workflow {
+  id        String   @id @default(cuid())
+  user      User     @relation(fields: [userId], references: [id])
+  userId    String
+  name      String
+  basedOnText String @db.Text
+  frequency String   @default("Monthly") // Weekly | Monthly | Quarterly
+  nextRun   DateTime?
+  lastRun   DateTime?
+  createdAt DateTime @default(now())
+}
