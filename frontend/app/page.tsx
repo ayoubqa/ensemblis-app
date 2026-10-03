@@ -2,7 +2,7 @@ import Link from "next/link";
 
 export default function HomePage() {
   return (
-    <section className="max-w-3xl mx-auto px-6 py-24 text-center flex flex-col items-center">
+    <section className="hero-wrap max-w-3xl mx-auto px-6 py-24 text-center flex flex-col items-center">
       <div className="hero-badge">
         <span className="pulse-dot" />
         The marketplace for AI work

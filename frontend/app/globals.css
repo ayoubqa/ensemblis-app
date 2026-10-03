@@ -296,6 +296,28 @@ button.chip:hover {
 }
 
 /* ===== hero ===== */
+.hero-wrap {
+  position: relative;
+  overflow: hidden;
+}
+
+.hero-wrap::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image: linear-gradient(var(--line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--line) 1px, transparent 1px);
+  background-size: 56px 56px;
+  opacity: 0.45;
+  -webkit-mask-image: linear-gradient(to bottom, #000, transparent 80%);
+  mask-image: linear-gradient(to bottom, #000, transparent 80%);
+  pointer-events: none;
+}
+
+.hero-wrap > * {
+  position: relative;
+}
+
 .hero-badge {
   display: inline-flex;
   align-items: center;
