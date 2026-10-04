@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Avatar, EmptyState, Icon, Modal, PageSkeleton, RequireAuth, SkeletonCard, Tag, useToast } from "@/components";
 import { api, type Agent, type Depth, type Frequency, type Task, type Workflow } from "@/lib/api";
+import { toastApiError } from "@/lib/errors";
 import { useAuth } from "@/lib/auth-context";
 import { FREQ_PER } from "@/lib/data";
 import { dayLabel, eur, longDate, plural } from "@/lib/format";
@@ -116,7 +117,7 @@ function Workflows() {
       // Refresh to pick up the server's rescheduled nextRun.
       api.listWorkflows().then((r) => setWorkflows(r.workflows)).catch(() => {});
     } catch (e) {
-      toast.error((e as Error).message);
+      toastApiError(toast, e, "Couldn't run this workflow");
     } finally {
       setBusy(null);
     }

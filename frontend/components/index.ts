@@ -34,3 +34,6 @@ export { CommandPalette } from "./CommandPalette";
 export { Header, BottomNav, useNotifications } from "./Header";
 export { Footer } from "./Footer";
 export { confetti } from "@/lib/confetti";
+export { DemoBanner } from "./DemoBanner";
+export { SampleTag } from "./SampleTag";
+export { CharCount } from "./CharCount";

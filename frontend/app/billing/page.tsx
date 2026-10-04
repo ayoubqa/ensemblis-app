@@ -4,7 +4,9 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { ChipGroup, EmptyState, HBar, Icon, LineChart, RequireAuth, Skeleton, SkeletonText, Tag, useToast, type TagVariant } from "@/components";
 import { api, type Billing, type Task, type Transaction } from "@/lib/api";
+import { errorText } from "@/lib/errors";
 import { useAuth } from "@/lib/auth-context";
+import { useConfig } from "@/lib/config";
 import { dateTime, dayLabel, eur, eurSigned, plural } from "@/lib/format";
 import { ROUTES } from "@/lib/routes";
 import { downloadCsv, spendBy, spendSeries, startOfMonth } from "../dashboard/_lib/insights";
@@ -128,6 +130,7 @@ function BillingView() {
 
         <TopUpCard
           balance={user.credits}
+          toppedUpCents={billing ? toppedUpCents : null}
           onDone={(b) => {
             setBilling(b);
           }}
@@ -268,21 +271,43 @@ function BillingView() {
   );
 }
 
-function TopUpCard({ balance, onDone, onUser }: { balance: number; onDone: (b: Billing) => void; onUser: (u: import("@/lib/api").User) => void }) {
+function TopUpCard({
+  balance,
+  toppedUpCents,
+  onDone,
+  onUser,
+}: {
+  balance: number;
+  /** lifetime sum of TOP_UP transactions; null while billing loads */
+  toppedUpCents: number | null;
+  onDone: (b: Billing) => void;
+  onUser: (u: import("@/lib/api").User) => void;
+}) {
   const toast = useToast();
+  const { config, loaded } = useConfig();
+  // Lifetime demo top-up allowance (server-enforced; mirrored here for a clear UI).
+  const capKnown = loaded && toppedUpCents !== null;
+  const disabledByServer = loaded && (!config.topupEnabled || config.topupMaxCents <= 0);
+  const remaining = capKnown ? Math.max(0, config.topupMaxCents - (toppedUpCents ?? 0)) : null;
+  const exhausted = !disabledByServer && remaining !== null && remaining < 100;
+  const maxPer = remaining !== null ? Math.min(MAX_TOPUP, remaining) : MAX_TOPUP;
+  const presets = PRESETS.filter((p) => p <= maxPer);
   const [amount, setAmount] = useState<number>(2500);
   const [custom, setCustom] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
   const customCents = custom.trim() ? Math.round(parseFloat(custom.replace(",", ".")) * 100) : null;
-  const cents = customCents ?? amount;
-  const invalid = customCents !== null && (!Number.isFinite(customCents) || customCents < 100 || customCents > MAX_TOPUP);
+  // If the chosen preset is above what's left of the allowance, fall back to the largest one that fits (or the remainder).
+  const presetCents = amount <= maxPer ? amount : presets[presets.length - 1] ?? maxPer;
+  const cents = customCents ?? presetCents;
+  const invalid = customCents !== null && (!Number.isFinite(customCents) || customCents < 100 || customCents > maxPer);
+  const presetTooBig = customCents === null && (cents > maxPer || cents < 100);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (invalid) {
-      setErr(`Enter an amount between €1 and ${eur(MAX_TOPUP)}.`);
+      setErr(`Enter an amount between €1 and ${eur(maxPer)}.`);
       return;
     }
     setErr(null);
@@ -294,7 +319,7 @@ function TopUpCard({ balance, onDone, onUser }: { balance: number; onDone: (b: B
       setCustom("");
       toast(`${eur(cents)} demo credits added`, { icon: "check" });
     } catch (e2) {
-      setErr((e2 as Error).message);
+      setErr(errorText(e2, "Couldn't add credits"));
     } finally {
       setBusy(false);
     }
@@ -315,14 +340,25 @@ function TopUpCard({ balance, onDone, onUser }: { balance: number; onDone: (b: B
       <div className="small muted" style={{ marginBottom: 12 }}>
         Available balance
       </div>
+      {disabledByServer || exhausted ? (
+        <div className="notice" role="status" style={{ marginTop: 4 }}>
+          <Icon name="info" />
+          <div className="sp">
+            {disabledByServer
+              ? "Top-ups are turned off on this public demo. Every account gets its starting credits — when they run out, that's the end of the free trial."
+              : `You've used this demo's full top-up allowance (${eur(config.topupMaxCents)} per account). Thanks for trying Ensemblis!`}
+          </div>
+        </div>
+      ) : (
+        <>
       <div className="row wrapflex" style={{ gap: 6 }} role="radiogroup" aria-label="Top-up amount">
-        {PRESETS.map((p) => (
+        {presets.map((p) => (
           <button
             key={p}
             type="button"
             role="radio"
-            aria-checked={customCents === null && amount === p}
-            className={customCents === null && amount === p ? "chip on" : "chip"}
+            aria-checked={customCents === null && presetCents === p}
+            className={customCents === null && presetCents === p ? "chip on" : "chip"}
             onClick={() => {
               setAmount(p);
               setCustom("");
@@ -355,13 +391,16 @@ function TopUpCard({ balance, onDone, onUser }: { balance: number; onDone: (b: B
         </div>
       ) : (
         <div className="hint" id="topup-hint">
-          Demo credits only — no real payment is taken. Up to {eur(MAX_TOPUP)} per top-up.
+          Demo credits only — no real payment is taken.{" "}
+          {remaining !== null ? <>You can add {eur(remaining)} more on this demo account.</> : <>Up to {eur(MAX_TOPUP)} per top-up.</>}
         </div>
       )}
-      <button type="submit" className="btn sm p" style={{ marginTop: 12 }} disabled={busy || invalid} aria-busy={busy}>
+      <button type="submit" className="btn sm p" style={{ marginTop: 12 }} disabled={busy || invalid || presetTooBig} aria-busy={busy}>
         <Icon name="plus" />
-        Add {invalid ? "" : eur(cents)} demo credits
+        Add {invalid || presetTooBig ? "" : eur(cents)} demo credits
       </button>
+        </>
+      )}
     </form>
   );
 }

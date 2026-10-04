@@ -5,11 +5,13 @@
 // Idempotent: agents are upserted by their unique name, so re-running the seed
 // refreshes descriptions/prompts/prices without duplicating rows. Live usage
 // counters (tasksCompleted) are never decreased by a re-seed.
+//
+// Lives in src/ so `npm run build` compiles it to dist/seed.js, which the
+// production start command (`npm run start:render`) runs on every boot.
+// Locally: `npm run seed`.
 
-import { PrismaClient } from "@prisma/client";
-import { CATALOG } from "../src/catalog/agents";
-
-const prisma = new PrismaClient();
+import { prisma } from "./db";
+import { CATALOG } from "./catalog/agents";
 
 async function main() {
   for (const agent of CATALOG) {
@@ -27,7 +29,7 @@ async function main() {
 main()
   .catch((e) => {
     console.error(e);
-    process.exit(1);
+    process.exitCode = 1;
   })
   .finally(async () => {
     await prisma.$disconnect();

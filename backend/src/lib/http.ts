@@ -42,6 +42,9 @@ export function errorHandler(err: unknown, _req: Request, res: Response, _next: 
   if (err && typeof err === "object" && (err as { type?: string }).type === "entity.parse.failed") {
     return res.status(400).json({ error: "Request body is not valid JSON" });
   }
+  if (err && typeof err === "object" && (err as { type?: string }).type === "entity.too.large") {
+    return res.status(413).json({ error: "Request body is too large" });
+  }
   console.error(err);
   res.status(500).json({ error: "Internal server error" });
 }

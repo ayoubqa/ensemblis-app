@@ -4,9 +4,10 @@ import Link from "next/link";
 import { Fragment, useState } from "react";
 import { useRouter } from "next/navigation";
 import { api, ApiError, type Agent, type Depth, type TaskEstimate } from "@/lib/api";
+import { isLimitError, toastApiError } from "@/lib/errors";
 import { Avatar, Flow, Icon, Modal, Rating, Skeleton, SkeletonText, VerifiedTag, useToast } from "@/components";
 import { useAuth } from "@/lib/auth-context";
-import { STARTING_CREDITS_CENTS } from "@/lib/data";
+import { StartingCredits } from "@/lib/config";
 import { duration, eur, minutesRange, num, pct } from "@/lib/format";
 import { useKeyboardShortcut } from "@/lib/hooks";
 import { ROUTES, loginUrl, signupUrl } from "@/lib/routes";
@@ -111,7 +112,11 @@ export function Plan({
       if (err.status === 402) {
         setShortfall(err.message);
         setModal("insufficient");
-      } else toast.error(err.message || "Couldn't start the task");
+      } else {
+        // Close the confirm sheet so the server's explanation (e.g. a daily limit) is readable.
+        if (isLimitError(err)) setModal(null);
+        toastApiError(toast, err, "Couldn't start the task");
+      }
       setStarting(false);
     }
   };
@@ -409,7 +414,7 @@ export function Plan({
                 {eur(user.credits)} → {eur(balanceAfter)}
               </b>
             ) : (
-              <span className="small">New accounts get {eur(STARTING_CREDITS_CENTS)} in demo credits</span>
+              <span className="small">New accounts get <StartingCredits /> in demo credits</span>
             )}
           </div>
           <button type="button" className="btn p lg block" style={{ marginTop: 16 }} onClick={start} disabled={busy} aria-busy={busy}>
@@ -523,7 +528,7 @@ export function Plan({
         </div>
         <div className="notice" style={{ margin: "14px 0", background: "var(--accent-soft)", color: "var(--accent)" }}>
           <Icon name="spark" />
-          <span>New accounts start with {eur(STARTING_CREDITS_CENTS)} in demo credits. No card needed.</span>
+          <span>New accounts start with <StartingCredits /> in demo credits. No card needed.</span>
         </div>
         <div className="row">
           <Link className="btn" href={loginUrl(RESUME)}>

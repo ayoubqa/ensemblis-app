@@ -2,7 +2,8 @@
 
 import { Fragment, useEffect, useRef, useState } from "react";
 import { api, type AgentDetail, type Depth, type TaskEstimate } from "@/lib/api";
-import { Avatar, Icon, VerifiedTag } from "@/components";
+import { Avatar, CharCount, Icon, VerifiedTag } from "@/components";
+import { useConfig } from "@/lib/config";
 import { TASK_TYPES } from "@/lib/data";
 import { eur, minutesRange } from "@/lib/format";
 import { useDebounced, useKeyboardShortcut } from "@/lib/hooks";
@@ -35,6 +36,8 @@ export function Describe({
 }) {
   const taRef = useRef<HTMLTextAreaElement>(null);
   const [error, setError] = useState<string | null>(null);
+  const { config } = useConfig();
+  const maxLen = config.maxDescriptionLength;
 
   // Live routing hint: a debounced, free estimate while the user types.
   const debounced = useDebounced(description.trim(), 650);
@@ -69,6 +72,11 @@ export function Describe({
   const submit = () => {
     if (description.trim().length < 3) {
       setError("Describe the work you need done — a sentence or two is enough.");
+      taRef.current?.focus();
+      return;
+    }
+    if (description.length > maxLen) {
+      setError(`Please shorten your brief to ${maxLen.toLocaleString("en")} characters or fewer.`);
       taRef.current?.focus();
       return;
     }
@@ -128,10 +136,10 @@ export function Describe({
             ref={taRef}
             rows={4}
             value={description}
-            maxLength={8000}
+            maxLength={maxLen}
             placeholder={PLACEHOLDER}
-            aria-invalid={error ? true : undefined}
-            aria-describedby="route-hint"
+            aria-invalid={error || description.length > maxLen ? true : undefined}
+            aria-describedby="route-hint draft-count"
             onChange={(e) => {
               onDescription(e.target.value);
               if (error) setError(null);
@@ -161,8 +169,11 @@ export function Describe({
             {error}
           </p>
         )}
-        <div className="tiny muted hideS" style={{ marginTop: 8, textAlign: "right" }}>
-          Press <span className="kbd">⌘</span> <span className="kbd">Enter</span> to analyze
+        <div className="row between" style={{ marginTop: 8 }}>
+          <CharCount id="draft-count" value={description} max={maxLen} />
+          <span className="tiny muted hideS">
+            Press <span className="kbd">⌘</span> <span className="kbd">Enter</span> to analyze
+          </span>
         </div>
 
         <div style={{ marginTop: 22 }}>
@@ -196,7 +207,9 @@ export function Describe({
         </p>
         <div className="small muted" style={{ marginTop: 16, display: "flex", gap: 7, alignItems: "flex-start" }}>
           <Icon name="lock" />
-          <span>Your task description is used only to complete this task — never sold, never used to train outside models.</span>
+          <span>
+            Your task description is sent to our AI provider ({config.aiProviderLabel}) to produce the result. It&apos;s never sold. Don&apos;t include confidential or other people&apos;s personal information.
+          </span>
         </div>
       </div>
     </div>

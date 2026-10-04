@@ -6,7 +6,9 @@ import { Suspense, useEffect, useRef, useState, type FormEvent } from "react";
 import { Icon, RolePicker, useToast, type SignupRole } from "@/components";
 import { api, ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
-import { PLATFORM_FEE_PERCENT, STARTING_CREDITS_CENTS } from "@/lib/data";
+import { errorText } from "@/lib/errors";
+import { PLATFORM_FEE_PERCENT } from "@/lib/data";
+import { useConfig } from "@/lib/config";
 import { eur, firstName } from "@/lib/format";
 import { ROUTES, loginUrl, safeNext, signupUrl } from "@/lib/routes";
 import { AuthShell, Divider, EMAIL_RE, Field, FormError, PasswordInput, StrengthMeter } from "../login/_components/AuthUI";
@@ -17,7 +19,7 @@ const PERSONA = {
     sub: "Confirm a few details — everything here is editable later in Settings.",
     companyLabel: "Company",
     companyPh: "Northstar Labs",
-    perk: `${eur(STARTING_CREDITS_CENTS)} in demo credits preloaded`,
+    perk: "{credits} in demo credits preloaded",
     perkIcon: "eur" as const,
   },
   developer: {
@@ -30,7 +32,7 @@ const PERSONA = {
   },
 };
 
-type Errors = Partial<Record<"name" | "email" | "password", string>>;
+type Errors = Partial<Record<"name" | "email" | "password" | "invite" | "terms", string>>;
 
 function SignupForm() {
   const params = useSearchParams();
@@ -39,8 +41,13 @@ function SignupForm() {
   const { user, loading, signIn, setUser } = useAuth();
   const next = params.get("next");
   const typeParam = params.get("type");
+  const inviteParam = params.get("invite");
+  /** Keep ?invite= when moving between signup steps. */
+  const keepInvite = (href: string) => (inviteParam ? `${href}${href.includes("?") ? "&" : "?"}invite=${encodeURIComponent(inviteParam)}` : href);
   const role: SignupRole | null = typeParam === "company" || typeParam === "developer" ? typeParam : null;
   const dev = role === "developer";
+  const { config } = useConfig();
+  const inviteRequired = config.inviteRequired;
 
   const [name, setName] = useState("");
   const [company, setCompany] = useState("");
@@ -49,6 +56,9 @@ function SignupForm() {
   const [firstTask, setFirstTask] = useState(params.get("q") || "");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [invite, setInvite] = useState(params.get("invite") || "");
+  const [inviteError, setInviteError] = useState<string | null>(null);
+  const [agreed, setAgreed] = useState(false);
   const [touched, setTouched] = useState<Record<string, boolean>>({});
   const [submitted, setSubmitted] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -70,6 +80,8 @@ function SignupForm() {
     name: !name.trim() ? "Tell us your name" : undefined,
     email: !email.trim() ? "Enter your email address" : !EMAIL_RE.test(email.trim()) ? "That doesn't look like an email address" : undefined,
     password: password.length < 8 ? (password ? "Use at least 8 characters" : "Choose a password") : undefined,
+    invite: inviteRequired && !invite.trim() ? "Enter your invite code" : undefined,
+    terms: !agreed ? "Please agree to the Terms and Privacy Policy to continue" : undefined,
   };
   const show = (k: keyof Errors) => (submitted || touched[k]) && errors[k];
   const blur = (k: string) => () => setTouched((t) => ({ ...t, [k]: true }));
@@ -83,7 +95,7 @@ function SignupForm() {
         <p className="muted" style={{ margin: "4px 0 22px" }}>
           How will you use it today?
         </p>
-        <RolePicker onPick={(r) => router.replace(signupUrl(r, next))} />
+        <RolePicker onPick={(r) => router.replace(keepInvite(signupUrl(r, next)))} />
         <p className="small muted" style={{ textAlign: "center", marginTop: 20 }}>
           Already have an account?{" "}
           <Link href={loginUrl(next)} style={{ color: "var(--accent)", fontWeight: 600 }}>
@@ -104,9 +116,10 @@ function SignupForm() {
     setSubmitted(true);
     setFormError(null);
     setEmailTaken(false);
-    if (errors.name || errors.email || errors.password) {
-      const first = (["name", "email", "password"] as const).find((k) => errors[k]);
-      if (first) document.getElementById(first === "name" ? "su-name" : first === "email" ? "su-email" : "su-password")?.focus();
+    setInviteError(null);
+    if (errors.name || errors.email || errors.password || errors.invite || errors.terms) {
+      const first = (["name", "email", "password", "invite", "terms"] as const).find((k) => errors[k]);
+      if (first) document.getElementById(`su-${first}`)?.focus();
       return;
     }
     setBusy(true);
@@ -118,6 +131,8 @@ function SignupForm() {
         company: company.trim() || undefined,
         accountType: dev ? "DEVELOPER" : "COMPANY",
         builds: dev ? builds.trim() || undefined : undefined,
+        acceptedTerms: true,
+        ...(inviteRequired || invite.trim() ? { inviteCode: invite.trim() } : {}),
       });
       done.current = true;
       signIn(token, u);
@@ -143,7 +158,16 @@ function SignupForm() {
         document.getElementById("su-email")?.focus();
         return;
       }
-      setFormError(err instanceof Error ? err.message : "Something went wrong");
+      if (err instanceof ApiError && err.status === 403) {
+        // Invite missing/invalid, or signups closed on this demo — show the server's reason inline.
+        const msg = errorText(err, "Signups need a valid invite code right now.");
+        if (inviteRequired || invite.trim()) {
+          setInviteError(msg);
+          document.getElementById("su-invite")?.focus();
+        } else setFormError(msg);
+        return;
+      }
+      setFormError(errorText(err));
     }
   };
 
@@ -244,6 +268,27 @@ function SignupForm() {
             />
             {!show("password") && <StrengthMeter pw={password} />}
           </Field>
+          {inviteRequired && (
+            <Field id="su-invite" label="Invite code" error={inviteError || show("invite")} hint="This demo is invite-only for now. Your code came with your invitation link.">
+              <input
+                id="su-invite"
+                className="f"
+                autoComplete="off"
+                autoCapitalize="characters"
+                spellCheck={false}
+                value={invite}
+                onChange={(e) => {
+                  setInvite(e.target.value);
+                  setInviteError(null);
+                }}
+                onBlur={blur("invite")}
+                aria-invalid={!!inviteError || !!show("invite")}
+                aria-describedby={inviteError || show("invite") ? "su-invite-err" : "su-invite-hint"}
+                placeholder="e.g. ENSEMBLIS-2026"
+                maxLength={120}
+              />
+            </Field>
+          )}
 
           <div className="dcard" style={{ marginTop: 18 }}>
             <div className="row" style={{ gap: 10 }}>
@@ -251,15 +296,42 @@ function SignupForm() {
                 <Icon name={P.perkIcon} />
               </div>
               <div className="sp">
-                <b className="small">{P.perk}</b>
+                <b className="small">{P.perk.replace("{credits}", eur(config.startingCreditsCents))}</b>
                 <div className="tiny muted">Demo environment · no real charges</div>
               </div>
             </div>
           </div>
 
+          <div style={{ marginTop: 16 }}>
+            <label htmlFor="su-terms" className="small" style={{ display: "flex", gap: 10, alignItems: "flex-start", cursor: "pointer", lineHeight: 1.45 }}>
+              <input
+                id="su-terms"
+                type="checkbox"
+                checked={agreed}
+                onChange={(e) => setAgreed(e.target.checked)}
+                required
+                aria-describedby="su-terms-note"
+                style={{ width: 18, height: 18, marginTop: 1, flex: "none", accentColor: "var(--accent)" }}
+              />
+              <span>
+                I agree to the{" "}
+                <a href={ROUTES.terms} target="_blank" rel="noopener noreferrer" style={{ color: "var(--accent)", fontWeight: 600, textDecoration: "underline" }}>
+                  Terms<span className="sr-only"> (opens in a new tab)</span>
+                </a>{" "}
+                and{" "}
+                <a href={ROUTES.privacy} target="_blank" rel="noopener noreferrer" style={{ color: "var(--accent)", fontWeight: 600, textDecoration: "underline" }}>
+                  Privacy Policy<span className="sr-only"> (opens in a new tab)</span>
+                </a>
+              </span>
+            </label>
+            <div className="tiny muted" id="su-terms-note" style={{ marginTop: 4, paddingLeft: 28 }}>
+              {agreed ? "Thanks — you can create your account now." : "Required to create an account."}
+            </div>
+          </div>
+
           {formError && <FormError>{formError}</FormError>}
 
-          <button type="submit" className="btn p lg" style={{ width: "100%", marginTop: 16 }} disabled={busy} aria-busy={busy}>
+          <button type="submit" className="btn p lg" style={{ width: "100%", marginTop: 16 }} disabled={busy || !agreed} aria-busy={busy}>
             {busy ? "Creating your account…" : "Create account"}
             {!busy && <Icon name="arrow" />}
           </button>
@@ -269,7 +341,7 @@ function SignupForm() {
           <Link href={loginUrl(next)} className="muted">
             Already have an account? <b style={{ color: "var(--accent)" }}>Log in</b>
           </Link>
-          <Link href={signupUrl(other, next)} replace className="muted">
+          <Link href={keepInvite(signupUrl(other, next))} replace className="muted">
             {dev ? "Hiring agents instead?" : "Building agents instead?"} <b style={{ color: "var(--ink)" }}>Switch</b>
           </Link>
         </div>

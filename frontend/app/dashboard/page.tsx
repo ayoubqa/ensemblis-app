@@ -21,6 +21,7 @@ import {
   useToast,
 } from "@/components";
 import { api, type Agent, type Billing, type Task, type Workflow } from "@/lib/api";
+import { toastApiError } from "@/lib/errors";
 import { useAuth } from "@/lib/auth-context";
 import { EXAMPLES, EX_FULL, ONBOARDING_STEPS } from "@/lib/data";
 import { dayLabel, eur, firstName, greeting, plural } from "@/lib/format";
@@ -117,7 +118,7 @@ function Dashboard() {
       api.billing().then(setBilling).catch(() => {});
       toast(`${w.name} started`, { action: { label: "View", onClick: () => router.push(ROUTES.task(task.id)) } });
     } catch (e) {
-      toast.error((e as Error).message);
+      toastApiError(toast, e, "Couldn't run this workflow");
     } finally {
       setRunningWf(null);
     }

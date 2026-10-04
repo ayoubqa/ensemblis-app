@@ -1,6 +1,7 @@
 "use client";
 
 import { CSSProperties, ReactNode, useState } from "react";
+import { StartingCredits } from "@/lib/config";
 import {
   Avatar,
   AvatarStack,
@@ -511,7 +512,7 @@ export function Styleguide() {
                   <Icon name="eur" />
                 </div>
                 <div className="sp">
-                  <b className="small">€100 in demo credits preloaded</b>
+                  <b className="small"><StartingCredits /> in demo credits preloaded</b>
                   <div className="tiny muted">Demo environment · no real charges</div>
                 </div>
               </div>

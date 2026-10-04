@@ -1,0 +1,70 @@
+# Render Blueprint for the Ensemblis backend (free web service).
+# Render dashboard -> New -> Blueprint -> pick this repo. You'll be asked for
+# the values marked `sync: false`. The database is NOT here: create a free
+# Postgres on Neon (https://neon.tech) and paste its connection string.
+#
+# The frontend is deployed separately on Vercel (NEXT_PUBLIC_API_URL = this
+# service's https://....onrender.com URL).
+services:
+  - type: web
+    name: ensemblis-api
+    runtime: node
+    plan: free
+    # Pick the region closest to your Neon database (Neon "AWS Europe Central"
+    # = frankfurt, "US East" = virginia/ohio).
+    region: frankfurt
+    rootDir: backend
+    # --include=dev: TypeScript and type packages are devDependencies, and
+    # NODE_ENV=production would otherwise make npm skip them.
+    buildCommand: npm install --include=dev && npm run build
+    # Syncs the schema (prisma db push, never with --accept-data-loss), seeds
+    # the agent catalog (idempotent), then starts the API.
+    startCommand: npm run start:render
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: NODE_VERSION
+        value: "20"
+      - key: NODE_ENV
+        value: production
+      - key: DEMO_MODE
+        value: "true"
+      - key: JWT_SECRET
+        generateValue: true
+
+      # --- entered by you in the Render dashboard ---
+      - key: DATABASE_URL # Neon connection string, must include ?sslmode=require
+        sync: false
+      - key: CORS_ORIGIN # your Vercel URL, e.g. https://ensemblis.vercel.app (comma-separate several)
+        sync: false
+      - key: OPENAI_API_KEY # Groq API key from https://console.groq.com/keys
+        sync: false
+      - key: SIGNUP_INVITE_CODE # leave empty for open sign-up
+        sync: false
+
+      # --- AI provider: Groq free plan via its OpenAI-compatible API ---
+      - key: AI_PROVIDER
+        value: openai
+      - key: OPENAI_BASE_URL
+        value: https://api.groq.com/openai/v1
+      - key: OPENAI_MODEL
+        value: llama-3.3-70b-versatile
+      # Groq's free tier allows few tokens per minute: run one model call at a time.
+      - key: MAX_CONCURRENT_LLM
+        value: "1"
+      - key: LLM_TIMEOUT_MS
+        value: "120000"
+
+      # --- cost & abuse protection ---
+      - key: STARTING_CREDITS_CENTS
+        value: "3000"
+      - key: DEMO_TOPUP_ENABLED
+        value: "true"
+      - key: DEMO_TOPUP_MAX_CENTS
+        value: "2000"
+      - key: MAX_TASKS_PER_USER_PER_DAY
+        value: "5"
+      - key: MAX_TASKS_PER_DAY_GLOBAL
+        value: "150"
+      - key: MAX_DESCRIPTION_LENGTH
+        value: "4000"

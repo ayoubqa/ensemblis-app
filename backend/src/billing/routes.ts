@@ -4,6 +4,7 @@ import { prisma } from "../db";
 import { requireAuth, AuthedRequest } from "../auth/middleware";
 import { ah, HttpError, parse } from "../lib/http";
 import { toPublicTransaction, toPublicUser } from "../lib/serializers";
+import { config } from "../config";
 
 // Demo credits only — no real payments yet. 1 credit = 1 cent (EUR).
 const router = Router();
@@ -58,7 +59,25 @@ router.post(
   "/topup",
   ah<AuthedRequest>(async (req, res) => {
     const { amountCents } = parse(topupSchema, req.body);
+    if (!config.topupEnabled || config.topupMaxCents <= 0) {
+      throw new HttpError(403, "Demo credit top-ups are turned off on this server.");
+    }
     const user = await prisma.$transaction(async (tx) => {
+      // Lifetime cap on free demo credits per account.
+      const agg = await tx.transaction.aggregate({
+        where: { userId: req.userId, type: "TOP_UP" },
+        _sum: { amountCents: true },
+      });
+      const used = agg._sum.amountCents ?? 0;
+      const left = Math.max(0, config.topupMaxCents - used);
+      if (amountCents > left) {
+        throw new HttpError(
+          403,
+          left > 0
+            ? `Demo top-up limit: you can add at most €${(left / 100).toFixed(2)} more demo credits to this account.`
+            : `You've used this account's demo top-up allowance (€${(config.topupMaxCents / 100).toFixed(2)}). No more demo credits can be added.`
+        );
+      }
       const u = await tx.user.update({ where: { id: req.userId }, data: { credits: { increment: amountCents } } });
       await tx.transaction.create({
         data: {

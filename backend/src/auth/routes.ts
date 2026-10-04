@@ -5,6 +5,8 @@ import { prisma } from "../db";
 import { signToken, requireAuth, AuthedRequest } from "./middleware";
 import { ah, HttpError, parse } from "../lib/http";
 import { toPublicUser } from "../lib/serializers";
+import { config } from "../config";
+import { loginLimiter, signupLimiter } from "../lib/rateLimits";
 
 const router = Router();
 
@@ -15,14 +17,23 @@ const signupSchema = z.object({
   company: z.string().trim().max(160).optional().default(""),
   accountType: z.enum(["COMPANY", "DEVELOPER"]).default("COMPANY"),
   builds: z.string().trim().max(500).optional().default(""),
+  acceptedTerms: z.literal(true, {
+    errorMap: () => ({ message: "You must accept the Terms and Privacy Policy to create an account" }),
+  }),
+  inviteCode: z.string().trim().max(200).optional(),
 });
 
 // The real version of the prototype's role-based sign-up flow
 // (company vs. developer persona) — it actually creates an account.
 router.post(
   "/signup",
+  signupLimiter,
   ah(async (req, res) => {
-    const { email, password, name, company, accountType, builds } = parse(signupSchema, req.body);
+    const { email, password, name, company, accountType, builds, inviteCode } = parse(signupSchema, req.body);
+
+    if (config.signupInviteCode && inviteCode !== config.signupInviteCode) {
+      throw new HttpError(403, "Invalid invite code");
+    }
 
     const existing = await prisma.user.findUnique({ where: { email } });
     if (existing) throw new HttpError(409, "An account with that email already exists");
@@ -36,6 +47,8 @@ router.post(
         company,
         accountType,
         builds,
+        credits: config.startingCreditsCents,
+        termsAcceptedAt: new Date(),
         role: accountType === "DEVELOPER" ? "Agent developer" : "Founder",
         seats: { create: [{ name, role: "Owner" }] },
       },
@@ -52,6 +65,7 @@ const loginSchema = z.object({
 
 router.post(
   "/login",
+  loginLimiter,
   ah(async (req, res) => {
     const { email, password } = parse(loginSchema, req.body);
     const user = await prisma.user.findUnique({ where: { email } });

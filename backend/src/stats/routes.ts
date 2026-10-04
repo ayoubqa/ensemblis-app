@@ -9,12 +9,13 @@ const router = Router();
 router.get(
   "/",
   ah(async (_req, res) => {
-    const [agents, live, tasksRunning, users, developers] = await Promise.all([
+    const [agents, live, tasksRunning, users, developers, realTasksCompleted] = await Promise.all([
       prisma.agent.count(),
       prisma.agent.findMany({ where: { isLive: true }, select: { category: true, successRate: true, tasksCompleted: true } }),
       prisma.task.count({ where: { status: "RUNNING" } }),
       prisma.user.count(),
       prisma.user.count({ where: { accountType: "DEVELOPER" } }),
+      prisma.task.count({ where: { status: "COMPLETED" } }),
     ]);
 
     // Marketplace-wide completed count = the per-agent counters shown on agent
@@ -33,6 +34,7 @@ router.get(
       agents,
       liveAgents: live.length,
       tasksCompleted,
+      realTasksCompleted,
       tasksRunning,
       users,
       developers,

@@ -66,15 +66,14 @@ cd backend
 cp .env.example .env
 # defaults are already set for Ollama — just set JWT_SECRET to any random string
 npm install
-npx prisma migrate dev --name v2   # creates/updates all tables (fresh DB or one from the old `init` schema)
+npx prisma migrate dev --name v3   # creates/updates all tables (fresh DB or an older one)
 npm run seed                        # upserts the full 20-agent catalog (safe to re-run)
 npm run dev                         # http://localhost:4000
 ```
 
-Already ran the earlier scaffold? Pull the new code, then from `backend/` run
-`npm install && npx prisma migrate dev --name v2 && npm run seed`. The v2
-migration only adds tables and nullable/defaulted columns, so existing users,
-tasks and workflows are kept.
+Already ran an earlier version? Pull the new code, then from `backend/` run
+`npm install && npx prisma migrate dev --name v3 && npm run seed`. The change
+only adds a nullable `termsAcceptedAt` column, so existing data is kept.
 
 Optional checks: `npm run typecheck` (TypeScript) and `npm run sanity:classify`
 (prints how sample briefs are routed to agent teams, with prices — no DB needed).
@@ -107,30 +106,69 @@ while the model loads into memory.
 adding a payment method; there's no free trial credit at the time of writing).
 Nothing else changes — same code, same data model, just a better model behind it.
 
-## Deploying
+## Deploying (public demo link)
 
-A reasonable, cheap starting setup:
+The free setup this repo is wired for:
 
-- **Frontend** → [Vercel](https://vercel.com) (it's a Next.js app, so this is a
-  near-zero-config deploy). Set `NEXT_PUBLIC_API_URL` to your deployed backend URL.
-- **Backend** → [Render](https://render.com), [Railway](https://railway.app), or
-  [Fly.io](https://fly.io). All three can build the `backend/Dockerfile` directly
-  or run `npm run build && npm start`. Set the same env vars as `.env.example`.
-- **Database** → a managed Postgres. [Supabase](https://supabase.com) or
-  [Neon](https://neon.tech) both have workable free tiers; point `DATABASE_URL`
-  at it and run `npx prisma migrate deploy` once against production.
+| Piece | Host | Notes |
+|---|---|---|
+| Database | [Neon](https://neon.tech) free Postgres | |
+| Backend | [Render](https://render.com) free web service | `render.yaml` at the repo root; sleeps after 15 min idle, first request then takes ~30–60 s |
+| AI model | [Groq](https://console.groq.com) free API | via `AI_PROVIDER=openai` (any OpenAI-compatible API works) |
+| Frontend | [Vercel](https://vercel.com) | |
 
-Once deployed, update the backend's `CORS_ORIGIN` to your real frontend URL.
+**1. Neon.** Create a project (pick a region, e.g. Europe Central / Frankfurt).
+Copy the **direct** connection string (Connection details → turn *off*
+"Connection pooling"). It must end with `?sslmode=require`. That one URL is all
+you need.
+
+**2. Groq.** Create a free API key at [console.groq.com/keys](https://console.groq.com/keys).
+
+**3. Render.** Push the repo to GitHub, then Render → **New → Blueprint** → pick
+the repo. It reads `render.yaml` and asks for:
+- `DATABASE_URL` — the Neon string from step 1
+- `OPENAI_API_KEY` — the Groq key
+- `CORS_ORIGIN` — your Vercel URL (fill in after step 4 if you don't have it yet; no trailing slash needed)
+- `SIGNUP_INVITE_CODE` — leave empty for open sign-up, or set a code to share only with testers
+
+`JWT_SECRET` is generated for you. Every deploy/boot runs `npm run start:render`:
+it syncs the schema with `prisma db push` (adds new tables/columns; it never
+drops data — if a change *would* lose data it stops with an error instead),
+re-seeds the agent catalog (safe to repeat), then starts the API. Check
+`https://<your-service>.onrender.com/health` returns `{"ok":true}`.
+
+**4. Vercel.** Import the repo, set the root directory to `frontend`, and set
+two environment variables: `NEXT_PUBLIC_API_URL` = your Render URL, and
+`NEXT_PUBLIC_CONTACT_EMAIL` = the address shown on the Privacy and Terms pages
+(until it's set those pages show a red placeholder). Then put the Vercel URL into Render's
+`CORS_ORIGIN` (Render redeploys automatically).
+
+**Protection built in** (all env vars, documented in `backend/.env.example`;
+production values are in `render.yaml`): per-IP rate limits on sign-up, login,
+estimates and task runs; a daily task cap per account and for the whole server
+(the "kill switch" on your AI bill); a lifetime cap on free demo top-ups; a max
+brief length; optional invite code; Terms acceptance at sign-up; and a
+concurrency limiter + retries so bursts queue instead of hitting the AI
+provider's rate limits. The server refuses to boot in production without a real
+`JWT_SECRET` and a `DATABASE_URL`.
+
+**Know the free-tier limits.** Groq's free plan caps tokens per minute and per
+day per model (see [console.groq.com/settings/limits](https://console.groq.com/settings/limits)).
+A team task makes 2–4 model calls of several thousand tokens each, so the
+70B model's daily allowance covers only a modest number of tasks. When it runs
+out, tasks fail with "the free AI quota is used up for now" and are refunded
+automatically. For more headroom set `OPENAI_MODEL=llama-3.1-8b-instant`
+(higher free limits, lower quality) or upgrade to Groq's paid tier.
+
+The `backend/Dockerfile` still works for Docker-based hosts (Fly.io, Railway).
+There, run `npx prisma db push` and `npm run seed` against the database yourself.
 
 ## Staying connected with Claude for ongoing development
 
 The practical setup:
 
-1. **Push this to a GitHub repo.** Once you connect GitHub in claude.ai (Settings
-   → Connectors), I can create the repo and push this scaffold directly next time
-   — just ask. Until then, push it yourself: `git init && git add -A && git commit
-   -m "Initial scaffold" && git remote add origin <your-repo-url> && git push -u
-   origin main`.
+1. **The code lives on GitHub** (`ayoubqa/ensemblis-app`). Claude pushes changes
+   there; on your Mac, `git pull` brings them down.
 2. **Keep working with Claude Code against that repo** — either locally (the
    `claude` CLI in your terminal, pointed at this folder) or in a cloud session
    like this one with the repo attached. Either way you get real version control:
@@ -145,7 +183,8 @@ The practical setup:
    - Add a scheduler for workflows (a hosted cron hitting a "run now" endpoint).
    - Add tests (the backend's route handlers are straightforward to test with
      something like Vitest + Supertest).
-   - Add rate limiting and basic abuse protection before this is public.
+   - Move the per-IP rate limits to Redis if you ever run more than one
+     backend instance (they're in-memory, per process, today).
 
 ## Why this structure
 

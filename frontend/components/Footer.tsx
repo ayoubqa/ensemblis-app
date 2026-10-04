@@ -28,6 +28,13 @@ const COLS: { title: string; links: [string, string][] }[] = [
       ["Changelog", ROUTES.changelog],
     ],
   },
+  {
+    title: "Legal",
+    links: [
+      ["Privacy Policy", ROUTES.privacy],
+      ["Terms of Use", ROUTES.terms],
+    ],
+  },
 ];
 
 /** Site footer (prototype `footer()`, `footer.ft`). Rendered once by the root layout. */
@@ -59,7 +66,7 @@ export function Footer() {
           ))}
         </div>
         <div className="row between wrapflex" style={{ marginTop: 28, paddingTop: 18, borderTop: "1px solid var(--line)" }}>
-          <span>© 2026 Ensemblis, Inc.</span>
+          <span>© 2026 Ensemblis · a demo project</span>
           <span>Performance figures shown are illustrative.</span>
         </div>
       </div>

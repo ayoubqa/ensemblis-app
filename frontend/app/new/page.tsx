@@ -3,6 +3,7 @@
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { api, type AgentDetail, type Depth, type TaskEstimate } from "@/lib/api";
+import { errorText } from "@/lib/errors";
 import { PageSkeleton, useToast } from "@/components";
 import { Describe } from "./_components/Describe";
 import { Analyze } from "./_components/Analyze";
@@ -68,7 +69,7 @@ function NewTaskFlow() {
         return estimate;
       } catch (e) {
         if (id !== reqRef.current) return null;
-        setEstError(e instanceof Error ? e.message : "Couldn't plan this task");
+        setEstError(errorText(e, "Couldn't plan this task"));
         return null;
       } finally {
         if (id === reqRef.current) setEstimating(false);

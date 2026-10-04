@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { api, ApiError, type Task, type TaskEstimate } from "@/lib/api";
+import { isLimitError, toastApiError } from "@/lib/errors";
 import { Icon, Modal, Skeleton, useToast } from "@/components";
 import { useAuth } from "@/lib/auth-context";
 import { eur, minutesRange } from "@/lib/format";
@@ -53,7 +54,10 @@ export function RunAgainModal({ task, open, onClose }: { task: Task; open: boole
     } catch (e) {
       const ae = e as ApiError;
       if (ae.status === 402) setShort(ae.message);
-      else toast.error(ae.message || "Couldn't start the task");
+      else {
+        if (isLimitError(ae)) onClose();
+        toastApiError(toast, ae, "Couldn't start the task");
+      }
     } finally {
       setBusy(false);
     }

@@ -1,6 +1,6 @@
 import Link from "next/link";
 import type { CSSProperties, ReactNode } from "react";
-import { Avatar, Icon, VerifiedTag } from "@/components";
+import { Avatar, Icon, SampleTag, VerifiedTag } from "@/components";
 import type { Agent } from "@/lib/api";
 import { duration, eur, num, pct } from "@/lib/format";
 import { ROUTES } from "@/lib/routes";
@@ -112,6 +112,12 @@ export function AgentCard({ agent: a, query, preview, style }: { agent: CardAgen
           </>
         )}
         <span>{a.category}</span>
+        {!preview && !fresh && (
+          <>
+            <span className="sp" />
+            <SampleTag label="Sample stats" />
+          </>
+        )}
       </div>
       <div className="row between small">
         <span className="muted">

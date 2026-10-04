@@ -3,7 +3,8 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { forwardRef, useEffect, useMemo, useRef, useState } from "react";
-import { Icon, Kbd } from "@/components";
+import { CharCount, Icon, Kbd } from "@/components";
+import { useConfig } from "@/lib/config";
 import { api, type PlatformStats, type TaskEstimate } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { DEMO2, EXAMPLES, EX_FULL, HERO, TICKER } from "@/lib/data";
@@ -106,6 +107,7 @@ function RouteHint({ state }: { state: HintState }) {
 // ------------------------------------------------------------- ticker
 function Ticker({ stats }: { stats: PlatformStats | null }) {
   const reduced = useReducedMotion();
+  const sampleCatalog = useConfig().config.sampleCatalogStats;
   const items = useMemo(() => {
     const sample = TICKER.map((t) => ({ key: t.who, live: false, node: (
       <>
@@ -119,7 +121,15 @@ function Ticker({ stats }: { stats: PlatformStats | null }) {
       node: (
         <>
           <b style={{ color: "var(--ink)" }}>{num(stats.tasksRunning)}</b> {stats.tasksRunning === 1 ? "task" : "tasks"} running right now ·{" "}
-          <b style={{ color: "var(--ink)" }}>{num(stats.tasksCompleted)}</b> delivered across {num(stats.liveAgents)} live agents
+          {sampleCatalog ? (
+            <>
+              <b style={{ color: "var(--ink)" }}>{num(stats.realTasksCompleted ?? 0)}</b> delivered on this demo so far
+            </>
+          ) : (
+            <>
+              <b style={{ color: "var(--ink)" }}>{num(stats.tasksCompleted)}</b> delivered across {num(stats.liveAgents)} live agents
+            </>
+          )}
         </>
       ),
     };
@@ -130,7 +140,7 @@ function Ticker({ stats }: { stats: PlatformStats | null }) {
       if (i % 3 === 2) out.push({ ...live, key: `live${i}` });
     });
     return out;
-  }, [stats]);
+  }, [stats, sampleCatalog]);
 
   const [i, setI] = useState(0);
   const [vis, setVis] = useState(true);
@@ -192,6 +202,7 @@ export const Hero = forwardRef<HTMLTextAreaElement, { stats: PlatformStats | nul
     const [focused, setFocused] = useState(false);
     const [ph, setPh] = useState(0);
     const reduced = useReducedMotion();
+    const maxLen = useConfig().config.maxDescriptionLength;
 
     // Rotate the placeholder through real example briefs while the box is idle.
     useEffect(() => {
@@ -202,7 +213,7 @@ export const Hero = forwardRef<HTMLTextAreaElement, { stats: PlatformStats | nul
 
     const est = hint.kind === "ok" ? hint.est : hint.kind === "loading" ? hint.prev : null;
 
-    const submit = () => router.push(newTaskHref(draft || DEMO2));
+    const submit = () => router.push(newTaskHref((draft || DEMO2).slice(0, maxLen)));
     const preview = () => {
       const text = draft.trim() || DEMO2;
       if (!draft.trim()) setDraft(text);
@@ -304,8 +315,8 @@ export const Hero = forwardRef<HTMLTextAreaElement, { stats: PlatformStats | nul
                   submit();
                 }
               }}
-              aria-describedby="route"
-              maxLength={8000}
+              aria-describedby="route hero-count"
+              maxLength={maxLen}
             />
             <div className="foot">
               <div className="route" id="route" aria-live="polite">
@@ -320,6 +331,9 @@ export const Hero = forwardRef<HTMLTextAreaElement, { stats: PlatformStats | nul
               </button>
             </div>
           </form>
+          <div className="reveal" style={{ maxWidth: 860, textAlign: "right", marginTop: 6, ...d(300) }}>
+            <CharCount id="hero-count" value={draft} max={maxLen} />
+          </div>
           <div className="examples reveal" style={{ maxWidth: 860, ...d(350) }} aria-label="Example tasks">
             {EXAMPLES.map((e) => (
               <button

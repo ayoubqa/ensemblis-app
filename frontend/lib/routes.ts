@@ -27,6 +27,8 @@ export const ROUTES = {
   login: "/login",
   signup: "/signup",
   styleguide: "/styleguide",
+  privacy: "/privacy",
+  terms: "/terms",
 } as const;
 
 /** "/login?next=/tasks/abc" */

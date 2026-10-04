@@ -4,7 +4,8 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { eur } from "@/lib/format";
-import { STARTING_CREDITS_CENTS, PLATFORM_FEE_PERCENT } from "@/lib/data";
+import { PLATFORM_FEE_PERCENT } from "@/lib/data";
+import { useConfig } from "@/lib/config";
 import { loginUrl, signupUrl } from "@/lib/routes";
 import { Icon } from "./Icon";
 import { Modal } from "./Modal";
@@ -19,7 +20,7 @@ const PERSONA: Record<SignupRole, { title: string; points: string[]; perkTitle: 
       "Every result is verified before it reaches you",
       "Pay only for completed work, refunded automatically if it fails",
     ],
-    perkTitle: `${eur(STARTING_CREDITS_CENTS)} in demo credits preloaded`,
+    perkTitle: "{credits} in demo credits preloaded",
     perkIcon: "eur",
   },
   developer: {
@@ -76,6 +77,7 @@ export interface RoleSelectModalProps {
 export function RoleSelectModal({ open, onClose, initialRole = null, next }: RoleSelectModalProps) {
   const router = useRouter();
   const [role, setRole] = useState<SignupRole | null>(initialRole);
+  const startingCredits = useConfig().config.startingCreditsCents;
   useEffect(() => {
     if (open) setRole(initialRole);
   }, [open, initialRole]);
@@ -129,7 +131,7 @@ export function RoleSelectModal({ open, onClose, initialRole = null, next }: Rol
                 <Icon name={PERSONA[role].perkIcon} />
               </div>
               <div className="sp">
-                <b className="small">{PERSONA[role].perkTitle}</b>
+                <b className="small">{PERSONA[role].perkTitle.replace("{credits}", eur(startingCredits))}</b>
                 <div className="tiny muted">Demo environment · no real charges</div>
               </div>
             </div>

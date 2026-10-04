@@ -5,7 +5,8 @@ import { useEffect, useMemo, useState } from "react";
 import { Icon, useShell } from "@/components";
 import { api, type Agent, type TaskEstimate } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
-import { CATS7, DEMO2, PRICING_FAQS, PRICING_PLANS, STARTING_CREDITS_CENTS, catGroup } from "@/lib/data";
+import { CATS7, DEMO2, PRICING_FAQS, PRICING_PLANS, catGroup } from "@/lib/data";
+import { StartingCredits } from "@/lib/config";
 import { eur, minutesRange } from "@/lib/format";
 import { useDebounced } from "@/lib/hooks";
 import { ROUTES } from "@/lib/routes";
@@ -214,7 +215,7 @@ export function PricingView() {
         ))}
       </div>
       <p className="tiny muted" style={{ textAlign: "center", marginTop: 12 }}>
-        Every new account starts with {eur(STARTING_CREDITS_CENTS)} in demo credits. This is a demo environment — no real payments are taken.
+        Every new account starts with <StartingCredits /> in demo credits. This is a demo environment — no real payments are taken.
       </p>
 
       <div className="grid g2" style={{ marginTop: 40, alignItems: "start" }}>

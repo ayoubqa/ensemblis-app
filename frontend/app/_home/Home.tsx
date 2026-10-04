@@ -2,7 +2,8 @@
 
 import Link from "next/link";
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
-import { Avatar, CountUp, Icon, PerfGraph, Reveal, SkeletonCard, VerifiedTag, useShell, type IconName } from "@/components";
+import { Avatar, CountUp, Icon, PerfGraph, Reveal, SampleTag, SkeletonCard, VerifiedTag, useShell, type IconName } from "@/components";
+import { useConfig } from "@/lib/config";
 import { api, type Agent, type PlatformStats } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import {
@@ -54,6 +55,7 @@ function CheckList({ items }: { items: string[] }) {
 
 // ------------------------------------------------------------- stats
 function PerfStats({ stats, failed }: { stats: PlatformStats | null; failed: boolean }) {
+  const sample = useConfig().config.sampleCatalogStats;
   if (!stats && !failed)
     return (
       <div className="grid g4 keep2" aria-busy="true">
@@ -83,6 +85,7 @@ function PerfStats({ stats, failed }: { stats: PlatformStats | null; failed: boo
     );
   const cats = stats.categories.length;
   return (
+    <>
     <div className="grid g4 keep2">
       <div className="stat">
         <b>
@@ -109,6 +112,16 @@ function PerfStats({ stats, failed }: { stats: PlatformStats | null; failed: boo
         <span>categories of work</span>
       </div>
     </div>
+    {sample && (
+      <p className="small muted row wrapflex" style={{ marginTop: 10, gap: 8 }}>
+        <SampleTag />
+        <span>
+          Catalog totals and success rates are seeded sample figures.{" "}
+          <b style={{ color: "var(--ink)" }}>{num(stats.realTasksCompleted ?? 0)}</b> {(stats.realTasksCompleted ?? 0) === 1 ? "task has" : "tasks have"} actually been delivered on this demo.
+        </span>
+      </p>
+    )}
+    </>
   );
 }
 
@@ -230,6 +243,7 @@ export function Home() {
     stats ? stats.categories.filter((c) => catGroup(c.category) === group).reduce((n, c) => n + c.agents, 0) : null;
 
   const creator = 100 - PLATFORM_FEE_PERCENT;
+  const { startingCreditsCents: startingCredits, sampleCatalogStats: sampleStats } = useConfig().config;
 
   return (
     <>
@@ -319,7 +333,7 @@ export function Home() {
                 Ensemblis learns which agents perform best for which types of work, then routes new tasks accordingly.
               </p>
             </div>
-            <span className="tag">Live example</span>
+            <span className="tag">Illustrative example</span>
           </div>
           <div style={{ marginTop: 14 }}>
             <PerfGraph rows={PERF_GRAPH.map((r) => [r[0], r[1], r[2]])} />
@@ -333,7 +347,9 @@ export function Home() {
           </div>
         </Reveal>
         <p className="tiny muted" style={{ marginTop: 10 }}>
-          Headline numbers above are live from the marketplace. The graph shows illustrative examples of the metrics Ensemblis tracks for every agent.
+          {sampleStats
+            ? "Catalog figures on this demo are sample data. The graph shows illustrative examples of the metrics Ensemblis tracks for every agent."
+            : "Headline numbers above are live from the marketplace. The graph shows illustrative examples of the metrics Ensemblis tracks for every agent."}
         </p>
       </section>
 
@@ -343,8 +359,15 @@ export function Home() {
           <div>
             <h2 style={{ maxWidth: "20ch" }}>The highest-rated agents right now.</h2>
             <p className="muted" style={{ maxWidth: "56ch" }}>
-              Real agents on the marketplace, ranked by customer rating. Ensemblis picks among them for you — or hire one directly.
+              {sampleStats
+                ? "Agents on the marketplace, ranked by rating. Ensemblis picks among them for you — or hire one directly."
+                : "Real agents on the marketplace, ranked by customer rating. Ensemblis picks among them for you — or hire one directly."}
             </p>
+            {sampleStats && (
+              <div style={{ marginTop: 8 }}>
+                <SampleTag label="Ratings & task counts are sample data" />
+              </div>
+            )}
           </div>
           <Link className="btn" href={`${ROUTES.agents}?sort=rating`}>
             All agents <Icon name="arrow" />
@@ -465,7 +488,7 @@ export function Home() {
                 icon: "home" as IconName,
                 title: "I need work done",
                 body: "Describe the outcome. Ensemblis plans the work, assembles the team, verifies the result and charges only for completed tasks.",
-                points: ["€100 in demo credits to start", "Results verified before delivery", "Automatic refund if a task fails"],
+                points: [`${eur(startingCredits)} in demo credits to start`, "Results verified before delivery", "Automatic refund if a task fails"],
                 cta: "Start as a company",
                 signed: { href: ROUTES.newTask, label: "Start a new task" },
               },

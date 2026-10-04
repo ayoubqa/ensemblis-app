@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useParams, usePathname, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { Avatar, EmptyState, HBar, Icon, KV, LineChart, PerfGraph, Rating, StatusTag, Tabs, VerifiedTag, useToast } from "@/components";
+import { Avatar, EmptyState, HBar, Icon, KV, LineChart, PerfGraph, Rating, SampleTag, StatusTag, Tabs, VerifiedTag, useToast } from "@/components";
 import { ApiError, api, type Agent, type AgentDetail } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { DEPTH, PLATFORM_FEE_PERCENT } from "@/lib/data";
@@ -232,7 +232,9 @@ export default function AgentPage() {
       <>
         <div className="card">
           <h3>Performance</h3>
-          <p className="small muted">Measured from completed work, not self-reported.</p>
+          <p className="small muted">
+            Measured from completed work, not self-reported. <SampleTag style={{ marginLeft: 4 }} />
+          </p>
           {fresh && (
             <div className="notice" style={{ margin: "12px 0 0", background: "var(--accent-soft)", color: "var(--accent)" }}>
               <Icon name="spark" />
@@ -469,6 +471,7 @@ export default function AgentPage() {
       </div>
 
       <div className="row wrapflex small muted" style={{ gap: 20, marginTop: 16 }}>
+        {!fresh && <SampleTag label="Sample stats" />}
         <span>
           <b style={{ color: "var(--ink)" }}>{num(a.tasksCompleted)}</b> tasks
         </span>

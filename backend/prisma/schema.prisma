@@ -6,9 +6,14 @@
 // cleanly to a database that already has rows in it.
 
 generator client {
-  provider = "prisma-client-js"
+  provider      = "prisma-client-js"
+  // "native" = whatever machine runs `prisma generate`; the second is Render's
+  // Node runtime (Debian, OpenSSL 3).
+  binaryTargets = ["native", "debian-openssl-3.0.x"]
 }
 
+// DATABASE_URL: on Neon use the *direct* (non-pooled) connection string with
+// `?sslmode=require` — it works for both the app and `prisma db push`.
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
@@ -49,7 +54,8 @@ model User {
   role         String      @default("")
   accountType  AccountType @default(COMPANY)
   builds       String      @default("") // developer persona: what they build, optional
-  credits      Int         @default(10000) // stored in cents to avoid float issues
+  credits      Int         @default(10000) // stored in cents to avoid float issues; signup sets STARTING_CREDITS_CENTS
+  termsAcceptedAt DateTime? // when the user ticked "I agree to the Terms and Privacy Policy" (null for pre-existing accounts)
   createdAt    DateTime    @default(now())
 
   tasks        Task[]

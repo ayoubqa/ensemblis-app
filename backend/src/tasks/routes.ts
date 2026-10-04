@@ -4,6 +4,8 @@ import { prisma } from "../db";
 import { requireAuth, AuthedRequest } from "../auth/middleware";
 import { ah, HttpError, parse } from "../lib/http";
 import { TASK_INCLUDE, toPublicTask } from "../lib/serializers";
+import { config } from "../config";
+import { estimateLimiter, taskRunLimiter } from "../lib/rateLimits";
 import { createTaskForUser, estimate, retryTaskForUser, toPublicEstimate } from "./service";
 
 const router = Router();
@@ -13,7 +15,7 @@ const description = z
   .string({ required_error: "Describe the work you need done" })
   .trim()
   .min(3, "Describe the work you need done")
-  .max(8000, "Description is too long (max 8000 characters)");
+  .max(config.maxDescriptionLength, `Description is too long (max ${config.maxDescriptionLength} characters)`);
 
 const estimateSchema = z.object({
   description,
@@ -24,6 +26,7 @@ const estimateSchema = z.object({
 // Public: lets anyone see the plan, team and price before signing up. No charge.
 router.post(
   "/estimate",
+  estimateLimiter,
   ah(async (req, res) => {
     const body = parse(estimateSchema, req.body);
     const plan = await estimate(body.description, { depth: body.depth, agentId: body.agentId });
@@ -66,6 +69,7 @@ const createSchema = estimateSchema.extend({
 // GET /:id to watch steps move QUEUED -> RUNNING -> COMPLETED.
 router.post(
   "/",
+  taskRunLimiter,
   ah<AuthedRequest>(async (req, res) => {
     const body = parse(createSchema, req.body);
     const result = await createTaskForUser(req.userId!, body);
@@ -75,6 +79,7 @@ router.post(
 
 router.post(
   "/:id/retry",
+  taskRunLimiter,
   ah<AuthedRequest>(async (req, res) => {
     const result = await retryTaskForUser(req.userId!, req.params.id);
     res.json(result);

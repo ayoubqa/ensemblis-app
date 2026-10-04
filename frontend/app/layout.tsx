@@ -7,6 +7,9 @@ import { Footer } from "@/components/Footer";
 import { PageTransition } from "@/components/PageTransition";
 import { ShellProvider } from "@/components/Shell";
 import { ToastProvider } from "@/components/Toast";
+import { DemoBanner } from "@/components/DemoBanner";
+import { ConfigProvider } from "@/lib/config";
+import { demoInitScript } from "@/lib/demo-flags";
 
 const FAVICON =
   "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='6' fill='%230B1020'/%3E%3Crect x='5' y='5' width='3.2' height='14' rx='1.4' fill='%23fff'/%3E%3Crect x='10' y='5' width='9' height='3.2' rx='1.4' fill='%238A7BFF'/%3E%3Crect x='10' y='10.4' width='6' height='3.2' rx='1.4' fill='%233CD3EA'/%3E%3Crect x='10' y='15.8' width='9' height='3.2' rx='1.4' fill='%238A7BFF'/%3E%3C/svg%3E";
@@ -42,6 +45,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <head>
         {/* Apply the saved theme before first paint (no flash). */}
         <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
+        {/* Show the cached public-demo banner state before first paint (no layout jump). */}
+        <script dangerouslySetInnerHTML={{ __html: demoInitScript }} />
         <link rel="icon" href={FAVICON} type="image/svg+xml" />
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="" />
@@ -53,12 +58,14 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       </head>
       <body>
         <ThemeProvider>
+          <ConfigProvider>
           <AuthProvider>
             <ToastProvider>
               <ShellProvider>
                 <a className="skip" href="#main">
                   Skip to content
                 </a>
+                <DemoBanner />
                 <Header />
                 <PageTransition>{children}</PageTransition>
                 <Footer />
@@ -66,6 +73,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               </ShellProvider>
             </ToastProvider>
           </AuthProvider>
+          </ConfigProvider>
         </ThemeProvider>
       </body>
     </html>

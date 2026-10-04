@@ -165,12 +165,26 @@ export interface DeveloperStats {
 export interface PlatformStats {
   agents: number;
   liveAgents: number;
-  tasksCompleted: number;
+  tasksCompleted: number; // seeded catalog counters + real completions (sample-heavy in a fresh demo)
+  realTasksCompleted: number; // real COMPLETED tasks in this deployment's database
   tasksRunning: number;
   users: number;
   developers: number;
   avgSuccessRate: number;
   categories: { category: string; agents: number }[];
+}
+
+/** Public, unauthenticated deployment settings so the UI can adapt to how the server is configured. */
+export interface PublicConfig {
+  demoMode: boolean; // public demo: show demo banner + AI disclaimers
+  inviteRequired: boolean; // signup needs an invite code
+  topupEnabled: boolean; // demo credit top-ups allowed
+  topupMaxCents: number; // lifetime demo top-up cap per user (0 = none allowed)
+  startingCreditsCents: number;
+  maxTasksPerUserPerDay: number;
+  maxDescriptionLength: number;
+  aiProviderLabel: string; // human-readable, e.g. "Groq (Llama 3.3 70B)", "Claude", "Local model (Ollama)"
+  sampleCatalogStats: boolean; // agent ratings/success/task counts are seeded sample data
 }
 
 export interface AgentListQuery {
@@ -257,7 +271,17 @@ function qs(params: Record<string, string | number | boolean | undefined>) {
 
 export const api = {
   // Auth
-  signup: (body: { email: string; password: string; name: string; company?: string; accountType: AccountType; builds?: string }) =>
+  config: () => request<PublicConfig>("/api/config"),
+  signup: (body: {
+    email: string;
+    password: string;
+    name: string;
+    company?: string;
+    accountType: AccountType;
+    builds?: string;
+    acceptedTerms: true; // required: user ticked "I agree to the Terms and Privacy Policy"
+    inviteCode?: string; // required when config.inviteRequired
+  }) =>
     request<{ token: string; user: User }>("/api/auth/signup", { method: "POST", body: json(body) }),
   login: (body: { email: string; password: string }) =>
     request<{ token: string; user: User }>("/api/auth/login", { method: "POST", body: json(body) }),

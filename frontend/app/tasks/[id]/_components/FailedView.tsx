@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useState } from "react";
 import { api, ApiError, type Task } from "@/lib/api";
+import { isLimitError, toastApiError } from "@/lib/errors";
 import { Icon, Modal, StepStatusTag, useToast } from "@/components";
 import { useAuth } from "@/lib/auth-context";
 import { dateTime, eur } from "@/lib/format";
@@ -40,7 +41,10 @@ export function FailedView({ task, onTask }: { task: Task; onTask: (t: Task) => 
     } catch (e) {
       const ae = e as ApiError;
       if (ae.status === 402) setShort(ae.message);
-      else toast.error(ae.message || "Couldn't retry this task");
+      else {
+        if (isLimitError(ae)) setConfirm(false);
+        toastApiError(toast, ae, "Couldn't retry this task");
+      }
     } finally {
       setBusy(false);
     }

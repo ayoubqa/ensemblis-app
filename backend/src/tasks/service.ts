@@ -5,6 +5,7 @@
 import type { Agent, Prisma } from "@prisma/client";
 import { prisma } from "../db";
 import { HttpError } from "../lib/http";
+import { assertDailyTaskQuota } from "../lib/usageLimits";
 import { TASK_INCLUDE, toPublicAgent, toPublicTask, toPublicUser } from "../lib/serializers";
 import { classifyTask, Classification, Depth } from "./classify";
 import { runTaskTeam } from "./orchestrator";
@@ -81,6 +82,7 @@ export interface CreateTaskInput {
  * team run in the background.
  */
 export async function createTaskForUser(userId: string, input: CreateTaskInput) {
+  await assertDailyTaskQuota(userId);
   const plan = await estimate(input.description, { depth: input.depth, agentId: input.agentId });
   const cost = plan.costCents;
   const title = input.title?.trim() || plan.title;
@@ -126,6 +128,7 @@ export async function retryTaskForUser(userId: string, taskId: string) {
   if (existing.status !== "FAILED") {
     throw new HttpError(409, `Only failed tasks can be retried (this task is ${existing.status.toLowerCase()})`);
   }
+  await assertDailyTaskQuota(userId);
 
   // Keep the original lead agent if it is still live; otherwise re-route.
   const leadLive = existing.agentId

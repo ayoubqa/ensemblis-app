@@ -84,6 +84,8 @@ export function CommandPalette({ open, onClose, onShortcuts, onGetStarted }: Com
           P("network", "Network", ROUTES.network, "globe", "resources economy"),
           P("pricing", "Pricing", ROUTES.pricing, "eur", "plans"),
           P("changelog", "Changelog", ROUTES.changelog, "list", "updates what's new"),
+          P("privacy", "Privacy Policy", ROUTES.privacy, "lock", "legal gdpr data protection personal data"),
+          P("terms", "Terms of Use", ROUTES.terms, "file", "legal conditions acceptable use"),
         ]
       : [
           P("home", "Home", ROUTES.home, "home"),
@@ -93,6 +95,8 @@ export function CommandPalette({ open, onClose, onShortcuts, onGetStarted }: Com
           P("network", "Resources", ROUTES.network, "globe", "network economy"),
           P("pricing", "Pricing", ROUTES.pricing, "eur", "plans"),
           P("changelog", "Changelog", ROUTES.changelog, "list", "updates what's new"),
+          P("privacy", "Privacy Policy", ROUTES.privacy, "lock", "legal gdpr data protection personal data"),
+          P("terms", "Terms of Use", ROUTES.terms, "file", "legal conditions acceptable use"),
         ];
     const A = (id: string, title: string, icon: IconName, run: () => void, keywords = ""): PaletteItem => ({ id: "a:" + id, title, sub: "Action", group: "Actions", icon, run, keywords });
     const actions: PaletteItem[] = [

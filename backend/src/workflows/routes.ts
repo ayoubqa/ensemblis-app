@@ -4,6 +4,8 @@ import { prisma } from "../db";
 import { requireAuth, AuthedRequest } from "../auth/middleware";
 import { ah, HttpError, parse } from "../lib/http";
 import { toPublicWorkflow } from "../lib/serializers";
+import { config } from "../config";
+import { taskRunLimiter } from "../lib/rateLimits";
 import { nextRunFrom, runWorkflow } from "./schedule";
 
 const router = Router();
@@ -31,7 +33,11 @@ router.get(
 
 const createSchema = z.object({
   name: z.string().trim().min(1, "Name is required").max(120),
-  basedOnText: z.string().trim().min(3, "Describe the recurring task").max(8000),
+  basedOnText: z
+    .string()
+    .trim()
+    .min(3, "Describe the recurring task")
+    .max(config.maxDescriptionLength, `Description is too long (max ${config.maxDescriptionLength} characters)`),
   frequency: frequency.default("Monthly"),
   depth: depth.default("standard"),
   agentId: z.string().min(1).optional(),
@@ -94,6 +100,7 @@ router.delete(
 // Run a workflow's task now (also used by the scheduler, see schedule.ts).
 router.post(
   "/:id/run",
+  taskRunLimiter,
   ah<AuthedRequest>(async (req, res) => {
     const workflow = await ownWorkflow(req.userId!, req.params.id);
     const result = await runWorkflow(workflow);

@@ -5,6 +5,7 @@ import type { Workflow } from "@prisma/client";
 import { prisma } from "../db";
 import { HttpError } from "../lib/http";
 import { createTaskForUser } from "../tasks/service";
+import { DailyLimitError } from "../lib/usageLimits";
 
 export type Frequency = "Weekly" | "Monthly" | "Quarterly";
 
@@ -63,6 +64,13 @@ export async function schedulerTick() {
         const { task } = await runWorkflow(w);
         console.log(`Scheduler: ran workflow "${w.name}" (${w.id}) -> task ${task.id}`);
       } catch (err) {
+        if (err instanceof DailyLimitError) {
+          // Daily cap reached: skip quietly; nextRun is left as-is so it runs
+          // once the cap resets. A global cap stops this whole pass.
+          console.log(`Scheduler: skipped workflow ${w.id} — daily ${err.scope} task limit reached`);
+          if (err.scope === "global") break;
+          continue;
+        }
         if (err instanceof HttpError && err.status === 402) {
           // Not enough credits: skip for now. nextRun is left as-is, so it runs
           // on the first tick after the user tops up.
