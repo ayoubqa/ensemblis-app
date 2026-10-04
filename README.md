@@ -155,10 +155,12 @@ provider's rate limits. The server refuses to boot in production without a real
 **Know the free-tier limits.** Groq's free plan caps tokens per minute and per
 day per model (see [console.groq.com/settings/limits](https://console.groq.com/settings/limits)).
 A team task makes 2–4 model calls of several thousand tokens each, so the
-70B model's daily allowance covers only a modest number of tasks. When it runs
+free daily allowance covers only a modest number of tasks. When it runs
 out, tasks fail with "the free AI quota is used up for now" and are refunded
-automatically. For more headroom set `OPENAI_MODEL=llama-3.1-8b-instant`
-(higher free limits, lower quality) or upgrade to Groq's paid tier.
+automatically. For more headroom set `OPENAI_MODEL=openai/gpt-oss-20b`
+(smaller and faster, lower quality) or upgrade to Groq's paid tier. Groq retires
+models from time to time — if tasks fail with "doesn't recognise the model",
+pick a current one from [console.groq.com/docs/models](https://console.groq.com/docs/models).
 
 The `backend/Dockerfile` still works for Docker-based hosts (Fly.io, Railway).
 There, run `npx prisma db push` and `npm run seed` against the database yourself.

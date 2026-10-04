@@ -140,7 +140,8 @@ async function runWithOllama(systemPrompt: string, userContent: string): Promise
 // ---------------------------------------------------------------------------
 
 const DEFAULT_OPENAI_BASE_URL = "https://api.groq.com/openai/v1";
-const DEFAULT_OPENAI_MODEL = "llama-3.3-70b-versatile";
+// Groq retired llama-3.3-70b-versatile on 2026-08-16; gpt-oss-120b is its recommended replacement.
+const DEFAULT_OPENAI_MODEL = "openai/gpt-oss-120b";
 const MAX_RETRIES = 3;
 const MAX_RETRY_WAIT_MS = 20_000;
 const RETRYABLE = new Set([429, 502, 503, 504]);
@@ -171,7 +172,10 @@ async function runWithOpenAI(systemPrompt: string, userContent: string): Promise
   }
   const baseUrl = (process.env.OPENAI_BASE_URL || DEFAULT_OPENAI_BASE_URL).trim().replace(/\/+$/, "");
   const model = process.env.OPENAI_MODEL || DEFAULT_OPENAI_MODEL;
-  const maxTokens = Number(process.env.OPENAI_MAX_TOKENS) || 4096;
+  // Reasoning models (gpt-oss, o-series) spend part of this budget "thinking" before answering.
+  const maxTokens = Number(process.env.OPENAI_MAX_TOKENS) || 8192;
+  // "low" | "medium" | "high" — only sent when set, since non-reasoning models reject it.
+  const reasoningEffort = process.env.OPENAI_REASONING_EFFORT?.trim() || "";
   const ms = timeoutMs("openai");
   const deadline = Date.now() + ms;
 
@@ -193,6 +197,7 @@ async function runWithOpenAI(systemPrompt: string, userContent: string): Promise
           ],
           max_tokens: maxTokens,
           temperature: 0.5,
+          ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
         }),
       });
     } catch (err) {
@@ -203,7 +208,12 @@ async function runWithOpenAI(systemPrompt: string, userContent: string): Promise
     if (res.ok) {
       const data = (await res.json().catch(() => null)) as { choices?: { message?: { content?: string | null } }[] } | null;
       const text = data?.choices?.[0]?.message?.content;
-      if (!text || !text.trim()) throw new Error("The AI model returned an empty response");
+      if (!text || !text.trim()) {
+        throw new Error(
+          "The AI model returned an empty response" +
+            (reasoningEffort ? "" : " (for reasoning models like gpt-oss, set OPENAI_REASONING_EFFORT=low or raise OPENAI_MAX_TOKENS)")
+        );
+      }
       return { text };
     }
 
@@ -282,6 +292,8 @@ export async function runLLM(systemPrompt: string, userContent: string): Promise
 const MODEL_LABELS: Record<string, string> = {
   "llama-3.3-70b-versatile": "Llama 3.3 70B",
   "llama-3.1-8b-instant": "Llama 3.1 8B",
+  "openai/gpt-oss-120b": "GPT-OSS 120B",
+  "openai/gpt-oss-20b": "GPT-OSS 20B",
 };
 
 /** Human-readable provider name for GET /api/config, e.g. "Groq (Llama 3.3 70B)". */

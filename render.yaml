@@ -48,7 +48,12 @@ services:
       - key: OPENAI_BASE_URL
         value: https://api.groq.com/openai/v1
       - key: OPENAI_MODEL
-        value: llama-3.3-70b-versatile
+        value: openai/gpt-oss-120b
+      # gpt-oss is a reasoning model: keep its hidden "thinking" short so answers aren't cut off.
+      - key: OPENAI_REASONING_EFFORT
+        value: low
+      - key: OPENAI_MAX_TOKENS
+        value: "8192"
       # Groq's free tier allows few tokens per minute: run one model call at a time.
       - key: MAX_CONCURRENT_LLM
         value: "1"
