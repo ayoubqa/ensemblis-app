@@ -1,0 +1,62 @@
+/* Result page extras: active TOC entry, and a clean print / "Save as PDF" layout. */
+.tocOn {
+  color: var(--ink) !important;
+  border-color: var(--accent) !important;
+  font-weight: 600;
+}
+
+.printOnly {
+  display: none;
+}
+
+@media print {
+  /* Readable on paper regardless of the on-screen theme. */
+  .page {
+    --ink: #111418;
+    --muted: #4a5258;
+    --bg: #fff;
+    --surface: #fff;
+    --surface2: #f5f6f7;
+    --line: #dcdfe2;
+    --line2: #c9cdd1;
+    --accent: #0f6b62;
+    --accent-soft: #e8f3f1;
+    color: var(--ink);
+    background: #fff;
+  }
+  .page :global(.toc) {
+    display: none;
+  }
+  .page :global(.report) {
+    display: block;
+  }
+  .page :global(.card) {
+    box-shadow: none !important;
+    break-inside: avoid-page;
+  }
+  .page :global(.flow) {
+    display: none;
+  }
+  .reportCard {
+    border: 0 !important;
+    padding: 0 !important;
+  }
+  .page :global(.rsec) {
+    break-inside: auto;
+  }
+  .page :global(.rsec h2) {
+    break-after: avoid;
+  }
+  .page :global(.tw) {
+    overflow: visible;
+  }
+  .page :global(.prose table) {
+    font-size: 11px;
+  }
+  .printOnly {
+    display: block;
+  }
+  .screenOnly {
+    display: none !important;
+  }
+}

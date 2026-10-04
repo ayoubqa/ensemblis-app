@@ -1,25 +1,28 @@
 "use client";
 
-import { createContext, useContext, useEffect, useState, ReactNode } from "react";
-import { api, setToken } from "./api";
+import { createContext, ReactNode, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import { api, ApiError, getToken, setToken, type User } from "./api";
 
-interface User {
-  id: string;
-  email: string;
-  name: string;
-  company: string;
-  role: string;
-  accountType: "COMPANY" | "DEVELOPER";
-  builds: string;
-  credits: number;
-}
+export type { User };
 
 interface AuthContextValue {
   user: User | null;
+  /** true until the initial /me check has finished */
   loading: boolean;
+  /** Store the token + user after api.login / api.signup. */
   signIn: (token: string, user: User) => void;
   signOut: () => void;
+  /** Re-fetch the current user from /api/auth/me. */
   refresh: () => Promise<void>;
+  /**
+   * Replace the user (or update it functionally). Use it after any API call that
+   * returns a fresh `user` (createTask, retryTask, runWorkflow, topUp, updateMe)
+   * so the header credits pill stays correct:
+   *   const { task, user } = await api.createTask(...); setUser(user);
+   */
+  setUser: (u: User | null | ((prev: User | null) => User | null)) => void;
+  /** Convenience: set the credit balance (cents) without a round-trip. */
+  setCredits: (cents: number) => void;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -28,35 +31,50 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
 
-  async function refresh() {
+  const refresh = useCallback(async () => {
+    if (!getToken()) {
+      setUser(null);
+      setLoading(false);
+      return;
+    }
     try {
       const { user } = await api.me();
       setUser(user);
-    } catch {
-      setUser(null);
+    } catch (e) {
+      // Only drop the session on an auth failure — keep it on network errors.
+      if (e instanceof ApiError && (e.status === 401 || e.status === 403)) {
+        setToken(null);
+        setUser(null);
+      }
     } finally {
       setLoading(false);
     }
-  }
+  }, []);
 
   useEffect(() => {
     refresh();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refresh]);
+
+  const signIn = useCallback((token: string, u: User) => {
+    setToken(token);
+    setUser(u);
+    setLoading(false);
   }, []);
 
-  function signIn(token: string, user: User) {
-    setToken(token);
-    setUser(user);
-  }
-
-  function signOut() {
+  const signOut = useCallback(() => {
     setToken(null);
     setUser(null);
-  }
+  }, []);
 
-  return (
-    <AuthContext.Provider value={{ user, loading, signIn, signOut, refresh }}>{children}</AuthContext.Provider>
+  const setCredits = useCallback((cents: number) => {
+    setUser((u) => (u ? { ...u, credits: cents } : u));
+  }, []);
+
+  const value = useMemo(
+    () => ({ user, loading, signIn, signOut, refresh, setUser, setCredits }),
+    [user, loading, signIn, signOut, refresh, setCredits]
   );
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 
 export function useAuth() {

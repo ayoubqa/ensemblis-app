@@ -1,94 +1,110 @@
 import { Router } from "express";
 import { z } from "zod";
-import type { Prisma } from "@prisma/client";
 import { prisma } from "../db";
 import { requireAuth, AuthedRequest } from "../auth/middleware";
-import { runTask } from "./agentRunner";
+import { ah, HttpError, parse } from "../lib/http";
+import { TASK_INCLUDE, toPublicTask } from "../lib/serializers";
+import { createTaskForUser, estimate, retryTaskForUser, toPublicEstimate } from "./service";
 
 const router = Router();
+
+const depthSchema = z.enum(["focused", "standard", "deep"]);
+const description = z
+  .string({ required_error: "Describe the work you need done" })
+  .trim()
+  .min(3, "Describe the work you need done")
+  .max(8000, "Description is too long (max 8000 characters)");
+
+const estimateSchema = z.object({
+  description,
+  depth: depthSchema.optional(),
+  agentId: z.string().min(1).optional(),
+});
+
+// Public: lets anyone see the plan, team and price before signing up. No charge.
+router.post(
+  "/estimate",
+  ah(async (req, res) => {
+    const body = parse(estimateSchema, req.body);
+    const plan = await estimate(body.description, { depth: body.depth, agentId: body.agentId });
+    res.json({ estimate: toPublicEstimate(plan) });
+  })
+);
+
 router.use(requireAuth);
 
-router.get("/", async (req: AuthedRequest, res) => {
-  const tasks = await prisma.task.findMany({
-    where: { userId: req.userId },
-    orderBy: { createdAt: "desc" },
-    include: { agent: true },
-  });
-  res.json({ tasks });
-});
-
-router.get("/:id", async (req: AuthedRequest, res) => {
-  const task = await prisma.task.findFirst({
-    where: { id: req.params.id, userId: req.userId },
-    include: { agent: true },
-  });
-  if (!task) return res.status(404).json({ error: "Task not found" });
-  res.json({ task });
-});
-
-const createSchema = z.object({
-  title: z.string().min(1),
-  description: z.string().min(1),
-  agentId: z.string().optional(),
-});
-
-// Creates a task, charges the user's credits up front, and kicks off the real
-// agent run in the background. The client polls GET /:id (or you can add
-// Server-Sent Events) to watch it move from RUNNING to COMPLETED/FAILED.
-router.post("/", async (req: AuthedRequest, res) => {
-  const parsed = createSchema.safeParse(req.body);
-  if (!parsed.success) {
-    return res.status(400).json({ error: parsed.error.issues[0].message });
-  }
-  const { title, description, agentId } = parsed.data;
-
-  const agent = agentId
-    ? await prisma.agent.findUnique({ where: { id: agentId } })
-    : await prisma.agent.findFirst({ where: { isLive: true } });
-
-  const cost = agent?.pricePerTaskCents ?? 1500;
-
-  const user = await prisma.user.findUniqueOrThrow({ where: { id: req.userId } });
-  if (user.credits < cost) {
-    return res.status(402).json({ error: "Insufficient credits", required: cost, available: user.credits });
-  }
-
-  const task = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
-    await tx.user.update({ where: { id: user.id }, data: { credits: { decrement: cost } } });
-    return tx.task.create({
-      data: {
-        userId: user.id,
-        agentId: agent?.id,
-        title,
-        description,
-        costCents: cost,
-        status: "PLANNING",
-      },
+router.get(
+  "/",
+  ah<AuthedRequest>(async (req, res) => {
+    const tasks = await prisma.task.findMany({
+      where: { userId: req.userId },
+      orderBy: { createdAt: "desc" },
+      include: TASK_INCLUDE,
     });
-  });
+    res.json({ tasks: tasks.map(toPublicTask) });
+  })
+);
 
-  // Fire-and-forget: don't make the HTTP caller wait minutes for the result.
-  runTask(task.id).catch((err) => console.error("runTask crashed:", err));
+router.get(
+  "/:id",
+  ah<AuthedRequest>(async (req, res) => {
+    const task = await prisma.task.findFirst({
+      where: { id: req.params.id, userId: req.userId },
+      include: TASK_INCLUDE,
+    });
+    if (!task) throw new HttpError(404, "Task not found");
+    res.json({ task: toPublicTask(task) });
+  })
+);
 
-  res.status(201).json({ task });
+const createSchema = estimateSchema.extend({
+  title: z.string().trim().max(200).optional(),
 });
+
+// Re-estimates server-side, charges credits, creates the task + team steps,
+// responds immediately, and runs the team in the background. The client polls
+// GET /:id to watch steps move QUEUED -> RUNNING -> COMPLETED.
+router.post(
+  "/",
+  ah<AuthedRequest>(async (req, res) => {
+    const body = parse(createSchema, req.body);
+    const result = await createTaskForUser(req.userId!, body);
+    res.status(201).json(result);
+  })
+);
+
+router.post(
+  "/:id/retry",
+  ah<AuthedRequest>(async (req, res) => {
+    const result = await retryTaskForUser(req.userId!, req.params.id);
+    res.json(result);
+  })
+);
 
 const feedbackSchema = z.object({
-  outcome: z.enum(["Achieved", "Partially", "Not achieved"]),
+  outcome: z.enum(["Achieved", "Partially", "Not achieved"], {
+    errorMap: () => ({ message: 'outcome must be "Achieved", "Partially" or "Not achieved"' }),
+  }),
 });
 
-router.post("/:id/feedback", async (req: AuthedRequest, res) => {
-  const parsed = feedbackSchema.safeParse(req.body);
-  if (!parsed.success) return res.status(400).json({ error: "Invalid outcome" });
-
-  const task = await prisma.task.findFirst({ where: { id: req.params.id, userId: req.userId } });
-  if (!task) return res.status(404).json({ error: "Task not found" });
-
-  const updated = await prisma.task.update({
-    where: { id: task.id },
-    data: { outcome: parsed.data.outcome },
-  });
-  res.json({ task: updated });
-});
+// Outcome ratings feed each agent's `achievedRate` (see agents/routes.ts and
+// developer/routes.ts), computed live from these rows.
+router.post(
+  "/:id/feedback",
+  ah<AuthedRequest>(async (req, res) => {
+    const { outcome } = parse(feedbackSchema, req.body);
+    const task = await prisma.task.findFirst({ where: { id: req.params.id, userId: req.userId } });
+    if (!task) throw new HttpError(404, "Task not found");
+    if (task.status === "RUNNING" || task.status === "PLANNING") {
+      throw new HttpError(409, "You can rate a task once it has finished");
+    }
+    const updated = await prisma.task.update({
+      where: { id: task.id },
+      data: { outcome },
+      include: TASK_INCLUDE,
+    });
+    res.json({ task: toPublicTask(updated) });
+  })
+);
 
 export default router;

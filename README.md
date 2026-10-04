@@ -33,9 +33,9 @@ and return a real markdown report.
   2 seconds. Fine at low volume; swap in a real job queue (BullMQ + Redis, or a
   hosted queue) once you have enough concurrent tasks that a server restart
   losing an in-flight task would actually matter.
-- Workflows (recurring tasks) have the data model and a create/delete API, but
-  nothing triggers them on a schedule yet — that needs a cron trigger calling a
-  "run this workflow's task now" endpoint.
+- Workflows (recurring tasks) are run by a simple in-process scheduler that checks
+  every minute. With more than one backend instance you'd want a single external
+  cron/queue scheduler instead, so a workflow isn't picked up twice.
 - No published-agent moderation/review step — a developer's agent goes live the
   moment they publish it.
 - The frontend is a clean, working rebuild of the core flows, not a pixel-for-pixel
@@ -66,10 +66,26 @@ cd backend
 cp .env.example .env
 # defaults are already set for Ollama — just set JWT_SECRET to any random string
 npm install
-npx prisma migrate dev --name init
-npm run seed        # loads the starter agent roster
-npm run dev          # http://localhost:4000
+npx prisma migrate dev --name v2   # creates/updates all tables (fresh DB or one from the old `init` schema)
+npm run seed                        # upserts the full 20-agent catalog (safe to re-run)
+npm run dev                         # http://localhost:4000
 ```
+
+Already ran the earlier scaffold? Pull the new code, then from `backend/` run
+`npm install && npx prisma migrate dev --name v2 && npm run seed`. The v2
+migration only adds tables and nullable/defaulted columns, so existing users,
+tasks and workflows are kept.
+
+Optional checks: `npm run typecheck` (TypeScript) and `npm run sanity:classify`
+(prints how sample briefs are routed to agent teams, with prices — no DB needed).
+
+How a task runs: `POST /api/tasks/estimate` plans a team (Research → lead
+specialist → Verification → Report, depending on depth) and prices it;
+`POST /api/tasks` charges credits and runs those agents one after another in the
+background, each step a real model call that sees the previous steps' output.
+Failed runs are refunded automatically, and tasks interrupted by a server
+restart are failed and refunded on the next start. Active workflows are run by
+an in-process scheduler (checked every minute) when the user has credits.
 
 **4. Frontend**
 

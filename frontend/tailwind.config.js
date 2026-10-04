@@ -1,6 +1,12 @@
 /** @type {import('tailwindcss').Config} */
 module.exports = {
-  content: ["./app/**/*.{ts,tsx}", "./components/**/*.{ts,tsx}"],
+  content: ["./app/**/*.{ts,tsx}", "./components/**/*.{ts,tsx}", "./lib/**/*.{ts,tsx}"],
+  // The resolved theme is always written to <html data-theme="light|dark">,
+  // so `dark:` utilities work for both explicit and "system" preference.
+  darkMode: ["selector", '[data-theme="dark"]'],
+  // The prototype stylesheet in app/globals.css ships its own reset.
+  // Tailwind's preflight would fight it (headings, lists, buttons), so it is off.
+  corePlugins: { preflight: false },
   theme: {
     extend: {
       colors: {
@@ -28,6 +34,14 @@ module.exports = {
       },
       boxShadow: {
         card: "var(--shadow)",
+      },
+      borderColor: {
+        DEFAULT: "var(--line)",
+      },
+      screens: {
+        // Mirrors the prototype breakpoints (max-width 560 / 860).
+        sm: "561px",
+        md: "861px",
       },
     },
   },

@@ -1,5 +1,9 @@
 // Ensemblis data model.
 // This replaces the prototype's in-memory `S` object with real, persisted tables.
+//
+// v2 notes: every column added on top of the original `init` schema is either
+// nullable or has a default, so `npx prisma migrate dev --name v2` applies
+// cleanly to a database that already has rows in it.
 
 generator client {
   provider = "prisma-client-js"
@@ -23,6 +27,19 @@ enum TaskStatus {
   REFUNDED
 }
 
+enum StepStatus {
+  QUEUED
+  RUNNING
+  COMPLETED
+  FAILED
+}
+
+enum TransactionType {
+  TASK_CHARGE
+  REFUND
+  TOP_UP
+}
+
 model User {
   id           String      @id @default(cuid())
   email        String      @unique
@@ -35,10 +52,12 @@ model User {
   credits      Int         @default(10000) // stored in cents to avoid float issues
   createdAt    DateTime    @default(now())
 
-  tasks     Task[]
-  agents    Agent[] // agents this user has published (developer persona)
-  workflows Workflow[]
-  seats     TeamSeat[]
+  tasks        Task[]
+  agents       Agent[] // agents this user has published (developer persona)
+  workflows    Workflow[]
+  seats        TeamSeat[]
+  transactions Transaction[]
+  workforce    WorkforceMember[]
 }
 
 model TeamSeat {
@@ -50,49 +69,133 @@ model TeamSeat {
   createdAt DateTime @default(now())
 }
 
-// Agents available in the marketplace. Seeded with the demo roster; developers can publish more.
+// Agents available in the marketplace. Seeded with the catalog in
+// src/catalog/agents.ts; developers can publish more.
 model Agent {
-  id          String   @id @default(cuid())
-  name        String   @unique
-  category    String
-  description String
-  systemPrompt String  @db.Text // the real instructions sent to Claude for this agent's persona
-  pricePerTaskCents Int @default(1500)
-  successRate Float    @default(95)
-  tasksCompleted Int    @default(0)
-  isLive      Boolean  @default(true)
-  owner       User?    @relation(fields: [ownerId], references: [id])
-  ownerId     String?
-  createdAt   DateTime @default(now())
+  id                String   @id @default(cuid())
+  // Nullable in the DB only so the migration applies to pre-v2 rows; the seed
+  // and the publish endpoint always set it, and the API falls back to a
+  // slugified name if it is ever missing.
+  slug              String?  @unique
+  name              String   @unique
+  category          String
+  creator           String   @default("")
+  description       String
+  capabilities      String[] @default([])
+  specialty         String   @default("")
+  taskType          String   @default("")
+  outputType        String   @default("Report")
+  systemPrompt      String   @db.Text // the real instructions sent to the model for this agent
+  pricePerTaskCents Int      @default(1500)
+  priceFromCents    Int      @default(1000)
+  estMinutesLow     Int      @default(5)
+  estMinutesHigh    Int      @default(10)
+  avgRunSeconds     Int      @default(450)
+  successRate       Float    @default(95)
+  rating            Float    @default(0)
+  reputation        Int      @default(50)
+  tasksCompleted    Int      @default(0)
+  verified          Boolean  @default(false)
+  hue               Int      @default(200)
+  isLive            Boolean  @default(true)
+  owner             User?    @relation(fields: [ownerId], references: [id])
+  ownerId           String?
+  createdAt         DateTime @default(now())
 
-  tasks Task[]
+  tasks     Task[]
+  steps     TaskStep[]
+  workflows Workflow[]
+  workforce WorkforceMember[]
 }
 
 model Task {
-  id          String     @id @default(cuid())
-  user        User       @relation(fields: [userId], references: [id])
-  userId      String
-  agent       Agent?     @relation(fields: [agentId], references: [id])
-  agentId     String?
-  title       String
-  description String     @db.Text
-  status      TaskStatus @default(PLANNING)
-  costCents   Int        @default(0)
-  result      String?    @db.Text // the actual Claude-generated deliverable (markdown)
+  id           String     @id @default(cuid())
+  user         User       @relation(fields: [userId], references: [id])
+  userId       String
+  agent        Agent?     @relation(fields: [agentId], references: [id]) // lead agent
+  agentId      String?
+  title        String
+  description  String     @db.Text
+  category     String?
+  depth        String     @default("standard") // focused | standard | deep
+  status       TaskStatus @default(PLANNING)
+  costCents    Int        @default(0)
+  result       String?    @db.Text // the final deliverable (markdown)
   errorMessage String?
-  outcome     String?    // 'Achieved' | 'Partially' | 'Not achieved', set by user feedback
-  createdAt   DateTime   @default(now())
+  outcome      String? // 'Achieved' | 'Partially' | 'Not achieved', set by user feedback
+  createdAt    DateTime   @default(now())
+  startedAt    DateTime?
+  completedAt  DateTime?
+
+  steps        TaskStep[]
+  transactions Transaction[]
+
+  @@index([userId, createdAt])
+  @@index([agentId, status])
+}
+
+// One agent's contribution to a task run, executed sequentially.
+model TaskStep {
+  id          String     @id @default(cuid())
+  task        Task       @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  taskId      String
+  order       Int
+  agent       Agent?     @relation(fields: [agentId], references: [id], onDelete: SetNull)
+  agentId     String?
+  agentName   String
+  role        String // Research | Analysis | Verification | Report
+  title       String
+  status      StepStatus @default(QUEUED)
+  output      String?    @db.Text
+  startedAt   DateTime?
   completedAt DateTime?
+
+  @@index([taskId, order])
 }
 
 model Workflow {
+  id          String    @id @default(cuid())
+  user        User      @relation(fields: [userId], references: [id])
+  userId      String
+  name        String
+  basedOnText String    @db.Text
+  frequency   String    @default("Monthly") // Weekly | Monthly | Quarterly
+  depth       String    @default("standard")
+  agent       Agent?    @relation(fields: [agentId], references: [id], onDelete: SetNull)
+  agentId     String?
+  isActive    Boolean   @default(true)
+  runCount    Int       @default(0)
+  nextRun     DateTime?
+  lastRun     DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@index([isActive, nextRun])
+}
+
+// Credit ledger. amountCents is signed: negative for charges, positive for
+// refunds and top-ups.
+model Transaction {
+  id          String          @id @default(cuid())
+  user        User            @relation(fields: [userId], references: [id])
+  userId      String
+  type        TransactionType
+  amountCents Int
+  description String
+  task        Task?           @relation(fields: [taskId], references: [id], onDelete: SetNull)
+  taskId      String?
+  createdAt   DateTime        @default(now())
+
+  @@index([userId, createdAt])
+}
+
+// A user's saved agents ("my workforce").
+model WorkforceMember {
   id        String   @id @default(cuid())
-  user      User     @relation(fields: [userId], references: [id])
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   userId    String
-  name      String
-  basedOnText String @db.Text
-  frequency String   @default("Monthly") // Weekly | Monthly | Quarterly
-  nextRun   DateTime?
-  lastRun   DateTime?
+  agent     Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  agentId   String
   createdAt DateTime @default(now())
+
+  @@unique([userId, agentId])
 }

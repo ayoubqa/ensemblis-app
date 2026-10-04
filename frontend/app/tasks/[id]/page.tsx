@@ -1,105 +1,112 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams } from "next/navigation";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
-import { api } from "@/lib/api";
+import { api, ApiError, type Task, type TaskStatus } from "@/lib/api";
+import { EmptyState, Icon, PageSkeleton, RequireAuth, useToast } from "@/components";
+import { useAuth } from "@/lib/auth-context";
+import { confetti } from "@/lib/confetti";
+import { usePolling } from "@/lib/hooks";
+import { ROUTES } from "@/lib/routes";
+import { RunView } from "./_components/RunView";
+import { ResultView } from "./_components/ResultView";
+import { FailedView } from "./_components/FailedView";
+import { isLive } from "./_components/shared";
 
-export default function TaskDetailPage() {
-  const { id } = useParams<{ id: string }>();
-  const [task, setTask] = useState<any | null>(null);
-  const [sendingFeedback, setSendingFeedback] = useState(false);
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    async function poll() {
-      const { task } = await api.getTask(id);
-      if (cancelled) return;
-      setTask(task);
-      if (task.status === "COMPLETED" || task.status === "FAILED") {
-        if (intervalRef.current) clearInterval(intervalRef.current);
-      }
-    }
-
-    poll();
-    // The task runs in the background on the server; poll every 2s until it
-    // settles. Swap this for Server-Sent Events / websockets for live
-    // progress instead of polling once you're past the scaffold stage.
-    intervalRef.current = setInterval(poll, 2000);
-
-    return () => {
-      cancelled = true;
-      if (intervalRef.current) clearInterval(intervalRef.current);
-    };
-  }, [id]);
-
-  async function sendFeedback(outcome: "Achieved" | "Partially" | "Not achieved") {
-    setSendingFeedback(true);
-    try {
-      const { task } = await api.sendFeedback(id, outcome);
-      setTask(task);
-    } finally {
-      setSendingFeedback(false);
-    }
-  }
-
-  if (!task) return <p className="max-w-3xl mx-auto px-6 py-14 text-muted">Loading…</p>;
-
-  const statusTag: Record<string, string> = {
-    COMPLETED: "tag ok",
-    RUNNING: "tag",
-    PLANNING: "tag gray",
-    FAILED: "tag bad",
-    REFUNDED: "tag gray",
-  };
-
+export default function TaskPage() {
   return (
-    <section className="max-w-3xl mx-auto px-6 py-14">
-      <h1 className="serif text-2xl mb-3">{task.title}</h1>
-      <p className="text-sm text-muted mb-8 flex items-center gap-2">
-        <span className={statusTag[task.status] || "tag gray"}>{task.status}</span>
-        {task.agent && <span>· {task.agent.name}</span>}
-      </p>
+    <RequireAuth>
+      <TaskLive />
+    </RequireAuth>
+  );
+}
 
-      {(task.status === "PLANNING" || task.status === "RUNNING") && (
-        <div className="card text-muted flex items-center gap-3">
-          <span className="pulse-dot" />
-          Working on it — this calls a real model, so it may take a bit.
+/** One live page per task: run view → result view (or failed view), driven by polling. */
+function TaskLive() {
+  const { id } = useParams<{ id: string }>();
+  const toast = useToast();
+  const { refresh } = useAuth();
+  const [task, setTask] = useState<Task | null>(null);
+  const [error, setError] = useState<ApiError | null>(null);
+  const prevStatus = useRef<TaskStatus | null>(null);
+  const celebrated = useRef(false);
+
+  const accept = useCallback(
+    (t: Task) => {
+      const prev = prevStatus.current;
+      const wasLive = prev === "RUNNING" || prev === "PLANNING";
+      if (wasLive && t.status === "COMPLETED" && !celebrated.current) {
+        celebrated.current = true;
+        confetti();
+        toast("Your work is ready");
+        window.scrollTo({ top: 0, behavior: "smooth" });
+      }
+      if (wasLive && (t.status === "FAILED" || t.status === "REFUNDED")) {
+        toast.error("A step failed. You've been refunded automatically.");
+        refresh(); // pick up the refunded balance in the header
+      }
+      prevStatus.current = t.status;
+      setTask(t);
+    },
+    [toast, refresh]
+  );
+
+  const live = !task || isLive(task);
+  usePolling(
+    async () => {
+      try {
+        const { task: t } = await api.getTask(id);
+        setError(null);
+        accept(t);
+        return isLive(t);
+      } catch (e) {
+        const ae = e instanceof ApiError ? e : new ApiError("Something went wrong", 500);
+        setError(ae);
+        return !(ae.status === 404 || ae.status === 403 || ae.status === 400);
+      }
+    },
+    2000,
+    { enabled: live && !(error && (error.status === 404 || error.status === 403 || error.status === 400)) }
+  );
+
+  // Tab title shows live progress, e.g. "(2/4) Market sizing · Ensemblis".
+  useEffect(() => {
+    if (!task) return;
+    const done = task.steps.filter((s) => s.status === "COMPLETED").length;
+    const prefix = isLive(task) ? `(${done}/${task.steps.length}) ` : task.status === "COMPLETED" ? "✓ " : "";
+    const before = document.title;
+    document.title = `${prefix}${task.title} · Ensemblis`;
+    return () => {
+      document.title = before;
+    };
+  }, [task]);
+
+  if (!task) {
+    if (error && (error.status === 404 || error.status === 403 || error.status === 400)) {
+      return (
+        <div className="narrow" style={{ padding: "56px 0" }}>
+          <EmptyState icon="list" title="Task not found" action={{ label: "Go to My work", href: ROUTES.tasks }}>
+            This task doesn&apos;t exist or belongs to another account.
+          </EmptyState>
         </div>
-      )}
-
-      {task.status === "FAILED" && (
-        <div className="card border-bad text-bad">
-          This task failed: {task.errorMessage}. Your credits were refunded.
-        </div>
-      )}
-
-      {task.status === "COMPLETED" && (
-        <>
-          <article className="card prose max-w-none mb-8">
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>{task.result}</ReactMarkdown>
-          </article>
-
-          <div className="card">
-            <h3 className="font-medium mb-3">Did this achieve what you needed?</h3>
-            <div className="flex gap-3 flex-wrap">
-              {(["Achieved", "Partially", "Not achieved"] as const).map((o) => (
-                <button
-                  key={o}
-                  className={`btn ${task.outcome === o ? "p" : ""}`}
-                  disabled={sendingFeedback}
-                  onClick={() => sendFeedback(o)}
-                >
-                  {o}
-                </button>
-              ))}
+      );
+    }
+    return (
+      <>
+        {error && (
+          <div className="wrap" style={{ paddingTop: 20 }}>
+            <div className="notice" role="alert">
+              <Icon name="alert" />
+              <span>{error.message} Retrying automatically…</span>
             </div>
           </div>
-        </>
-      )}
-    </section>
-  );
+        )}
+        <PageSkeleton />
+      </>
+    );
+  }
+
+  if (task.status === "COMPLETED") return <ResultView task={task} onTask={accept} />;
+  if (task.status === "FAILED" || task.status === "REFUNDED") return <FailedView task={task} onTask={accept} />;
+  return <RunView task={task} stale={!!error} />;
 }
