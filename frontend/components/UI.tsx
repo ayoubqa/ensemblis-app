@@ -217,9 +217,9 @@ export function PageHead({
 }
 
 // ---------------------------------------------------------------- Flow
-export const FLOW_STEPS = ["Describe", "Plan", "Execute", "Verify", "Deliver"] as const;
+export const FLOW_STEPS = ["Objective", "Plan", "Approve", "Execute", "Verify", "Outcome"] as const;
 
-/** Describe → Plan → Execute → Verify → Deliver indicator (prototype `flow(n)`), `step` is 0-based. */
+/** Objective → Plan → Approve → Execute → Verify → Outcome indicator; `step` is 0-based. */
 export function Flow({ step }: { step: number }) {
   return (
     <nav className="flow" aria-label="Progress">

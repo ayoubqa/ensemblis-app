@@ -80,7 +80,7 @@ export interface ReportViewProps {
 
 /**
  * The premium report reader: sticky contents, sections, citation chips with
- * source popovers, and a numbered Sources panel. Used by the task result page,
+ * source popovers, and a numbered Sources panel. Used by the objective console,
  * the public share page and the examples gallery.
  */
 export function ReportView({ markdown, sources, idPrefix = "r", disclaimer, tocExtra = [], before, children, emptyText, className }: ReportViewProps) {

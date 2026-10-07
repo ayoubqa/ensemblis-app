@@ -1,7 +1,7 @@
 "use client";
 
 import { createContext, ReactNode, useCallback, useContext, useEffect, useMemo, useState } from "react";
-import { api, ApiError, getToken, setToken, type User } from "./api";
+import { api, ApiError, getToken, setToken, UNAUTHORIZED_EVENT, type User } from "./api";
 
 export type { User };
 
@@ -18,7 +18,7 @@ interface AuthContextValue {
    * Replace the user (or update it functionally). Use it after any API call that
    * returns a fresh `user` (createTask, retryTask, runWorkflow, topUp, updateMe)
    * so the header credits pill stays correct:
-   *   const { task, user } = await api.createTask(...); setUser(user);
+   *   const { user } = await api.updateMe(...); setUser(user);
    */
   setUser: (u: User | null | ((prev: User | null) => User | null)) => void;
   /** Convenience: set the credit balance (cents) without a round-trip. */
@@ -54,6 +54,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     refresh();
   }, [refresh]);
+
+  // Any API call that comes back 401 ends the session everywhere (lib/api.ts
+  // already dropped the token); RequireAuth then sends the person to /login.
+  useEffect(() => {
+    const onUnauthorized = () => setUser(null);
+    window.addEventListener(UNAUTHORIZED_EVENT, onUnauthorized);
+    return () => window.removeEventListener(UNAUTHORIZED_EVENT, onUnauthorized);
+  }, []);
 
   const signIn = useCallback((token: string, u: User) => {
     setToken(token);

@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
-import { Avatar, Icon, Skeleton, SkeletonText, confetti, useToast } from "@/components";
+import { Avatar, Icon, Skeleton, SkeletonText, useToast } from "@/components";
 import { api, ApiError, type InvitePreview } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { errorText, toastApiError } from "@/lib/errors";
@@ -12,7 +12,7 @@ import { ROUTES, loginUrl, signupUrl } from "@/lib/routes";
 
 const REASONS: Record<string, { title: string; body: string }> = {
   expired: { title: "This invite link has expired", body: "Invite links only work for a limited time." },
-  revoked: { title: "This invite link was revoked", body: "The team owner turned this link off." },
+  revoked: { title: "This invite link was revoked", body: "The organization owner turned this link off." },
   "used up": { title: "This invite link has been used up", body: "It already reached its maximum number of members." },
 };
 
@@ -47,11 +47,10 @@ export default function JoinPage() {
     try {
       const r = await api.joinTeam(token);
       setUser(r.user);
-      confetti();
       toast(`Welcome to ${r.team.name}!`, { icon: "check" });
-      router.push(ROUTES.team);
+      router.push(ROUTES.dashboard);
     } catch (e) {
-      toastApiError(toast, e, "Couldn't join this team");
+      toastApiError(toast, e, "Couldn't join this organization");
       setJoining(false);
       load();
     }
@@ -71,7 +70,7 @@ export default function JoinPage() {
           {notFound ? "We couldn't find this invite link." : "We couldn't check this invite."}
         </h1>
         <p className="muted">
-          {notFound ? "Check that you copied the whole link, or ask the team owner to send a new one." : error.message}
+          {notFound ? "Check that you copied the whole link, or ask the organization owner to send a new one." : error.message}
         </p>
         <div className="row wrapflex" style={{ marginTop: 18 }}>
           {!notFound && (
@@ -108,7 +107,7 @@ export default function JoinPage() {
           {r.title}
         </h1>
         <p className="muted">
-          {r.body} Ask {invite.ownerName || "the team owner"} for a new link to join <b style={{ color: "var(--ink)" }}>{invite.teamName}</b>.
+          {r.body} Ask {invite.ownerName || "the organization owner"} for a new link to join <b style={{ color: "var(--ink)" }}>{invite.teamName}</b>.
         </p>
         <div className="row wrapflex" style={{ marginTop: 18 }}>
           <Link className="btn" href={user ? ROUTES.dashboard : ROUTES.home}>
@@ -123,12 +122,12 @@ export default function JoinPage() {
       <>
         <span className="tag">
           <Icon name="share" />
-          Team invite
+          Organization invite
         </span>
         <div className="row" style={{ gap: 14, marginTop: 16 }}>
           <Avatar name={invite.teamName} size="lg" />
           <div style={{ minWidth: 0 }}>
-            <h1 className="serif" style={{ ...titleStyle, margin: 0, overflowWrap: "anywhere" }}>
+            <h1 style={{ ...titleStyle, margin: 0, overflowWrap: "anywhere" }}>
               Join {invite.teamName}
             </h1>
             <div className="small muted">
@@ -137,9 +136,9 @@ export default function JoinPage() {
           </div>
         </div>
         <ul className="small muted" style={{ margin: "18px 0 0", paddingLeft: 18, display: "grid", gap: 6 }}>
-          <li>Your tasks are paid from the team wallet — {invite.ownerName} manages the credits.</li>
-          <li>Everyone on the team can see the tasks you run, and you can see theirs.</li>
-          <li>You can leave the team any time.</li>
+          <li>You work from the organization&apos;s Company Context, objectives and AI Team.</li>
+          <li>Executions are paid from the organization wallet and follow its approval policy — {invite.ownerName} manages both.</li>
+          <li>You can leave any time.</li>
         </ul>
 
         <div style={{ marginTop: 22 }}>
@@ -151,7 +150,7 @@ export default function JoinPage() {
                 <Link className="btn p" href={loginUrl(here)}>
                   Log in to join
                 </Link>
-                <Link className="btn" href={signupUrl("company", here)}>
+                <Link className="btn" href={signupUrl(here)}>
                   Create a free account
                 </Link>
               </div>
@@ -163,7 +162,7 @@ export default function JoinPage() {
             <>
               <div className="notice" style={{ marginBottom: 12 }}>
                 <Icon name="info" />
-                <span>You&apos;re using a guest session. Create a free account to join a team — your guest work comes with you.</span>
+                <span>You&apos;re using a guest session. Create an account to join an organization — your trial work comes with you.</span>
               </div>
               <Link className="btn p" href={`${ROUTES.signup}?claim=1&next=${encodeURIComponent(here)}`}>
                 <Icon name="check" />
@@ -179,19 +178,19 @@ export default function JoinPage() {
                     <>You&apos;re already a member of {user.team.name}.</>
                   ) : user.team.role === "OWNER" ? (
                     <>
-                      You own <b>{user.team.name}</b>. You can be in one team at a time — dissolve it on your Team page before joining{" "}
+                      You own <b>{user.team.name}</b>. You can be in one organization at a time — remove its members on your Members page before joining{" "}
                       {invite.teamName}.
                     </>
                   ) : (
                     <>
-                      You&apos;re already in <b>{user.team.name}</b>. You can be in one team at a time — leave it on your Team page before joining{" "}
+                      You&apos;re already in <b>{user.team.name}</b>. You can be in one organization at a time — leave it on your Members page before joining{" "}
                       {invite.teamName}.
                     </>
                   )}
                 </span>
               </div>
-              <Link className="btn" href={ROUTES.team} style={{ marginTop: 12 }}>
-                Go to my team
+              <Link className="btn" href={ROUTES.members} style={{ marginTop: 12 }}>
+                Go to members
               </Link>
             </>
           ) : (

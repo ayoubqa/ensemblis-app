@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 
 export const metadata: Metadata = {
   title: "Create your account",
-  description: "Hire AI agents to get work done, or publish the agents that do it.",
+  description: "Create your organization on Ensemblis — the AI operating layer for business.",
 };
 
 export default function SignupLayout({ children }: { children: ReactNode }) {

@@ -1,27 +1,25 @@
-# Render Blueprint for the Ensemblis backend (free web service).
+# Render Blueprint for the Ensemblis backend: the API and the execution worker.
 # Render dashboard -> New -> Blueprint -> pick this repo. You'll be asked for
-# the values marked `sync: false`. The database is NOT here: create a free
-# Postgres on Neon (https://neon.tech) and paste its connection string.
+# the values marked `sync: false`. The database is NOT here: use a managed
+# Postgres (e.g. Neon: https://neon.tech) and paste its connection string.
 #
-# The frontend is deployed separately on Vercel (NEXT_PUBLIC_API_URL = this
-# service's https://....onrender.com URL).
-services:
-  - type: web
-    name: ensemblis-api
-    runtime: node
-    plan: free
-    # Pick the region closest to your Neon database (Neon "AWS Europe Central"
-    # = frankfurt, "US East" = virginia/ohio).
-    region: frankfurt
-    rootDir: backend
-    # --include=dev: TypeScript and type packages are devDependencies, and
-    # NODE_ENV=production would otherwise make npm skip them.
-    buildCommand: npm install --include=dev && npm run build
-    # Syncs the schema (prisma db push, never with --accept-data-loss), seeds
-    # the agent catalog (idempotent), then starts the API.
-    startCommand: npm run start:render
-    healthCheckPath: /health
-    autoDeploy: true
+# The frontend is deployed separately (e.g. Vercel) with
+# NEXT_PUBLIC_API_URL = the API service's https://....onrender.com URL.
+#
+# Topology (v4):
+#   ensemblis-api     web service. On every start it applies pending Prisma
+#                     migrations (`prisma migrate deploy` via dist/ops/migrate.js;
+#                     a database created by the old `prisma db push` is baselined
+#                     first — no data is touched) and then serves the API.
+#   ensemblis-worker  background worker. Claims jobs from the Postgres queue and
+#                     runs executions, recovery and recurring objectives.
+# Background workers need a paid Render plan. On the free plan, delete the
+# worker service and set EMBEDDED_WORKER=true on the API instead (the API then
+# runs the worker in-process; a sleeping free instance pauses executions until
+# it wakes, and recovery resumes them).
+
+envVarGroups:
+  - name: ensemblis-shared
     envVars:
       - key: NODE_VERSION
         value: "20"
@@ -31,16 +29,8 @@ services:
         value: "true"
       - key: JWT_SECRET
         generateValue: true
-
-      # --- entered by you in the Render dashboard ---
-      - key: DATABASE_URL # Neon connection string, must include ?sslmode=require
-        sync: false
-      - key: CORS_ORIGIN # your Vercel URL, e.g. https://ensemblis.vercel.app (comma-separate several)
-        sync: false
-      - key: OPENAI_API_KEY # Groq API key from https://console.groq.com/keys
-        sync: false
-      - key: SIGNUP_INVITE_CODE # leave empty for open sign-up
-        sync: false
+      - key: IP_HASH_SALT
+        generateValue: true
 
       # --- AI provider: Groq free plan via its OpenAI-compatible API ---
       - key: AI_PROVIDER
@@ -54,7 +44,10 @@ services:
         value: low
       - key: OPENAI_MAX_TOKENS
         value: "8192"
-      # Groq's free tier allows few tokens per minute: run one model call at a time.
+      # Smaller, faster model for planning helpers (criteria suggestions, memory).
+      - key: OPENAI_FAST_MODEL
+        value: openai/gpt-oss-20b
+      # Groq's free tier allows few tokens per minute: one model call at a time per process.
       - key: MAX_CONCURRENT_LLM
         value: "1"
       - key: LLM_TIMEOUT_MS
@@ -67,53 +60,21 @@ services:
         value: "true"
       - key: DEMO_TOPUP_MAX_CENTS
         value: "2000"
-      - key: MAX_TASKS_PER_USER_PER_DAY
+      - key: MAX_TASKS_PER_USER_PER_DAY # executions started per user per UTC day
         value: "5"
-      - key: MAX_TASKS_PER_DAY_GLOBAL
+      - key: MAX_TASKS_PER_DAY_GLOBAL # executions started across the server per UTC day
         value: "150"
       - key: MAX_DESCRIPTION_LENGTH
         value: "4000"
-
-      # --- v3: public URL + owner dashboard (entered by you) ---
-      - key: APP_URL # your Vercel URL, e.g. https://ensemblis.vercel.app — used in emails, share links, Stripe redirects
-        sync: false
-      - key: ADMIN_EMAILS # your own email(s), comma-separated: unlocks /admin
-        sync: false
-
-      # --- v3: web research (Tavily when the key is set, otherwise free Wikipedia) ---
-      - key: TAVILY_API_KEY # optional, free at https://app.tavily.com
-        sync: false
       - key: SEARCH_DAILY_BUDGET
         value: "30"
-      # Smaller, faster Groq model for quick helper calls (clarifying questions).
-      - key: OPENAI_FAST_MODEL
-        value: openai/gpt-oss-20b
 
-      # --- v3: email via Resend (optional; off until both are set) ---
-      - key: RESEND_API_KEY
-        sync: false
-      - key: EMAIL_FROM # e.g. Ensemblis <hello@yourdomain.com>
-        sync: false
-
-      # --- v3: Stripe Checkout (optional; off until both are set — use test keys first) ---
-      - key: STRIPE_SECRET_KEY
-        sync: false
-      - key: STRIPE_WEBHOOK_SECRET # endpoint: https://<this service>/api/billing/stripe/webhook
-        sync: false
-
-      # --- v3: Cloudflare Turnstile bot check (optional; off until both are set) ---
-      - key: TURNSTILE_SITE_KEY
-        sync: false
-      - key: TURNSTILE_SECRET_KEY
-        sync: false
-
-      # --- v3: guest trial ("try without signing up") ---
+      # --- guest trial ("try without an account") ---
       - key: GUEST_TRIAL_ENABLED
         value: "true"
-      # Enough for any one "focused" task with the default catalog (max ≈ €45).
-      - key: GUEST_CREDITS_CENTS
-        value: "5000"
-      - key: GUEST_MAX_TASKS
+      - key: GUEST_CREDITS_CENTS # covers one execution (plans are capped at 7 steps ≈ €21 incl. verification)
+        value: "3000"
+      - key: GUEST_MAX_TASKS # executions a guest may start
         value: "1"
       - key: GUEST_TRIALS_PER_IP_PER_DAY
         value: "2"
@@ -121,17 +82,83 @@ services:
         value: "30"
       - key: GUEST_RETENTION_DAYS
         value: "7"
-      - key: IP_HASH_SALT
-        generateValue: true
 
-      # --- v3: task features ---
-      - key: FOLLOWUP_COST_CENTS
-        value: "200"
-      - key: CLARIFY_ENABLED
-        value: "true"
-      - key: MAX_ATTACHMENTS
-        value: "3"
-      - key: MAX_ATTACHMENT_CHARS
-        value: "40000"
-      - key: DEV_TEST_RUNS_PER_DAY
-        value: "3"
+services:
+  - type: web
+    name: ensemblis-api
+    runtime: node
+    plan: free
+    # Pick the region closest to your database (Neon "AWS Europe Central" = frankfurt).
+    region: frankfurt
+    rootDir: backend
+    # --include=dev: TypeScript and type packages are devDependencies, and
+    # NODE_ENV=production would otherwise make npm skip them.
+    buildCommand: npm ci --include=dev && npm run build
+    # migrate deploy (never `db push`), then start the API.
+    startCommand: npm run start:render
+    # /health checks the database and reports queue health; /health/live is a plain liveness probe.
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - fromGroup: ensemblis-shared
+      # The worker runs as its own service below. Set to "true" on the free plan without a worker.
+      - key: EMBEDDED_WORKER
+        value: "false"
+
+      # --- entered by you in the Render dashboard ---
+      - key: DATABASE_URL # direct (non-pooled) connection string, with ?sslmode=require
+        sync: false
+      - key: CORS_ORIGIN # your frontend URL, e.g. https://ensemblis.vercel.app (comma-separate several)
+        sync: false
+      - key: APP_URL # your frontend URL — used in emails, share links and Stripe redirects
+        sync: false
+      - key: OPENAI_API_KEY # Groq API key from https://console.groq.com/keys
+        sync: false
+      - key: SIGNUP_INVITE_CODE # leave empty for open sign-up
+        sync: false
+      # Operators who may open /admin. Each address must also be VERIFIED
+      # (email link, or `npm run ops:verify-email -- you@example.com`).
+      - key: ADMIN_EMAILS
+        sync: false
+      - key: TAVILY_API_KEY # optional web search (otherwise keyless Wikipedia)
+        sync: false
+      - key: RESEND_API_KEY # optional email (verification, notifications, password reset)
+        sync: false
+      - key: EMAIL_FROM # e.g. Ensemblis <hello@yourdomain.com>
+        sync: false
+      - key: STRIPE_SECRET_KEY # optional real payments — use test keys first
+        sync: false
+      - key: STRIPE_WEBHOOK_SECRET # endpoint: https://<this service>/api/billing/stripe/webhook
+        sync: false
+      - key: TURNSTILE_SITE_KEY # optional bot check on sign-up and guest trial
+        sync: false
+      - key: TURNSTILE_SECRET_KEY
+        sync: false
+
+  - type: worker
+    name: ensemblis-worker
+    runtime: node
+    plan: starter
+    region: frankfurt
+    rootDir: backend
+    buildCommand: npm ci --include=dev && npm run build
+    # The API service applies migrations; the worker only needs the generated client.
+    startCommand: npm run start:worker
+    autoDeploy: true
+    envVars:
+      - fromGroup: ensemblis-shared
+      - key: WORKER_CONCURRENCY
+        value: "2"
+      # Same values as on ensemblis-api.
+      - key: DATABASE_URL
+        sync: false
+      - key: APP_URL
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: TAVILY_API_KEY
+        sync: false
+      - key: RESEND_API_KEY
+        sync: false
+      - key: EMAIL_FROM
+        sync: false

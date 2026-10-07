@@ -75,8 +75,8 @@ export async function createCheckoutSession(userId: string, packId: string): Pro
         payment_intent_data: { metadata },
         client_reference_id: userId,
         customer_email: user.email,
-        success_url: `${config.appUrl}/billing?checkout=success`,
-        cancel_url: `${config.appUrl}/billing?checkout=cancelled`,
+        success_url: `${config.appUrl}/usage?checkout=success`,
+        cancel_url: `${config.appUrl}/usage?checkout=cancelled`,
       },
       { idempotencyKey: `checkout_${payment.id}` }
     );

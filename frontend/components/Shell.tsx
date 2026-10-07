@@ -6,7 +6,6 @@ import { ROUTES } from "@/lib/routes";
 import { isTypingTarget } from "@/lib/utils";
 import { CommandPalette } from "./CommandPalette";
 import { Modal } from "./Modal";
-import { RoleSelectModal, type SignupRole } from "./RoleSelect";
 
 /** Every global shortcut (rendered in the "?" modal and the style guide). */
 export const SHORTCUTS: [string, string][] = [
@@ -14,65 +13,59 @@ export const SHORTCUTS: [string, string][] = [
   ["/", "Open the command palette"],
   ["↑ / ↓", "Move the palette selection"],
   ["Enter", "Open the selected palette result"],
-  ["N", "Start a new task"],
+  ["N", "Define a new outcome"],
   ["G then D", "Go to Dashboard"],
-  ["G then T", "Go to My work"],
-  ["G then A", "Go to Agents"],
-  ["G then N", "Go to Network"],
-  ["G then H", "Go home"],
+  ["G then O", "Go to Objectives"],
+  ["G then T", "Go to AI Team"],
+  ["G then C", "Go to Company Context"],
+  ["G then A", "Go to Approvals"],
+  ["G then E", "Go to Exceptions"],
+  ["G then U", "Go to Usage"],
   ["Esc", "Close the open modal or menu"],
   ["?", "Show this list"],
 ];
 
 const GOTO: Record<string, string> = {
   d: ROUTES.dashboard,
-  t: ROUTES.tasks,
-  a: ROUTES.agents,
-  n: ROUTES.network,
-  h: ROUTES.home,
-  w: ROUTES.workflows,
-  b: ROUTES.billing,
+  o: ROUTES.objectives,
+  t: ROUTES.aiTeam,
+  c: ROUTES.context,
+  a: ROUTES.approvals,
+  e: ROUTES.exceptions,
+  u: ROUTES.usage,
+  r: ROUTES.routines,
   s: ROUTES.settings,
+  h: ROUTES.home,
 };
 
 interface ShellCtx {
   openPalette: () => void;
   openShortcuts: () => void;
-  /** Opens the "How will you use Ensemblis?" role picker → /signup?type=… */
-  openRoleSelect: (opts?: { role?: SignupRole; next?: string }) => void;
   closeAll: () => void;
 }
 const Ctx = createContext<ShellCtx | null>(null);
 
 /**
  * App-wide overlays + keyboard shortcuts: command palette (⌘K, Ctrl K, /),
- * shortcuts sheet (?), role-select signup modal, N = new task, G-then-X go-to.
+ * shortcuts sheet (?), N = define an outcome, G-then-X go-to.
  */
 export function ShellProvider({ children }: { children: ReactNode }) {
   const router = useRouter();
   const [palette, setPalette] = useState(false);
   const [shortcuts, setShortcuts] = useState(false);
-  const [role, setRole] = useState<{ open: boolean; role?: SignupRole; next?: string }>({ open: false });
   const gPending = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const closeAll = useCallback(() => {
     setPalette(false);
     setShortcuts(false);
-    setRole({ open: false });
   }, []);
   const openPalette = useCallback(() => {
     setShortcuts(false);
-    setRole({ open: false });
     setPalette(true);
   }, []);
   const openShortcuts = useCallback(() => {
     setPalette(false);
     setShortcuts(true);
-  }, []);
-  const openRoleSelect = useCallback((opts?: { role?: SignupRole; next?: string }) => {
-    setPalette(false);
-    setShortcuts(false);
-    setRole({ open: true, ...opts });
   }, []);
 
   useEffect(() => {
@@ -106,7 +99,7 @@ export function ShellProvider({ children }: { children: ReactNode }) {
         openShortcuts();
       } else if (k === "n" || k === "N") {
         e.preventDefault();
-        router.push(ROUTES.newTask);
+        router.push(ROUTES.newObjective);
       } else if (k === "g" || k === "G") {
         gPending.current = setTimeout(() => (gPending.current = null), 1200);
       }
@@ -115,14 +108,13 @@ export function ShellProvider({ children }: { children: ReactNode }) {
     return () => window.removeEventListener("keydown", onKey);
   }, [router, openPalette, openShortcuts]);
 
-  const value = useMemo(() => ({ openPalette, openShortcuts, openRoleSelect, closeAll }), [openPalette, openShortcuts, openRoleSelect, closeAll]);
+  const value = useMemo(() => ({ openPalette, openShortcuts, closeAll }), [openPalette, openShortcuts, closeAll]);
 
   return (
     <Ctx.Provider value={value}>
       {children}
-      <CommandPalette open={palette} onClose={() => setPalette(false)} onShortcuts={openShortcuts} onGetStarted={() => openRoleSelect()} />
+      <CommandPalette open={palette} onClose={() => setPalette(false)} onShortcuts={openShortcuts} />
       <ShortcutsModal open={shortcuts} onClose={() => setShortcuts(false)} />
-      <RoleSelectModal open={role.open} initialRole={role.role ?? null} next={role.next} onClose={() => setRole({ open: false })} />
     </Ctx.Provider>
   );
 }

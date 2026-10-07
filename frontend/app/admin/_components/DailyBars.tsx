@@ -7,7 +7,7 @@ import { dayLabelUTC } from "./adminFormat";
  * top, separated by a 2px surface gap. One y-scale, hairline grid, native
  * hover titles, a legend with totals and a screen-reader table.
  */
-export function DailyBars({ completed, failed, height = 150, label = "Tasks per day" }: { completed: DayCount[]; failed: DayCount[]; height?: number; label?: string }) {
+export function DailyBars({ completed, failed, height = 150, label = "Executions per day" }: { completed: DayCount[]; failed: DayCount[]; height?: number; label?: string }) {
   const days = Array.from(new Set([...completed.map((d) => d.day), ...failed.map((d) => d.day)])).sort();
   const okBy = new Map(completed.map((d) => [d.day, d.count]));
   const badBy = new Map(failed.map((d) => [d.day, d.count]));

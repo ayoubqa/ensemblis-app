@@ -1,38 +1,33 @@
 "use client";
 
-import { useState } from "react";
-import { Icon, PageSkeleton } from "@/components";
+import Link from "next/link";
+import { EmptyState, PageSkeleton } from "@/components";
 import { useAuth } from "@/lib/auth-context";
-import { AdminView } from "./AdminView";
+import { ROUTES } from "@/lib/routes";
 import { OwnerDashboard } from "./OwnerDashboard";
 
 /**
- * /admin: owners (user.isAdmin — emails in the server's ADMIN_EMAILS) get the
- * real owner dashboard; everyone else gets the illustrative demo console.
+ * /admin: deployment operators only — a verified email listed in the server's
+ * ADMIN_EMAILS (user.isAdmin). Everyone else sees a plain "not available".
+ * The server enforces the same rule on /api/admin/*.
  */
 export function AdminGate() {
   const { user, loading } = useAuth();
-  const [previewDemo, setPreviewDemo] = useState(false);
-
   if (loading) return <PageSkeleton cards={4} />;
-  if (!user?.isAdmin) return <AdminView />;
-
-  if (previewDemo)
+  if (!user?.isAdmin)
     return (
-      <>
-        <div className="wrap" style={{ paddingTop: 16 }}>
-          <div className="notice" role="status" style={{ background: "var(--accent-soft)", color: "var(--accent)", alignItems: "center" }}>
-            <Icon name="info" />
-            <span className="sp">You&apos;re previewing the demo console that visitors who aren&apos;t owners see. Nothing here is real data.</span>
-            <button type="button" className="btn sm" onClick={() => setPreviewDemo(false)}>
-              <Icon name="back" />
-              Back to owner dashboard
-            </button>
-          </div>
-        </div>
-        <AdminView />
-      </>
+      <div className="narrow" style={{ padding: "56px 0" }}>
+        <EmptyState icon="lock" title="Operations console">
+          This page is for the people who operate this deployment.{" "}
+          {user && !user.emailVerified ? (
+            <>
+              Operators must have a verified email — <Link href={`${ROUTES.settings}#profile`}>verify yours in Settings</Link>.
+            </>
+          ) : (
+            <Link href={ROUTES.dashboard}>Back to your briefing</Link>
+          )}
+        </EmptyState>
+      </div>
     );
-
-  return <OwnerDashboard onPreviewDemo={() => setPreviewDemo(true)} />;
+  return <OwnerDashboard />;
 }

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useState, type FormEvent } from "react";
-import { Icon, RequireAuth, Skeleton, SkeletonText, confetti, useToast } from "@/components";
+import { Icon, RequireAuth, Skeleton, SkeletonText, useToast } from "@/components";
 import { api, type TeamDetail } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { errorText, toastApiError } from "@/lib/errors";
@@ -35,20 +35,20 @@ function GuestTeam() {
           <Icon name="user" />
           Guest session
         </span>
-        <h1 className="serif" style={{ fontSize: "clamp(26px,3.6vw,36px)", lineHeight: 1.1, margin: "12px 0 8px" }}>
-          Create a free account to work as a team.
+        <h1 style={{ fontSize: "clamp(26px,3.6vw,36px)", lineHeight: 1.1, margin: "12px 0 8px" }}>
+          Create an account to invite your colleagues.
         </h1>
         <p className="muted" style={{ maxWidth: "56ch" }}>
-          Teams share one credit wallet and one task history. Save your guest work to a free account first — everything you&apos;ve done so far
-          comes with you.
+          Members share your Company Context, objectives, AI Team and wallet. Save your trial work to an account first — everything you&apos;ve
+          done so far comes with you.
         </p>
         <TeamExplainer compact />
         <div className="row wrapflex">
-          <Link className="btn p" href={`${ROUTES.signup}?claim=1&next=${encodeURIComponent(ROUTES.team)}`}>
+          <Link className="btn p" href={`${ROUTES.signup}?claim=1&next=${encodeURIComponent(ROUTES.members)}`}>
             <Icon name="check" />
             Save your work
           </Link>
-          <Link className="btn" href={ROUTES.tasks}>
+          <Link className="btn" href={ROUTES.objectives}>
             Back to my work
           </Link>
         </div>
@@ -68,7 +68,7 @@ function TeamView() {
       const r = await api.getTeam();
       setTeam(r.team);
     } catch (e) {
-      setError(errorText(e, "Couldn't load your team."));
+      setError(errorText(e, "Couldn't load your organization members."));
     }
   }, []);
   useEffect(() => {
@@ -100,7 +100,7 @@ function TeamView() {
 
   if (team === undefined)
     return (
-      <div className="wrap" aria-busy="true" aria-label="Loading your team">
+      <div className="wrap" aria-busy="true" aria-label="Loading organization members">
         <div className="pagehead">
           <Skeleton width={90} height={22} />
           <Skeleton width="min(380px, 70%)" height={38} style={{ marginTop: 14 }} />
@@ -143,11 +143,10 @@ function CreateTeam({ onCreated }: { onCreated: (t: TeamDetail) => void }) {
       const r = await api.createTeam(name.trim());
       setUser(r.user);
       onCreated(r.team);
-      confetti();
       toast(`${r.team.name} is ready — invite your colleagues next`, { icon: "check" });
     } catch (e2) {
-      setErr(errorText(e2, "Couldn't create the team"));
-      toastApiError(toast, e2, "Couldn't create the team");
+      setErr(errorText(e2, "Couldn't set up members"));
+      toastApiError(toast, e2, "Couldn't set up members");
     } finally {
       setBusy(false);
     }
@@ -160,12 +159,12 @@ function CreateTeam({ onCreated }: { onCreated: (t: TeamDetail) => void }) {
       <div className="pagehead">
         <span className="tag gray">
           <Icon name="share" />
-          Teams
+          Organization members
         </span>
-        <h1 style={{ marginTop: 12 }}>Work together, from one wallet.</h1>
+        <h1 style={{ marginTop: 12 }}>Bring your colleagues into the organization.</h1>
         <p>
-          Create a team and invite colleagues with a link. Everyone can run tasks; they&apos;re all paid from your balance and everyone sees the
-          team&apos;s history.
+          Invite colleagues with a link. Everyone defines objectives with the same Company Context and AI Team; executions are paid from your
+          balance and follow your approval policy.
         </p>
       </div>
 
@@ -173,7 +172,7 @@ function CreateTeam({ onCreated }: { onCreated: (t: TeamDetail) => void }) {
 
       <form className="card" onSubmit={submit} noValidate>
         <label className="l" htmlFor="team-name">
-          Team name
+          Organization name
         </label>
         <input
           id="team-name"
@@ -202,8 +201,8 @@ function CreateTeam({ onCreated }: { onCreated: (t: TeamDetail) => void }) {
         <div className="notice" style={{ marginTop: 14, background: "var(--accent-soft)", color: "var(--accent)" }}>
           <Icon name="wallet" />
           <span>
-            You&apos;ll be the owner. Your balance ({eur(user.credits)}) becomes the team wallet: members&apos; tasks are paid from it, and only you
-            can add credits.
+            You&apos;ll be the owner. Your balance ({eur(user.credits)}) becomes the organization wallet: members&apos; executions are paid from
+            it, and only you can add balance.
           </span>
         </div>
         {err && (
@@ -213,7 +212,7 @@ function CreateTeam({ onCreated }: { onCreated: (t: TeamDetail) => void }) {
         )}
         <button type="submit" className="btn p" style={{ marginTop: 16 }} disabled={busy} aria-busy={busy}>
           <Icon name="plus" />
-          Create team
+          Start inviting
         </button>
       </form>
     </div>

@@ -1,4 +1,4 @@
-// Standalone worker process: `npm run worker` (node dist/worker.js).
+// Standalone worker process: `npm run start:worker` (node dist/worker.js).
 // Executes objectives from the durable queue and runs maintenance. Run one or
 // more alongside the API (render.yaml: the `ensemblis-worker` service).
 

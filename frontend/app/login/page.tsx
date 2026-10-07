@@ -34,11 +34,11 @@ function LoginForm() {
   const done = useRef(false);
   const emailRef = useRef<HTMLInputElement>(null);
 
-  const dest = (type: "COMPANY" | "DEVELOPER") => safeNext(next, type === "DEVELOPER" ? ROUTES.devDashboard : ROUTES.dashboard);
+  const dest = () => safeNext(next, ROUTES.dashboard);
 
   // Already signed in → straight through (a guest may still log in to a real account).
   useEffect(() => {
-    if (!loading && user && !user.isGuest && !done.current) router.replace(dest(user.accountType));
+    if (!loading && user && !user.isGuest && !done.current) router.replace(dest());
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loading, user]);
 
@@ -62,7 +62,7 @@ function LoginForm() {
       done.current = true;
       signIn(token, u);
       toast(`Welcome back, ${firstName(u.name)}`);
-      router.push(dest(u.accountType));
+      router.push(dest());
     } catch (err) {
       setBusy(false);
       if (isGuestAccountError(err)) {
@@ -134,7 +134,7 @@ function LoginForm() {
             <span>
               <b style={{ display: "block", marginBottom: 2 }}>That&apos;s a free-trial account</b>
               {guestError}{" "}
-              <Link href={signupUrl("company", next)} style={{ color: "var(--accent)", fontWeight: 600, textDecoration: "underline" }}>
+              <Link href={signupUrl(next)} style={{ color: "var(--accent)", fontWeight: 600, textDecoration: "underline" }}>
                 Sign up free
               </Link>
             </span>
@@ -148,7 +148,7 @@ function LoginForm() {
       </form>
       <p className="small muted" style={{ textAlign: "center", marginTop: 20 }}>
         New to Ensemblis?{" "}
-        <Link href={signupUrl(undefined, next)} style={{ color: "var(--accent)", fontWeight: 600 }}>
+        <Link href={signupUrl(next)} style={{ color: "var(--accent)", fontWeight: 600 }}>
           Create an account
         </Link>
         {config.guestTrialEnabled && !user && (
@@ -156,13 +156,13 @@ function LoginForm() {
             {" "}
             or{" "}
             <Link href={`${ROUTES.home}?trial=1`} style={{ color: "var(--accent)", fontWeight: 600 }}>
-              try a task free
+              try it without an account
             </Link>
           </>
         )}
       </p>
       <p className="tiny muted" style={{ textAlign: "center", marginTop: 8 }}>
-        Demo environment · new accounts get free demo credits, nothing is really charged.
+        Usage-based · nothing runs or is charged without your approval.
       </p>
     </AuthShell>
   );

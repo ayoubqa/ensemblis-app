@@ -5,36 +5,35 @@ import { useAuth } from "@/lib/auth-context";
 import { ROUTES } from "@/lib/routes";
 import { Mark } from "./Logo";
 
-type Col = { title: string; links: [string, string][] };
-
-function columns(signedIn: boolean): Col[] {
-  return [
+/** Site footer. Rendered once by the root layout. */
+export function Footer() {
+  const { user } = useAuth();
+  const cols: { title: string; links: [string, string][] }[] = [
     {
       title: "Product",
-      links: [
-        ["Work", ROUTES.newTask],
-        ["Agents", ROUTES.agents],
-        ["Examples", ROUTES.examples],
-        ["How it works", ROUTES.howItWorks],
-        ["Pricing", ROUTES.pricing],
-        ...(signedIn ? ([["Team", ROUTES.team]] as [string, string][]) : []),
-      ],
+      links: user
+        ? [
+            ["Dashboard", ROUTES.dashboard],
+            ["Objectives", ROUTES.objectives],
+            ["AI Team", ROUTES.aiTeam],
+            ["Company Context", ROUTES.context],
+          ]
+        : [
+            ["How it works", ROUTES.howItWorks],
+            ["Get started", ROUTES.signup],
+            ["Log in", ROUTES.login],
+          ],
     },
     {
-      title: "Developers",
-      links: [
-        ["Publish an agent", ROUTES.publish],
-        ["Economics", ROUTES.economics],
-        ["Developer dashboard", ROUTES.devDashboard],
-      ],
-    },
-    {
-      title: "Company",
-      links: [
-        ["The network", ROUTES.network],
-        ["Brand", ROUTES.brand],
-        ["Changelog", ROUTES.changelog],
-      ],
+      title: "Control",
+      links: user
+        ? [
+            ["Approvals", ROUTES.approvals],
+            ["Exceptions", ROUTES.exceptions],
+            ["Usage", ROUTES.usage],
+            ["Settings", ROUTES.settings],
+          ]
+        : [["Trust & safety", "/#trust"]],
     },
     {
       title: "Legal",
@@ -44,16 +43,10 @@ function columns(signedIn: boolean): Col[] {
       ],
     },
   ];
-}
-
-/** Site footer (prototype `footer()`, `footer.ft`). Rendered once by the root layout. */
-export function Footer() {
-  const { user } = useAuth();
-  const cols = columns(!!user);
   return (
     <footer className="ft no-print">
       <div className="wrap">
-        <div className="cols">
+        <div className="cols" style={{ gridTemplateColumns: "1.6fr repeat(3, 1fr)" }}>
           <div>
             <Link href={ROUTES.home} className="lockup" style={{ color: "var(--ink)", gap: 10, display: "inline-flex" }} aria-label="Ensemblis home">
               <Mark size={24} />
@@ -61,8 +54,8 @@ export function Footer() {
                 Ensemblis
               </span>
             </Link>
-            <p className="small" style={{ marginTop: 12, maxWidth: "32ch" }}>
-              The marketplace for AI work. Tell us what you need done. We&apos;ll find the right AI to do it.
+            <p className="small" style={{ marginTop: 12, maxWidth: "36ch" }}>
+              The AI operating layer for business. Describe the outcome. We do the work.
             </p>
           </div>
           {cols.map((c) => (
@@ -77,8 +70,8 @@ export function Footer() {
           ))}
         </div>
         <div className="row between wrapflex" style={{ marginTop: 28, paddingTop: 18, borderTop: "1px solid var(--line)" }}>
-          <span>© 2026 Ensemblis · a demo project</span>
-          <span>Performance figures shown are illustrative.</span>
+          <span>© 2026 Ensemblis</span>
+          <span>AI-generated work can contain mistakes — review the evidence and verification before acting.</span>
         </div>
       </div>
     </footer>

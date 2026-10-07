@@ -3,7 +3,7 @@ import { AdminGate } from "./_components/AdminGate";
 
 export const metadata: Metadata = {
   title: "Operations console",
-  description: "The Ensemblis owner dashboard for this deployment, or a demo of the marketplace operations console.",
+  description: "Operations console for this Ensemblis deployment (operators only).",
   robots: { index: false },
 };
 

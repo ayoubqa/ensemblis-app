@@ -1,18 +1,26 @@
 // =====================================================================
-// Ensemblis API contract — the single source of truth shared by the
-// frontend and the backend. Every endpoint below is implemented in
-// backend/src. Money is always integer cents (EUR). 1 credit = 1 cent.
-// v3 adds: web research + citations, attachments, live output, follow-up
-// revisions, clarifying questions, guest trial, sharing, gallery, email +
-// password reset, owner dashboard, Stripe payments, teams, developer test runs.
+// Ensemblis API contract — mirrors backend/src (engine/serialize.ts and the
+// route files). Money is always integer EUR cents. Dates are ISO strings.
+//
+// The product model:
+//   Objective        a desired business outcome (+ success criteria)
+//   Execution        one attempt to achieve it: plan → steps → verification → outcome
+//   AI Team          executives + the specialists that implement their capabilities
+//   Evidence         what supports the result (cited as [n])
+//   Approval         a person's authorization
+//   Exception        a situation that needs a person
+//   Memory           what Ensemblis learned from operations
 // =====================================================================
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000";
 const TOKEN_KEY = "ensemblis_token";
+/** Fired on window when an authenticated request comes back 401 (session ended). */
+export const UNAUTHORIZED_EVENT = "ensemblis:unauthorized";
 
-// ---------- Types ----------
+// ---------- Accounts ----------
 
 export type AccountType = "COMPANY" | "DEVELOPER";
+export type TeamRole = "OWNER" | "MEMBER";
 
 export interface User {
   id: string;
@@ -22,189 +30,459 @@ export interface User {
   role: string | null;
   accountType: AccountType;
   builds: string | null;
-  credits: number; // cents — the SPENDABLE balance: the team wallet (team owner's balance) when in a team
+  credits: number; // cents — the spendable balance (the organization owner's wallet when in a team)
   createdAt: string;
-  // v3
-  isGuest: boolean; // "try without signing up" account; can be claimed with api.claimAccount
-  isAdmin: boolean; // email listed in the server's ADMIN_EMAILS
+  isGuest: boolean;
+  isAdmin: boolean; // ADMIN_EMAILS match AND a verified email
+  emailVerified: boolean;
   emailOnTaskDone: boolean;
   team: { id: string; name: string; role: TeamRole } | null;
-  walletOwner: "self" | "team"; // whose balance `credits` shows
+  walletOwner: "self" | "team";
 }
 
-export type TeamRole = "OWNER" | "MEMBER";
-
-export interface Agent {
+export interface Organization {
   id: string;
-  slug: string; // URL-safe, e.g. "competitive-intelligence-agent"
   name: string;
-  category: string; // e.g. "Research", "Sales"
-  creator: string; // publisher display name, e.g. "DataLabs"
-  description: string;
-  capabilities: string[];
-  specialty: string; // "competitive intelligence and market research"
-  taskType: string; // "Competitive Intelligence"
-  outputType: string; // "PDF report"
-  pricePerTaskCents: number; // typical price
-  priceFromCents: number; // lowest price
-  estMinutesLow: number;
-  estMinutesHigh: number;
-  avgRunSeconds: number;
-  successRate: number; // 0-100, e.g. 96.8
-  rating: number; // 0-5, e.g. 4.8
-  reputation: number; // 0-100
-  tasksCompleted: number;
-  verified: boolean;
-  hue: number; // 0-360, avatar color
-  isLive: boolean;
-  ownerId: string | null;
+  role: TeamRole;
+  teamId: string | null;
+  defaultAutonomy: Autonomy;
+  approvalThresholdCents: number;
   createdAt: string;
 }
 
-export interface AgentDetail extends Agent {
-  stats: {
-    tasksLast30d: number;
-    achievedRate: number | null; // % of rated tasks marked "Achieved", null if no ratings
-    recentTasks: { id: string; title: string; status: TaskStatus; completedAt: string | null }[];
-  };
-  inWorkforce: boolean; // false when not signed in
+// ---------- Objectives & executions ----------
+
+export type Autonomy = "REVIEW_PLAN" | "AUTO_WITHIN_BUDGET";
+export type ObjectiveStatus = "DRAFT" | ExecutionStatus;
+export type ExecutionStatus = "PLANNING" | "PLANNED" | "WAITING_FOR_APPROVAL" | "RUNNING" | "BLOCKED" | "VERIFYING" | "COMPLETED" | "FAILED" | "CANCELLED";
+export type StepStatus = "PENDING" | "RUNNING" | "COMPLETED" | "FAILED" | "SKIPPED";
+export type OutcomeStatus = "ACHIEVED" | "PARTIALLY_ACHIEVED" | "NOT_ACHIEVED" | "UNKNOWN";
+export type CriterionResult = "MET" | "PARTIALLY_MET" | "NOT_MET" | "UNKNOWN";
+export type VerificationStatus = "PASS" | "PASS_WITH_WARNINGS" | "FAIL";
+export type ClaimStatus = "SUPPORTED" | "PARTIALLY_SUPPORTED" | "UNSUPPORTED" | "UNCITED" | "ESTIMATE";
+export type RiskLevel = "LOW" | "MEDIUM" | "HIGH";
+export type EvidenceKind = "WEB" | "WIKIPEDIA" | "DOCUMENT" | "COMPANY_CONTEXT" | "WEBSITE" | "CALCULATION" | "TOOL_OUTPUT" | "ARTIFACT";
+export type ExecutiveKey = "chief_of_staff" | "marketing" | "sales" | "finance" | "operations";
+
+export interface SuccessCriterion {
+  id: string;
+  order: number;
+  description: string;
+  kind: "qualitative" | "quantitative";
+  targetValue: number | null;
+  unit: string | null;
+  source: "user" | "proposed";
 }
 
-export type TaskStatus = "PLANNING" | "RUNNING" | "COMPLETED" | "FAILED" | "REFUNDED";
-export type Depth = "focused" | "standard" | "deep";
-export type Outcome = "Achieved" | "Partially" | "Not achieved";
-
-export interface TaskStep {
+export interface ExecutionSummary {
   id: string;
-  order: number; // 0-based
-  agentId: string | null;
-  agentName: string;
-  role: string; // "Research", "Analysis", "Verification", "Report"
-  title: string; // what this step does, e.g. "Collect sources"
-  status: "QUEUED" | "RUNNING" | "COMPLETED" | "FAILED";
-  output: string | null; // markdown
+  attempt: number;
+  status: ExecutionStatus;
+  estimatedCostCents: number;
+  costCents: number;
+  refundedCents: number;
+  verificationStatus: VerificationStatus | null;
+  verificationScore: number | null;
+  outcomeStatus: OutcomeStatus | null;
+  outcomeSummary: string | null;
+  planSource: "planner" | "fallback" | null;
   startedAt: string | null;
   completedAt: string | null;
-  liveOutput: string | null; // v3: text streamed so far while status is RUNNING (null otherwise)
+  createdAt: string;
+  progress: { done: number; total: number };
+  currentStep: { title: string; agent: string; executive: string; executiveTitle: string } | null;
 }
 
-/** v3: a numbered source agents may cite inline as [n]. */
-export interface TaskSource {
-  n: number; // 1-based citation number
-  kind: "web" | "wikipedia" | "link" | "upload";
+export interface Objective {
+  id: string;
+  title: string;
+  statement: string;
+  contextNotes: string;
+  deadline: string | null;
+  budgetCents: number;
+  autonomy: Autonomy;
+  status: ObjectiveStatus;
+  outcomeStatus: OutcomeStatus | null;
+  workflowId: string | null;
+  createdBy: { id: string; name: string } | null;
+  criteria: SuccessCriterion[];
+  latestExecution: ExecutionSummary | null;
+  attempts: number;
+  createdAt: string;
+  updatedAt: string;
+  completedAt: string | null;
+}
+
+export interface PlanInfo {
+  title: string;
+  objective: string;
+  assumptions: string[];
+  missingInformation: { question: string; whyItMatters: string; blocking: boolean }[];
+  risks: string[];
+  notes: string[];
+  source: "planner" | "fallback";
+  version: string;
+  estimatedCostCents: number;
+  estimatedManualHours: number | null;
+}
+
+export interface ExecutionStep {
+  id: string;
+  key: string;
+  order: number;
+  title: string;
+  purpose: string;
+  executive: ExecutiveKey;
+  executiveTitle: string;
+  capability: string;
+  capabilityName: string;
+  capabilityVersion: string;
+  agent: string;
+  dependsOn: string[];
+  outputs: string[];
+  verification: string[];
+  kind: "work" | "revision";
+  status: StepStatus;
+  attempts: number;
+  summary: string | null;
+  output: string | null;
+  partialOutput: string | null;
+  error: string | null;
+  provider: string | null;
+  model: string | null;
+  tokensIn: number;
+  tokensOut: number;
+  latencyMs: number | null;
+  costCents: number;
+  retryAt: string | null;
+  startedAt: string | null;
+  completedAt: string | null;
+  evidenceNs: number[];
+}
+
+export interface Evidence {
+  id: string;
+  n: number;
+  kind: EvidenceKind;
+  sourceKind: "web" | "wikipedia" | "upload";
   title: string;
   url: string | null;
   domain: string | null;
   snippet: string;
   publishedAt: string | null;
+  stepId: string | null;
+  createdAt: string;
 }
 
-export type AttachmentKind = "pdf" | "csv" | "xlsx" | "docx" | "txt" | "md" | "url";
+export interface VerificationCheck {
+  key: string;
+  label: string;
+  status: "pass" | "warn" | "fail" | "not_assessed";
+  score: number | null;
+  detail: string;
+}
 
-/** v3: client material; the extracted text stays on the server. */
-export interface Attachment {
+export interface Verification {
   id: string;
-  kind: AttachmentKind;
+  round: number;
+  status: VerificationStatus;
+  score: number;
+  checks: VerificationCheck[];
+  summary: string;
+  warnings: string[];
+  humanJudgment: string[];
+  method: string;
+  version: string;
+  claims: { claim: string; status: ClaimStatus; evidenceNs: number[]; supportScore: number; note: string }[];
+  createdAt: string;
+}
+
+export interface OutcomeMeasurement {
+  criterionId: string;
+  result: CriterionResult;
+  measuredValue: number | null;
+  measurement: string;
+  explanation: string;
+  method: "model-assessed" | "deterministic" | "not-assessed" | "user-confirmed";
+}
+
+export interface ExecutionEvent {
+  id: number;
+  type: string;
+  actor: string;
+  actorTitle: string;
+  message: string;
+  data: Record<string, unknown>;
+  stepId: string | null;
+  createdAt: string;
+}
+
+export interface Approval {
+  id: string;
+  objectiveId: string;
+  objectiveTitle: string | null;
+  executionId: string;
+  kind: "PLAN" | "BUDGET" | "ACTION";
+  status: "PENDING" | "APPROVED" | "REJECTED" | "CANCELLED";
+  title: string;
+  proposedAction: string;
+  reason: string;
+  costCents: number;
+  risk: RiskLevel;
+  recommendation: string;
+  recommendedDecision: "APPROVE" | "REJECT";
+  decidedAt: string | null;
+  decisionNote: string | null;
+  createdAt: string;
+}
+
+export type ExceptionAction = "provide_info" | "proceed" | "retry" | "accept" | "cancel";
+
+export interface ExceptionItem {
+  id: string;
+  objectiveId: string;
+  objectiveTitle: string | null;
+  executionId: string;
+  stepId: string | null;
+  kind: "MISSING_INFORMATION" | "STEP_FAILED" | "VERIFICATION_FAILED" | "INSUFFICIENT_FUNDS" | "POLICY_BLOCKED";
+  status: "OPEN" | "RESOLVED" | "DISMISSED";
+  severity: RiskLevel;
+  title: string;
+  whatHappened: string;
+  whyItMatters: string;
+  recommendation: string;
+  neededFromUser: string;
+  questions: { question: string; whyItMatters: string }[];
+  actions: ExceptionAction[];
+  resolution: string | null;
+  resolvedAction: string | null;
+  resolvedAt: string | null;
+  createdAt: string;
+}
+
+export interface MemoryItem {
+  id: string;
+  kind: "PREFERENCE" | "DECISION" | "LESSON" | "CONSTRAINT" | "FACT";
+  status: "ACTIVE" | "PENDING_CONFIRMATION" | "ARCHIVED";
+  content: string;
+  rationale: string;
+  sensitive: boolean;
+  source: "execution" | "user";
+  sourceExecutionId: string | null;
+  confirmedAt: string | null;
+  lastUsedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface Execution extends ExecutionSummary {
+  objectiveId: string;
+  plan: PlanInfo | null;
+  plannerVersion: string | null;
+  summary: string | null;
+  result: string | null;
+  errorMessage: string | null;
+  shareToken: string | null;
+  estimatedManualHours: number | null;
+  outcomeConfirmedAt: string | null;
+  revisionCount: number;
+  steps: ExecutionStep[];
+  evidence: Evidence[];
+  verification: Verification | null;
+  measurements: OutcomeMeasurement[];
+  approvals: Approval[];
+  exceptions: ExceptionItem[];
+  memories: MemoryItem[];
+  events: ExecutionEvent[];
+  lastEventId: number;
+}
+
+export interface ObjectiveDetail {
+  objective: Objective;
+  executions: ExecutionSummary[];
+  execution: Execution | null;
+}
+
+export interface ObjectiveCounts {
+  all: number;
+  active: number;
+  attention: number;
+  completed: number;
+  drafts: number;
+  closed: number;
+}
+
+export type ObjectiveGroup = "all" | "active" | "attention" | "completed" | "drafts" | "closed";
+
+export interface CriterionInput {
+  description: string;
+  targetValue?: number | null;
+  unit?: string | null;
+}
+
+export interface CreateObjectiveInput {
+  statement: string;
+  title?: string;
+  successCriteria?: CriterionInput[];
+  deadline?: string | null; // YYYY-MM-DD
+  budgetCents?: number;
+  contextNotes?: string;
+  autonomy?: Autonomy;
+  draft?: boolean;
+}
+
+export interface Suggestion {
+  title: string;
+  criteria: { description: string; targetValue: number | null; unit: string | null }[];
+  questions: string[];
+  source: "model" | "heuristic";
+}
+
+// ---------- AI Team ----------
+
+export interface ToolRef {
+  key: string;
+  name: string;
+  permission: "READ_ONLY" | "WRITE" | "EXTERNAL_ACTION" | "FINANCIAL" | "DESTRUCTIVE";
+}
+
+export interface CapabilityInfo {
+  key: string;
+  name: string;
+  version: string;
+  kind: "framing" | "research" | "analysis" | "synthesis";
+  specialist: string;
+  description: string;
+  methodology: string[];
+  deliverable: string[];
+  verificationFocus: string[];
+  tools: ToolRef[];
+  costCents: number;
+  completedLast30d: number;
+}
+
+export interface ExecutiveInfo {
+  key: ExecutiveKey;
+  title: string;
+  department: string;
+  reportsTo: ExecutiveKey | null;
+  mandate: string;
+  capabilities: CapabilityInfo[];
+  working: { stepTitle: string; agent: string; capability: string; objectiveId: string; objectiveTitle: string; startedAt: string | null }[];
+}
+
+export interface AITeam {
+  version: string;
+  verificationCostCents: number;
+  executives: ExecutiveInfo[];
+  tools: { key: string; name: string; description: string; permission: ToolRef["permission"]; trust: string; version: string }[];
+  policy: { granted: string[]; notGranted: string[]; note: string };
+}
+
+// ---------- Company context ----------
+
+export interface CompanyContext {
+  companyName: string;
+  description: string;
+  products: string;
+  businessModel: string;
+  customers: string;
+  markets: string;
+  goals: string;
+  website: string;
+  websiteFetchedAt: string | null;
+  websiteChars: number;
+  updatedAt: string;
+}
+
+export type DocumentKind = "pdf" | "csv" | "xlsx" | "docx" | "txt" | "md" | "url";
+
+export interface ContextDocument {
+  id: string;
+  kind: DocumentKind;
   name: string;
   url: string | null;
   charCount: number;
   createdAt: string;
 }
 
-/** v3: a version of the report. Version 1 = the original result. */
-export interface TaskRevision {
-  id: string;
-  version: number;
-  instruction: string; // "Original report" for version 1
-  status: "RUNNING" | "COMPLETED" | "FAILED";
-  result: string | null;
-  costCents: number;
-  errorMessage: string | null;
-  createdAt: string;
-  completedAt: string | null;
+export interface ContextPayload {
+  context: CompanyContext;
+  completeness: { filled: number; total: number; missing: string[] };
+  documents: ContextDocument[];
+  maxDocuments: number;
 }
 
-export interface Task {
+// ---------- Dashboard ----------
+
+export interface Briefing {
+  greetingName: string;
+  orgName: string;
+  objectives: { active: number; running: number; blocked: number; waiting: number; completed: number; drafts: number; total: number };
+  attention: { approvals: Approval[]; exceptions: ExceptionItem[] };
+  team: {
+    working: { executive: ExecutiveKey; executiveTitle: string; agent: string; stepTitle: string; objectiveId: string; objectiveTitle: string; startedAt: string | null }[];
+    activity: (ExecutionEvent & { objectiveId: string; objectiveTitle: string })[];
+  };
+  usage: { balanceCents: number; walletOwner: "self" | "team"; monthSpendCents: number; executionsThisMonth: number };
+  recentOutcomes: {
+    executionId: string;
+    objectiveId: string;
+    objectiveTitle: string;
+    completedAt: string | null;
+    costCents: number;
+    outcomeStatus: OutcomeStatus | null;
+    outcomeSummary: string | null;
+    verificationStatus: VerificationStatus | null;
+    verificationScore: number | null;
+  }[];
+  context: { filled: number; total: number; missing: string[] };
+  value30d: { criteriaMet: number; estimatedHoursReturned: number; executionCostCents: number };
+}
+
+export interface Attention {
+  approvals: number;
+  exceptions: number;
+  running: number;
+}
+
+// ---------- Usage / billing ----------
+
+export interface Transaction {
   id: string;
-  title: string;
+  type: "TASK_CHARGE" | "REFUND" | "TOP_UP" | "PURCHASE";
+  amountCents: number; // negative for charges
   description: string;
-  category: string | null;
-  depth: Depth;
-  status: TaskStatus;
-  costCents: number;
-  result: string | null; // final markdown report — v3: always the LATEST completed revision
-  errorMessage: string | null;
-  outcome: Outcome | null;
+  taskId: string | null;
+  executionId: string | null;
   createdAt: string;
-  startedAt: string | null;
-  completedAt: string | null;
-  agentId: string | null; // lead agent
-  agent: Agent | null;
-  steps: TaskStep[]; // ordered; always included
-  // v3
-  sources: TaskSource[]; // ordered by n
-  attachments: Attachment[];
-  revisions: TaskRevision[]; // ordered by version; empty until the first follow-up
-  shareToken: string | null; // public link = /r/<shareToken> when not null
-  isTest: boolean; // developer test run
-  teamId: string | null;
-  createdBy: { id: string; name: string }; // who started it (differs from you for team tasks)
+  actor: { id: string; name: string } | null;
 }
 
-export interface ClarifyQuestion {
+export interface Billing {
+  balanceCents: number;
+  walletOwner: "self" | "team";
+  monthSpendCents: number;
+  lifetimeSpendCents: number;
+  usage: {
+    monthExecutions: number;
+    monthExecutionSpendCents: number;
+    avgExecutionCostCents: number;
+    byObjective: { objectiveId: string; title: string; spendCents: number; executions: number }[];
+  };
+  transactions: Transaction[];
+  nextCursor: string | null;
+}
+
+export interface CreditPack {
   id: string;
-  question: string;
-  options: string[]; // 0-4 quick-pick answers; free text is always allowed
+  label: string;
+  priceCents: number;
+  credits: number;
+  popular?: boolean;
 }
 
-/** v3: what /r/<token> shows — no private fields. */
-export interface PublicReport {
-  token: string;
-  title: string;
-  category: string | null;
-  depth: Depth;
-  result: string; // latest version, markdown
-  version: number;
-  sources: TaskSource[];
-  completedAt: string | null;
-  leadAgent: Agent | null;
-  team: { agentName: string; role: string; title: string }[];
-}
-
-/** v3: gallery card / detail. `content` is only present on the detail endpoint. */
-export interface GalleryItem {
-  slug: string;
-  title: string;
-  category: string;
-  summary: string;
-  agentName: string;
-  depth: Depth;
-  isExample: boolean; // true = curated example written for the demo; false = a featured real report
-  sources: TaskSource[];
-  content?: string;
-  createdAt: string;
-}
-
-export interface TeamMember {
-  agentId: string;
-  agentName: string;
-  role: string;
-  title: string;
-}
-
-export interface TaskEstimate {
-  title: string;
-  category: string;
-  depth: Depth;
-  leadAgent: Agent;
-  alternatives: Agent[]; // up to 3 other good-fit agents
-  team: TeamMember[]; // the steps that will run, in order
-  capabilities: string[]; // required capabilities detected
-  costCents: number;
-  estMinutesLow: number;
-  estMinutesHigh: number;
-  manualHoursEstimate: number; // how long a human would take
-}
+// ---------- Recurring objectives ----------
 
 export type Frequency = "Weekly" | "Monthly" | "Quarterly";
 
@@ -213,94 +491,78 @@ export interface Workflow {
   name: string;
   basedOnText: string;
   frequency: Frequency;
-  depth: Depth;
-  agentId: string | null;
   isActive: boolean;
   nextRun: string | null;
   lastRun: string | null;
   runCount: number;
   createdAt: string;
+  successCriteria: string[];
+  budgetCents: number | null;
+  autonomy: Autonomy | null;
+  lastObjectiveId: string | null;
 }
 
-export interface Transaction {
+// ---------- Legacy reports (v1–v3 tasks) ----------
+
+export type TaskStatus = "PLANNING" | "RUNNING" | "COMPLETED" | "FAILED" | "REFUNDED";
+export type Depth = "focused" | "standard" | "deep";
+
+/** A numbered source [n] (legacy task sources and the public share shape). */
+export interface TaskSource {
+  n: number;
+  kind: "web" | "wikipedia" | "link" | "upload";
+  title: string;
+  url: string | null;
+  domain: string | null;
+  snippet: string;
+  publishedAt: string | null;
+}
+
+export interface LegacyTask {
   id: string;
-  type: "TASK_CHARGE" | "REFUND" | "TOP_UP" | "PURCHASE";
-  amountCents: number; // negative for charges, positive for refunds/top-ups
+  title: string;
   description: string;
-  taskId: string | null;
+  category: string | null;
+  depth: Depth;
+  status: TaskStatus;
+  costCents: number;
+  result: string | null;
+  errorMessage: string | null;
   createdAt: string;
-  actor: { id: string; name: string } | null; // v3: who triggered it (team wallets)
+  completedAt: string | null;
+  steps: { id: string; order: number; agentName: string; role: string; title: string; status: string }[];
+  sources: TaskSource[];
+  /** Follow-up versions written on the old system; the newest completed one is the current report. */
+  revisions?: { version: number; status: string; result: string | null; completedAt: string | null }[];
+  shareToken: string | null;
+  createdBy: { id: string; name: string };
 }
 
-export interface Billing {
-  balanceCents: number;
-  monthSpendCents: number;
-  lifetimeSpendCents: number;
-  transactions: Transaction[]; // newest first
+/** What /r/<token> shows — no private fields. */
+export interface PublicReport {
+  kind: "task" | "execution";
+  token: string;
+  title: string;
+  category: string | null;
+  depth: Depth;
+  result: string;
+  version: number;
+  sources: TaskSource[];
+  completedAt: string | null;
+  /** Legacy task reports only. */
+  leadAgent: { name: string; hue?: number } | null;
+  team: { agentName: string; role: string; title: string }[];
+  objective?: {
+    title: string;
+    criteria: SuccessCriterion[];
+    measurements: OutcomeMeasurement[];
+    outcomeStatus: OutcomeStatus | null;
+    outcomeSummary: string | null;
+  };
+  verification?: { status: VerificationStatus; score: number; summary: string; warnings: string[]; checks: VerificationCheck[] } | null;
 }
 
-export interface DeveloperAgentStats extends Agent {
-  revenueCents: number; // developer's share (80%) of task revenue
-  tasksRun: number;
-  achievedRate: number | null;
-}
-
-export interface DeveloperStats {
-  agents: DeveloperAgentStats[];
-  totalRevenueCents: number;
-  totalTasks: number;
-  platformFeePercent: number; // 20
-  monthly: { month: string; revenueCents: number; tasks: number }[]; // last 6 months, oldest first, "2026-05"
-  testRunsToday: number; // v3
-  testRunsPerDay: number; // v3
-}
-
-export interface PlatformStats {
-  agents: number;
-  liveAgents: number;
-  tasksCompleted: number; // seeded catalog counters + real completions (sample-heavy in a fresh demo)
-  realTasksCompleted: number; // real COMPLETED tasks in this deployment's database
-  tasksRunning: number;
-  users: number;
-  developers: number;
-  avgSuccessRate: number;
-  categories: { category: string; agents: number }[];
-}
-
-/** Public, unauthenticated deployment settings so the UI can adapt to how the server is configured. */
-export interface PublicConfig {
-  demoMode: boolean; // public demo: show demo banner + AI disclaimers
-  inviteRequired: boolean; // signup needs an invite code
-  topupEnabled: boolean; // demo credit top-ups allowed
-  topupMaxCents: number; // lifetime demo top-up cap per user (0 = none allowed)
-  startingCreditsCents: number;
-  maxTasksPerUserPerDay: number;
-  maxDescriptionLength: number;
-  aiProviderLabel: string; // human-readable, e.g. "Groq (GPT-OSS 120B)", "Claude", "Local model (Ollama)"
-  sampleCatalogStats: boolean; // agent ratings/success/task counts are seeded sample data
-  // v3
-  searchEnabled: boolean; // agents can research the web/Wikipedia
-  searchProviderLabel: string; // "Tavily web search" | "Wikipedia" | "Off"
-  emailEnabled: boolean; // task-done emails + password reset work
-  paymentsEnabled: boolean; // Stripe Checkout for credit packs
-  creditPacks: CreditPack[];
-  guestTrialEnabled: boolean;
-  guestCreditsCents: number;
-  turnstileSiteKey: string | null; // Cloudflare Turnstile; when set, guest trial + signup require a token
-  followupCostCents: number;
-  clarifyEnabled: boolean;
-  maxAttachments: number; // per task
-  maxAttachmentChars: number; // per attachment (extracted text)
-  devTestRunsPerDay: number;
-}
-
-export interface CreditPack {
-  id: string;
-  label: string; // "Starter"
-  priceCents: number; // money charged
-  credits: number; // credits granted (cents)
-  popular?: boolean;
-}
+// ---------- Teams (organization members) ----------
 
 export interface TeamMemberInfo {
   userId: string;
@@ -308,12 +570,12 @@ export interface TeamMemberInfo {
   email: string;
   role: TeamRole;
   joinedAt: string;
-  tasksThisMonth: number;
+  objectivesThisMonth: number;
 }
 
 export interface TeamInviteInfo {
   id: string;
-  token: string; // invite link = /join/<token>
+  token: string;
   maxUses: number;
   uses: number;
   expiresAt: string;
@@ -323,10 +585,10 @@ export interface TeamInviteInfo {
 export interface TeamDetail {
   id: string;
   name: string;
-  role: TeamRole; // your role
+  role: TeamRole;
   owner: { id: string; name: string };
   members: TeamMemberInfo[];
-  invites: TeamInviteInfo[]; // active ones; empty for members (owner only)
+  invites: TeamInviteInfo[];
   walletCents: number;
   createdAt: string;
 }
@@ -336,65 +598,67 @@ export interface InvitePreview {
   ownerName: string;
   memberCount: number;
   valid: boolean;
-  reason: string | null; // why not valid: "expired" | "revoked" | "used up"
+  reason: string | null;
 }
 
+// ---------- Deployment config ----------
+
+export interface PublicConfig {
+  demoMode: boolean;
+  inviteRequired: boolean;
+  topupEnabled: boolean;
+  topupMaxCents: number;
+  startingCreditsCents: number;
+  maxTasksPerUserPerDay: number;
+  maxDescriptionLength: number;
+  aiProviderLabel: string;
+  mockAI: boolean;
+  verificationCostCents: number;
+  searchEnabled: boolean;
+  searchProviderLabel: string;
+  emailEnabled: boolean;
+  paymentsEnabled: boolean;
+  creditPacks: CreditPack[];
+  guestTrialEnabled: boolean;
+  guestCreditsCents: number;
+  turnstileSiteKey: string | null;
+  maxAttachments: number;
+  maxAttachmentChars: number;
+}
+
+// ---------- Owner dashboard ----------
+
 export interface DayCount {
-  day: string; // "2026-10-04" (UTC)
+  day: string;
   count: number;
 }
 
-/** v3: owner dashboard (ADMIN_EMAILS only). */
 export interface AdminOverview {
   generatedAt: string;
-  users: { total: number; guests: number; developers: number; signupsLast14d: DayCount[] };
-  tasks: {
+  users: { total: number; guests: number; organizations: number; signupsLast14d: DayCount[] };
+  executions: {
     total: number;
     completed: number;
     failed: number;
-    running: number;
+    cancelled: number;
+    inFlight: number;
+    waiting: number;
+    verification: { pass: number; warnings: number; failedAccepted: number };
+    openExceptions: number;
+    pendingApprovals: number;
     runsToday: number;
     dailyCapGlobal: number;
     completedLast14d: DayCount[];
     failedLast14d: DayCount[];
+    legacyTasks: number;
   };
-  ai: {
-    providerLabel: string;
-    callsToday: number;
-    failuresToday: number;
-    tokensInToday: number;
-    tokensOutToday: number;
-    tokensLast14d: DayCount[]; // in + out
-  };
+  queue: { queued: number; running: number; deadLast24h: number; oldestQueuedSeconds: number };
+  ai: { providerLabel: string; callsToday: number; failuresToday: number; tokensInToday: number; tokensOutToday: number; tokensLast14d: DayCount[] };
   search: { providerLabel: string; callsToday: number; callsThisMonth: number; dailyBudget: number };
   email: { enabled: boolean; sentToday: number };
   money: { purchasesCents: number; purchasesCount: number; demoTopupsCents: number };
-  topAgents: { agentId: string; name: string; runs: number; achievedRate: number | null }[];
-  recentFailures: { taskId: string; title: string; error: string; at: string }[];
-  recentUsers: { id: string; name: string; email: string; isGuest: boolean; accountType: AccountType; createdAt: string; tasks: number }[];
-  shareableReports: { taskId: string; title: string; shareToken: string; completedAt: string | null; featured: boolean }[];
-  gallery: GalleryItem[];
-}
-
-export interface AgentListQuery {
-  q?: string;
-  category?: string;
-  sort?: "recommended" | "rating" | "price" | "tasks" | "newest";
-  verified?: boolean;
-}
-
-export interface PublishAgentInput {
-  name: string;
-  category: string;
-  description: string;
-  capabilities: string[];
-  specialty: string;
-  taskType: string;
-  outputType: string;
-  systemPrompt: string;
-  pricePerTaskCents: number;
-  estMinutesLow: number;
-  estMinutesHigh: number;
+  recentFailures: { executionId: string; objectiveId: string; title: string; error: string; at: string }[];
+  recentUsers: { id: string; name: string; email: string; isGuest: boolean; verified: boolean; createdAt: string }[];
 }
 
 // ---------- Plumbing ----------
@@ -426,11 +690,20 @@ export class ApiError extends Error {
   }
 }
 
+export function apiUrl(path: string): string {
+  return `${API_URL}${path}`;
+}
+
+/**
+ * Every request goes through here. A 401 on a request that carried a token
+ * means the session ended (expired, password changed, account removed): the
+ * token is dropped and UNAUTHORIZED_EVENT tells the app to sign out.
+ */
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const token = getToken();
   let res: Response;
   try {
-    res = await fetch(`${API_URL}${path}`, {
+    res = await fetch(apiUrl(path), {
       ...options,
       headers: {
         "Content-Type": "application/json",
@@ -439,18 +712,22 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
       },
     });
   } catch {
-    throw new ApiError("Can't reach the Ensemblis server. Is the backend running?", 0);
+    throw new ApiError("Can't reach the Ensemblis server. Check your connection and try again.", 0);
   }
   const data = await res.json().catch(() => ({}));
+  if (res.status === 401 && token) {
+    setToken(null);
+    if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent(UNAUTHORIZED_EVENT, { detail: data.error }));
+  }
   if (!res.ok) throw new ApiError(data.error || `Request failed (${res.status})`, res.status);
   return data as T;
 }
 
 const json = (body: unknown) => JSON.stringify(body);
 
-function qs(params: Record<string, string | number | boolean | undefined>) {
+function qs(params: Record<string, string | number | boolean | undefined | null>) {
   const s = Object.entries(params)
-    .filter(([, v]) => v !== undefined && v !== "" && v !== false)
+    .filter(([, v]) => v !== undefined && v !== null && v !== "" && v !== false)
     .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(String(v))}`)
     .join("&");
   return s ? `?${s}` : "";
@@ -459,125 +736,107 @@ function qs(params: Record<string, string | number | boolean | undefined>) {
 // ---------- Endpoints ----------
 
 export const api = {
-  // Auth
+  // Auth & account
   config: () => request<PublicConfig>("/api/config"),
-  signup: (body: {
-    email: string;
-    password: string;
-    name: string;
-    company?: string;
-    accountType: AccountType;
-    builds?: string;
-    acceptedTerms: true; // required: user ticked "I agree to the Terms and Privacy Policy"
-    inviteCode?: string; // required when config.inviteRequired
-    turnstileToken?: string; // required when config.turnstileSiteKey is set
-  }) =>
-    request<{ token: string; user: User }>("/api/auth/signup", { method: "POST", body: json(body) }),
-  login: (body: { email: string; password: string }) =>
-    request<{ token: string; user: User }>("/api/auth/login", { method: "POST", body: json(body) }),
+  signup: (body: { email: string; password: string; name: string; company?: string; acceptedTerms: true; inviteCode?: string; turnstileToken?: string }) =>
+    request<{ token: string; user: User }>("/api/auth/signup", { method: "POST", body: json({ ...body, accountType: "COMPANY" }) }),
+  login: (body: { email: string; password: string }) => request<{ token: string; user: User }>("/api/auth/login", { method: "POST", body: json(body) }),
   me: () => request<{ user: User }>("/api/auth/me"),
-  updateMe: (body: Partial<Pick<User, "name" | "company" | "role" | "builds" | "emailOnTaskDone">>) =>
-    request<{ user: User }>("/api/auth/me", { method: "PATCH", body: json(body) }),
-  // Changing the password ends every other session; store the returned token to keep THIS device signed in.
-  changePassword: (body: { currentPassword: string; newPassword: string }) =>
-    request<{ ok: true; token: string }>("/api/auth/password", { method: "POST", body: json(body) }),
-  // v3: always resolves {ok:true} (never reveals whether an email exists); emails a link when email is enabled
+  updateMe: (body: Partial<Pick<User, "name" | "company" | "role" | "emailOnTaskDone">>) => request<{ user: User }>("/api/auth/me", { method: "PATCH", body: json(body) }),
+  changePassword: (body: { currentPassword: string; newPassword: string }) => request<{ ok: true; token: string }>("/api/auth/password", { method: "POST", body: json(body) }),
   forgotPassword: (email: string) => request<{ ok: true }>("/api/auth/forgot", { method: "POST", body: json({ email }) }),
-  resetPassword: (body: { token: string; password: string }) =>
-    request<{ token: string; user: User }>("/api/auth/reset", { method: "POST", body: json(body) }),
+  resetPassword: (body: { token: string; password: string }) => request<{ token: string; user: User }>("/api/auth/reset", { method: "POST", body: json(body) }),
+  requestEmailVerification: () => request<{ ok: true; sent: boolean }>("/api/auth/verify-email/request", { method: "POST" }),
+  verifyEmail: (token: string) => request<{ ok: true; user: User }>("/api/auth/verify-email", { method: "POST", body: json({ token }) }),
+  guestStart: (body: { acceptedTerms: true; turnstileToken?: string }) => request<{ token: string; user: User }>("/api/guest/start", { method: "POST", body: json(body) }),
+  claimAccount: (body: { email: string; password: string; name: string; company?: string; acceptedTerms: true }) =>
+    request<{ token: string; user: User }>("/api/auth/claim", { method: "POST", body: json({ ...body, accountType: "COMPANY" }) }),
 
-  // v3: Guest trial — creates a temporary account with config.guestCreditsCents; store the token with setToken()
-  guestStart: (body: { acceptedTerms: true; turnstileToken?: string }) =>
-    request<{ token: string; user: User }>("/api/guest/start", { method: "POST", body: json(body) }),
-  // v3: turns the signed-in GUEST into a real account, keeping its tasks
-  claimAccount: (body: {
-    email: string;
-    password: string;
-    name: string;
-    company?: string;
-    accountType: AccountType;
-    builds?: string;
-    acceptedTerms: true;
-  }) => request<{ token: string; user: User }>("/api/auth/claim", { method: "POST", body: json(body) }),
+  // Organization
+  getOrg: () => request<{ organization: Organization }>("/api/org"),
+  updateOrg: (body: Partial<Pick<Organization, "name" | "defaultAutonomy" | "approvalThresholdCents">>) =>
+    request<{ organization: Organization }>("/api/org", { method: "PATCH", body: json(body) }),
 
-  // Public stats
-  stats: () => request<PlatformStats>("/api/stats"),
+  // Dashboard
+  briefing: () => request<Briefing>("/api/dashboard"),
+  attention: () => request<Attention>("/api/dashboard/attention"),
 
-  // Agents
-  listAgents: (query: AgentListQuery = {}) =>
-    request<{ agents: Agent[]; categories: string[] }>(`/api/agents${qs({ ...query })}`),
-  getAgent: (idOrSlug: string) => request<{ agent: AgentDetail }>(`/api/agents/${encodeURIComponent(idOrSlug)}`),
-  listMyAgents: () => request<{ agents: Agent[] }>("/api/agents/mine/list"),
-  publishAgent: (body: PublishAgentInput) => request<{ agent: Agent }>("/api/agents", { method: "POST", body: json(body) }),
-  updateAgent: (id: string, body: Partial<PublishAgentInput & { isLive: boolean }>) =>
-    request<{ agent: Agent }>(`/api/agents/${id}`, { method: "PATCH", body: json(body) }),
+  // Objectives
+  suggestObjective: (statement: string) => request<{ suggestion: Suggestion }>("/api/objectives/suggest", { method: "POST", body: json({ statement }) }),
+  createObjective: (body: CreateObjectiveInput) => request<{ objective: Objective; executionId: string | null }>("/api/objectives", { method: "POST", body: json(body) }),
+  listObjectives: (params: { group?: ObjectiveGroup; cursor?: string; q?: string; limit?: number } = {}) =>
+    request<{ objectives: Objective[]; nextCursor: string | null; counts: ObjectiveCounts }>(`/api/objectives${qs(params)}`),
+  getObjective: (id: string) => request<ObjectiveDetail>(`/api/objectives/${encodeURIComponent(id)}`),
+  planObjective: (id: string) => request<ObjectiveDetail & { executionId: string }>(`/api/objectives/${encodeURIComponent(id)}/plan`, { method: "POST" }),
+  runAgain: (id: string) => request<ObjectiveDetail & { executionId: string }>(`/api/objectives/${encodeURIComponent(id)}/executions`, { method: "POST" }),
+  replaceCriteria: (id: string, criteria: CriterionInput[]) =>
+    request<ObjectiveDetail>(`/api/objectives/${encodeURIComponent(id)}/criteria`, { method: "PUT", body: json({ criteria }) }),
 
-  // Tasks
-  estimateTask: (body: { description: string; depth?: Depth; agentId?: string }) =>
-    request<{ estimate: TaskEstimate }>("/api/tasks/estimate", { method: "POST", body: json(body) }),
-  // scope: "mine" = tasks you started, "team" = your team's tasks, omitted = everything you can see
-  listTasks: (scope?: "mine" | "team") => request<{ tasks: Task[] }>(`/api/tasks${qs({ scope })}`),
-  getTask: (id: string) => request<{ task: Task }>(`/api/tasks/${id}`),
-  createTask: (body: { description: string; title?: string; depth?: Depth; agentId?: string; attachmentIds?: string[] }) =>
-    request<{ task: Task; user: User }>("/api/tasks", { method: "POST", body: json(body) }),
-  // v3: 0-3 questions that would sharpen a vague brief; [] when the brief is clear or the feature is off (never throws for that)
-  clarify: (description: string) =>
-    request<{ questions: ClarifyQuestion[] }>("/api/tasks/clarify", { method: "POST", body: json({ description }) }),
-  // v3: follow-up refinement of a COMPLETED task; charges config.followupCostCents
-  createRevision: (taskId: string, instruction: string) =>
-    request<{ task: Task; user: User }>(`/api/tasks/${taskId}/revisions`, { method: "POST", body: json({ instruction }) }),
-  // v3: turn the public read-only link on/off (COMPLETED tasks only)
-  setShare: (taskId: string, enabled: boolean) =>
-    request<{ task: Task }>(`/api/tasks/${taskId}/share`, { method: "POST", body: json({ enabled }) }),
+  // Executions
+  getExecution: (id: string) => request<{ execution: Execution }>(`/api/executions/${encodeURIComponent(id)}`),
+  executionEvents: (id: string, after = 0) => request<{ events: ExecutionEvent[] }>(`/api/executions/${encodeURIComponent(id)}/events${qs({ after })}`),
+  cancelExecution: (id: string) => request<{ execution: Execution }>(`/api/executions/${encodeURIComponent(id)}/cancel`, { method: "POST" }),
+  shareExecution: (id: string, enabled: boolean) =>
+    request<{ shareToken: string | null }>(`/api/executions/${encodeURIComponent(id)}/share`, { method: "POST", body: json({ enabled }) }),
+  confirmOutcome: (id: string, status: Exclude<OutcomeStatus, "UNKNOWN">, note?: string) =>
+    request<{ execution: Execution }>(`/api/executions/${encodeURIComponent(id)}/outcome`, { method: "POST", body: json({ status, note }) }),
 
-  // v3: Attachments (upload before creating the task, then pass attachmentIds)
-  createAttachment: (body: { kind: Exclude<AttachmentKind, "url">; name: string; text: string }) =>
-    request<{ attachment: Attachment }>("/api/attachments", { method: "POST", body: json(body) }),
-  createLinkAttachment: (url: string) =>
-    request<{ attachment: Attachment }>("/api/attachments/link", { method: "POST", body: json({ url }) }),
-  deleteAttachment: (id: string) => request<{ ok: true }>(`/api/attachments/${id}`, { method: "DELETE" }),
+  // Approvals & exceptions
+  listApprovals: (status: "PENDING" | "ALL" = "PENDING") => request<{ approvals: Approval[] }>(`/api/approvals${qs({ status })}`),
+  approve: (id: string, note?: string) => request<{ approval: Approval; executionId: string }>(`/api/approvals/${encodeURIComponent(id)}/approve`, { method: "POST", body: json({ note }) }),
+  reject: (id: string, note?: string) => request<{ approval: Approval; executionId: string }>(`/api/approvals/${encodeURIComponent(id)}/reject`, { method: "POST", body: json({ note }) }),
+  listExceptions: (status: "OPEN" | "ALL" = "OPEN") => request<{ exceptions: ExceptionItem[] }>(`/api/exceptions${qs({ status })}`),
+  resolveException: (id: string, action: ExceptionAction, response?: string) =>
+    request<{ exception: ExceptionItem; executionId: string }>(`/api/exceptions/${encodeURIComponent(id)}/resolve`, { method: "POST", body: json({ action, response }) }),
 
-  // v3: Public pages (no auth)
-  getPublicReport: (token: string) => request<{ report: PublicReport }>(`/api/public/reports/${encodeURIComponent(token)}`),
-  listGallery: () => request<{ items: GalleryItem[] }>("/api/gallery"),
-  getGalleryItem: (slug: string) => request<{ item: GalleryItem }>(`/api/gallery/${encodeURIComponent(slug)}`),
-  retryTask: (id: string) => request<{ task: Task; user: User }>(`/api/tasks/${id}/retry`, { method: "POST" }),
-  sendFeedback: (id: string, outcome: Outcome) =>
-    request<{ task: Task }>(`/api/tasks/${id}/feedback`, { method: "POST", body: json({ outcome }) }),
+  // AI Team
+  aiTeam: () => request<AITeam>("/api/ai-team"),
 
-  // Workflows (recurring tasks)
+  // Company context
+  getContext: () => request<ContextPayload>("/api/context"),
+  updateContext: (body: Partial<Omit<CompanyContext, "websiteFetchedAt" | "websiteChars" | "updatedAt">>) =>
+    request<ContextPayload>("/api/context", { method: "PUT", body: json(body) }),
+  refreshWebsite: () => request<ContextPayload>("/api/context/website/refresh", { method: "POST" }),
+  addDocument: (body: { kind: Exclude<DocumentKind, "url">; name: string; text: string }) =>
+    request<ContextPayload & { document: ContextDocument }>("/api/context/documents", { method: "POST", body: json(body) }),
+  addLinkDocument: (url: string) => request<ContextPayload & { document: ContextDocument }>("/api/context/documents/link", { method: "POST", body: json({ url }) }),
+  deleteDocument: (id: string) => request<ContextPayload>(`/api/context/documents/${encodeURIComponent(id)}`, { method: "DELETE" }),
+
+  // Memory
+  listMemory: (status?: MemoryItem["status"]) => request<{ memories: MemoryItem[] }>(`/api/memory${qs({ status })}`),
+  addMemory: (body: { kind: MemoryItem["kind"]; content: string }) => request<{ memory: MemoryItem }>("/api/memory", { method: "POST", body: json(body) }),
+  updateMemory: (id: string, body: Partial<Pick<MemoryItem, "kind" | "content">> & { status?: "ACTIVE" | "ARCHIVED" }) =>
+    request<{ memory: MemoryItem }>(`/api/memory/${encodeURIComponent(id)}`, { method: "PATCH", body: json(body) }),
+  deleteMemory: (id: string) => request<{ ok: true }>(`/api/memory/${encodeURIComponent(id)}`, { method: "DELETE" }),
+
+  // Recurring objectives
   listWorkflows: () => request<{ workflows: Workflow[] }>("/api/workflows"),
-  createWorkflow: (body: { name: string; basedOnText: string; frequency: Frequency; depth?: Depth; agentId?: string }) =>
+  createWorkflow: (body: { name: string; basedOnText: string; frequency: Frequency; successCriteria?: string[]; budgetCents?: number; autonomy?: Autonomy }) =>
     request<{ workflow: Workflow }>("/api/workflows", { method: "POST", body: json(body) }),
-  updateWorkflow: (id: string, body: Partial<Pick<Workflow, "isActive" | "frequency" | "name" | "depth">>) =>
+  updateWorkflow: (id: string, body: Partial<Pick<Workflow, "isActive" | "frequency" | "name" | "successCriteria" | "budgetCents" | "autonomy">>) =>
     request<{ workflow: Workflow }>(`/api/workflows/${id}`, { method: "PATCH", body: json(body) }),
   deleteWorkflow: (id: string) => request<{ ok: true }>(`/api/workflows/${id}`, { method: "DELETE" }),
-  runWorkflow: (id: string) => request<{ task: Task; user: User }>(`/api/workflows/${id}/run`, { method: "POST" }),
+  runWorkflow: (id: string) => request<{ objectiveId: string; executionId: string | null }>(`/api/workflows/${id}/run`, { method: "POST" }),
 
-  // Workforce (saved agents)
-  listWorkforce: () => request<{ agents: Agent[] }>("/api/workforce"),
-  addToWorkforce: (agentId: string) => request<{ ok: true }>(`/api/workforce/${agentId}`, { method: "POST" }),
-  removeFromWorkforce: (agentId: string) => request<{ ok: true }>(`/api/workforce/${agentId}`, { method: "DELETE" }),
-
-  // Billing (demo credits — no real payments yet)
+  // Usage
   billing: () => request<Billing>("/api/billing"),
-  topUp: (amountCents: number) =>
-    request<{ billing: Billing; user: User }>("/api/billing/topup", { method: "POST", body: json({ amountCents }) }),
-  // v3: Stripe Checkout — redirect the browser to `url`; credits arrive via webhook, then Stripe returns to /billing?checkout=success
-  createCheckout: (packId: string) =>
-    request<{ url: string }>("/api/billing/checkout", { method: "POST", body: json({ packId }) }),
+  moreTransactions: (cursor: string) => request<{ transactions: Transaction[]; nextCursor: string | null }>(`/api/billing/transactions${qs({ cursor })}`),
+  topUp: (amountCents: number) => request<{ billing: Billing; user: User }>("/api/billing/topup", { method: "POST", body: json({ amountCents }) }),
+  createCheckout: (packId: string) => request<{ url: string }>("/api/billing/checkout", { method: "POST", body: json({ packId }) }),
 
-  // Developer
-  developerStats: () => request<DeveloperStats>("/api/developer/stats"),
-  // v3: free single-agent test run of YOUR agent (config.devTestRunsPerDay per day)
-  devTestRun: (agentId: string, description: string) =>
-    request<{ task: Task }>(`/api/developer/agents/${agentId}/test-run`, { method: "POST", body: json({ description }) }),
+  // Legacy reports
+  listLegacyReports: (cursor?: string) => request<{ tasks: LegacyTask[]; nextCursor: string | null }>(`/api/tasks${qs({ cursor, limit: 30 })}`),
+  getLegacyReport: (id: string) => request<{ task: LegacyTask }>(`/api/tasks/${encodeURIComponent(id)}`),
+  shareLegacyReport: (id: string, enabled: boolean) => request<{ task: LegacyTask }>(`/api/tasks/${encodeURIComponent(id)}/share`, { method: "POST", body: json({ enabled }) }),
 
-  // v3: Teams (one shared wallet = the owner's balance)
+  // Public (no auth)
+  getPublicReport: (token: string) => request<{ report: PublicReport }>(`/api/public/reports/${encodeURIComponent(token)}`),
+
+  // Organization members (team)
   getTeam: () => request<{ team: TeamDetail | null }>("/api/team"),
   createTeam: (name: string) => request<{ team: TeamDetail; user: User }>("/api/team", { method: "POST", body: json({ name }) }),
   renameTeam: (name: string) => request<{ team: TeamDetail }>("/api/team", { method: "PATCH", body: json({ name }) }),
-  deleteTeam: () => request<{ user: User }>("/api/team", { method: "DELETE" }), // owner: dissolves the team
+  deleteTeam: () => request<{ user: User }>("/api/team", { method: "DELETE" }),
   createInvite: () => request<{ invite: TeamInviteInfo }>("/api/team/invites", { method: "POST" }),
   revokeInvite: (inviteId: string) => request<{ ok: true }>(`/api/team/invites/${inviteId}`, { method: "DELETE" }),
   previewInvite: (token: string) => request<{ invite: InvitePreview }>(`/api/team/invites/${encodeURIComponent(token)}`),
@@ -585,9 +844,6 @@ export const api = {
   removeMember: (userId: string) => request<{ team: TeamDetail }>(`/api/team/members/${userId}`, { method: "DELETE" }),
   leaveTeam: () => request<{ user: User }>("/api/team/leave", { method: "POST" }),
 
-  // v3: Owner dashboard (ADMIN_EMAILS only → 403 otherwise)
+  // Owner dashboard (verified ADMIN_EMAILS only)
   adminOverview: () => request<AdminOverview>("/api/admin/overview"),
-  adminFeature: (body: { taskId: string; title?: string; summary?: string }) =>
-    request<{ item: GalleryItem }>("/api/admin/gallery", { method: "POST", body: json(body) }),
-  adminUnfeature: (slug: string) => request<{ ok: true }>(`/api/admin/gallery/${encodeURIComponent(slug)}`, { method: "DELETE" }),
 };

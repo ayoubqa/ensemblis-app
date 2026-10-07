@@ -100,7 +100,7 @@ export function SourcesPanel({
         </button>
       )}
       <p className="tiny muted" style={{ marginTop: 10 }}>
-        Sources are what the agents read while working. Open them to check a claim before you rely on it.
+        Sources are the evidence the AI Team worked from. Open them to check a claim before you rely on it.
       </p>
     </section>
   );

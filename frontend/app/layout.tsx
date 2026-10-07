@@ -13,19 +13,19 @@ import { ConfigProvider } from "@/lib/config";
 import { demoInitScript } from "@/lib/demo-flags";
 
 const FAVICON =
-  "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='6' fill='%230B1020'/%3E%3Crect x='5' y='5' width='3.2' height='14' rx='1.4' fill='%23fff'/%3E%3Crect x='10' y='5' width='9' height='3.2' rx='1.4' fill='%238A7BFF'/%3E%3Crect x='10' y='10.4' width='6' height='3.2' rx='1.4' fill='%233CD3EA'/%3E%3Crect x='10' y='15.8' width='9' height='3.2' rx='1.4' fill='%238A7BFF'/%3E%3C/svg%3E";
+  "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='6' fill='%2305080F'/%3E%3Crect x='5' y='5' width='3.2' height='14' rx='1.4' fill='%23fff'/%3E%3Crect x='10' y='5' width='9' height='3.2' rx='1.4' fill='%233D7BFF'/%3E%3Crect x='10' y='10.4' width='6' height='3.2' rx='1.4' fill='%233CD3EA'/%3E%3Crect x='10' y='15.8' width='9' height='3.2' rx='1.4' fill='%233D7BFF'/%3E%3C/svg%3E";
 
 export const metadata: Metadata = {
   title: {
-    default: "Ensemblis — The marketplace for AI work",
+    default: "Ensemblis — The AI operating layer for business",
     template: "%s · Ensemblis",
   },
   description:
-    "Describe the outcome you need. Ensemblis finds, coordinates, and manages the AI agents required to get it done — and verifies the result.",
+    "Describe the outcome. We do the work. Ensemblis plans business objectives with a Chief of Staff, executes them with an AI Team, verifies the result against evidence and measures whether it was achieved.",
   applicationName: "Ensemblis",
   openGraph: {
-    title: "Ensemblis — The marketplace for AI work",
-    description: "Describe the outcome you need. Ensemblis finds, coordinates, and manages the AI agents required to get it done.",
+    title: "Ensemblis — The AI operating layer for business",
+    description: "Describe the outcome. We do the work.",
     type: "website",
   },
 };
@@ -35,8 +35,8 @@ export const viewport: Viewport = {
   initialScale: 1,
   viewportFit: "cover",
   themeColor: [
-    { media: "(prefers-color-scheme: light)", color: "#F5F6FA" },
-    { media: "(prefers-color-scheme: dark)", color: "#080B1A" },
+    { media: "(prefers-color-scheme: light)", color: "#05080F" },
+    { media: "(prefers-color-scheme: dark)", color: "#05080F" },
   ],
 };
 

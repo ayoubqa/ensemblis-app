@@ -1,119 +1,125 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import Link from "next/link";
+import { useCallback, useEffect, useState } from "react";
 import { useParams } from "next/navigation";
-import { api, ApiError, type Task, type TaskStatus } from "@/lib/api";
+import { api, ApiError, type LegacyTask } from "@/lib/api";
 import { EmptyState, Icon, PageSkeleton, RequireAuth, useToast } from "@/components";
-import { useAuth } from "@/lib/auth-context";
-import { confetti } from "@/lib/confetti";
-import { usePolling } from "@/lib/hooks";
+import { ExportMenu, ReportView, reportTitle } from "@/components/report";
+import { eur, longDate } from "@/lib/format";
 import { ROUTES } from "@/lib/routes";
-import { RunView } from "./_components/RunView";
-import { ResultView } from "./_components/ResultView";
-import { FailedView } from "./_components/FailedView";
-import { hasPendingRevision, isLive } from "./_components/shared";
 
-export default function TaskPage() {
+export default function LegacyReportPage() {
   return (
     <RequireAuth>
-      <TaskLive />
+      <LegacyReport />
     </RequireAuth>
   );
 }
 
-/** One live page per task: run view → result view (or failed view), driven by polling. */
-function TaskLive() {
+/** Read-only view of a report produced before objectives existed (v1–v3 tasks). */
+function LegacyReport() {
   const { id } = useParams<{ id: string }>();
   const toast = useToast();
-  const { refresh } = useAuth();
-  const [task, setTask] = useState<Task | null>(null);
-  const [error, setError] = useState<ApiError | null>(null);
-  const prevStatus = useRef<TaskStatus | null>(null);
-  const celebrated = useRef(false);
+  const [task, setTask] = useState<LegacyTask | null>(null);
+  const [error, setError] = useState<ApiError | Error | null>(null);
+  const [busy, setBusy] = useState(false);
 
-  const accept = useCallback(
-    (t: Task) => {
-      const prev = prevStatus.current;
-      const wasLive = prev === "RUNNING" || prev === "PLANNING";
-      if (wasLive && t.status === "COMPLETED" && !celebrated.current) {
-        celebrated.current = true;
-        confetti();
-        toast("Your work is ready");
-        window.scrollTo({ top: 0, behavior: "smooth" });
-      }
-      if (wasLive && (t.status === "FAILED" || t.status === "REFUNDED")) {
-        toast.error("A step failed. You've been refunded automatically.");
-        refresh(); // pick up the refunded balance in the header
-      }
-      prevStatus.current = t.status;
+  const load = useCallback(async () => {
+    try {
+      const { task: t } = await api.getLegacyReport(id);
       setTask(t);
-    },
-    [toast, refresh]
-  );
-
-  // Keep polling while the team works, and while a follow-up revision is being written.
-  const live = !task || isLive(task) || hasPendingRevision(task);
-  usePolling(
-    async () => {
-      try {
-        const { task: t } = await api.getTask(id);
-        setError(null);
-        accept(t);
-        return isLive(t) || hasPendingRevision(t);
-      } catch (e) {
-        const ae = e instanceof ApiError ? e : new ApiError("Something went wrong", 500);
-        setError(ae);
-        return !(ae.status === 404 || ae.status === 403 || ae.status === 400);
-      }
-    },
-    2000,
-    { enabled: live && !(error && (error.status === 404 || error.status === 403 || error.status === 400)) }
-  );
-
-  // Tab title shows live progress, e.g. "(2/4) Market sizing · Ensemblis".
-  useEffect(() => {
-    if (!task) return;
-    const done = task.steps.filter((s) => s.status === "COMPLETED").length;
-    const prefix = isLive(task)
-      ? `(${done}/${task.steps.length}) `
-      : hasPendingRevision(task)
-        ? "Refining · "
-        : task.status === "COMPLETED"
-          ? "✓ "
-          : "";
-    const before = document.title;
-    document.title = `${prefix}${task.title} · Ensemblis`;
-    return () => {
-      document.title = before;
-    };
-  }, [task]);
-
-  if (!task) {
-    if (error && (error.status === 404 || error.status === 403 || error.status === 400)) {
-      return (
-        <div className="narrow" style={{ padding: "56px 0" }}>
-          <EmptyState icon="list" title="Task not found" action={{ label: "Go to My work", href: ROUTES.tasks }}>
-            This task doesn&apos;t exist or belongs to another account.
-          </EmptyState>
-        </div>
-      );
+      setError(null);
+    } catch (e) {
+      setError(e as Error);
     }
+  }, [id]);
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  if (error) {
+    const missing = error instanceof ApiError && [403, 404].includes(error.status);
     return (
-      <>
-        {error && (
-          <div className="wrap" style={{ paddingTop: 20 }}>
-            <div className="notice" role="alert">
-              <Icon name="alert" />
-              <span>{error.message} Retrying automatically…</span>
-            </div>
-          </div>
-        )}
-        <PageSkeleton />
-      </>
+      <div className="narrow" style={{ padding: "56px 0" }}>
+        <EmptyState icon="file" title={missing ? "Report not found" : "Couldn't load this report"} action={{ label: "Back to objectives", href: `${ROUTES.objectives}?group=earlier` }}>
+          {missing ? "It may belong to another organization, or the link is incomplete." : error.message}
+        </EmptyState>
+      </div>
     );
   }
+  if (!task) return <PageSkeleton cards={2} />;
 
-  if (task.status === "COMPLETED") return <ResultView task={task} onTask={accept} />;
-  if (task.status === "FAILED" || task.status === "REFUNDED") return <FailedView task={task} onTask={accept} />;
-  return <RunView task={task} stale={!!error} />;
+  const latest = [...(task.revisions ?? [])].filter((r) => r.status === "COMPLETED" && r.result).sort((a, b) => b.version - a.version)[0];
+  const markdown = latest?.result ?? task.result ?? "";
+  const title = reportTitle(markdown) || task.title;
+  const shareUrl = task.shareToken && typeof window !== "undefined" ? `${window.location.origin}${ROUTES.sharedReport(task.shareToken)}` : null;
+
+  const toggleShare = async () => {
+    setBusy(true);
+    try {
+      const { task: t } = await api.shareLegacyReport(task.id, !task.shareToken);
+      setTask((cur) => (cur ? { ...cur, shareToken: t.shareToken } : cur));
+      if (t.shareToken) {
+        await navigator.clipboard?.writeText(`${window.location.origin}${ROUTES.sharedReport(t.shareToken)}`).catch(() => undefined);
+        toast("Public link created and copied");
+      } else toast("Public link turned off");
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="wrap" style={{ paddingBottom: 48 }}>
+      <div className="pagehead">
+        <Link href={`${ROUTES.objectives}?group=earlier`} className="small muted">
+          ← Earlier reports
+        </Link>
+        <div className="row wrapflex" style={{ gap: 8, marginTop: 10 }}>
+          <span className="tag gray">Earlier report · read-only</span>
+          {task.category && <span className="tag gray">{task.category}</span>}
+          {latest && latest.version > 1 && <span className="tag gray">Version {latest.version}</span>}
+        </div>
+        <h1 style={{ marginTop: 10 }}>{title}</h1>
+        <p className="small muted">
+          {task.createdBy.name} · {longDate(task.completedAt ?? task.createdAt)} · {eur(task.costCents, { decimals: true })}
+        </p>
+      </div>
+
+      <div className="banner-info" style={{ marginBottom: 16 }}>
+        <Icon name="info" size={15} />
+        <span className="small">
+          This report was produced before objectives existed, so it has no success criteria or verification. To build on it,{" "}
+          <Link href={ROUTES.newObjective} style={{ color: "var(--accent)", fontWeight: 600 }}>
+            define an outcome
+          </Link>
+          .
+        </span>
+      </div>
+
+      {task.status !== "COMPLETED" || !markdown.trim() ? (
+        <EmptyState icon="alert" title="No report was produced">
+          {task.errorMessage ?? "This run didn't finish. Any charge for it was refunded."}
+        </EmptyState>
+      ) : (
+        <>
+          <div className="row wrapflex" style={{ gap: 8, marginBottom: 14 }}>
+            <ExportMenu title={title} markdown={markdown} sources={task.sources} meta={{ date: task.completedAt, depth: task.depth, agent: null, version: latest?.version ?? 1, label: "Report" }} />
+            {shareUrl && (
+              <a className="btn sm" href={shareUrl} target="_blank" rel="noopener noreferrer">
+                <Icon name="ext" /> Public page
+              </a>
+            )}
+            <button type="button" className="btn sm" onClick={toggleShare} aria-busy={busy} disabled={busy}>
+              <Icon name="share" />
+              {task.shareToken ? "Stop sharing" : "Share"}
+            </button>
+          </div>
+          <ReportView markdown={markdown} sources={task.sources} />
+        </>
+      )}
+    </div>
+  );
 }

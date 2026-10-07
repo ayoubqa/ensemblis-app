@@ -19,6 +19,7 @@ import { DEFAULT_TOOL_GRANTS, deniedToolsFor } from "../org/policy";
 import { getCapability, getExecutive, type Capability } from "../org/registry";
 import { allowedLinkDomains, buildSourcesBlock, citationRules, cleanOutput, stripPreamble } from "../research/citations";
 import { research } from "../research/sources";
+import { searchEnabled } from "../research/search";
 import { clip, domainOf } from "../research/text";
 import { addEvidence, loadEvidence, toPromptSources, type EvidenceDraft } from "./evidence";
 import { emitNow } from "./events";
@@ -203,7 +204,7 @@ async function gatherEvidence(input: StepRunInput, cap: Capability, companyProfi
   }
   let found = drafts.length ? await addEvidence({ executionId: execution.id, orgId: execution.orgId, stepId: step.id, drafts }) : [];
 
-  if (cap.tools.includes("web_research") && cap.kind !== "synthesis") {
+  if (cap.tools.includes("web_research") && cap.kind !== "synthesis" && searchEnabled()) {
     const queryCount = cap.kind === "research" ? 3 : 2;
     const existing = await loadEvidence(execution.id);
     await emitNow({

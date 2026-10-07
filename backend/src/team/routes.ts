@@ -81,7 +81,7 @@ export async function loadTeamDetail(teamId: string, viewerId: string) {
       email: isOwner || m.userId === viewerId ? m.user.email : "",
       role: m.role,
       joinedAt: m.joinedAt.toISOString(),
-      tasksThisMonth: perUser.get(m.userId) ?? 0,
+      objectivesThisMonth: perUser.get(m.userId) ?? 0,
     }));
 
   return {

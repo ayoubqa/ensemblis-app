@@ -17,10 +17,10 @@ export function useLatest<T>(value: T) {
 /**
  * Calls `fn` every `intervalMs` while `enabled`. Pauses while the tab is hidden
  * and fires immediately when it becomes visible again. Return `false` from `fn`
- * (sync or async) to stop polling, e.g. once a task finished.
+ * (sync or async) to stop polling, e.g. once an execution finished.
  *
- *   usePolling(async () => { const { task } = await api.getTask(id); setTask(task);
- *     return task.status === "RUNNING" || task.status === "PLANNING"; }, 2000);
+ *   usePolling(async () => { const { objective } = await api.getObjective(id); setObjective(objective);
+ *     return objective.status === "RUNNING"; }, 2000);
  */
 export function usePolling(
   fn: () => unknown | Promise<unknown>,

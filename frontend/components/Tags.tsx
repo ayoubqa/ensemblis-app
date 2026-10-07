@@ -1,12 +1,12 @@
 "use client";
 
 import type { ReactNode } from "react";
-import type { Outcome, TaskStatus, TaskStep } from "@/lib/api";
+import type { ClaimStatus, CriterionResult, ExecutionStatus, ObjectiveStatus, OutcomeStatus, RiskLevel, StepStatus, VerificationStatus } from "@/lib/api";
 import { Icon, type IconName } from "./Icon";
 
 export type TagVariant = "accent" | "ok" | "warn" | "bad" | "gray";
 
-/** `.tag` pill. variant accent = default violet. */
+/** `.tag` pill. variant accent = default (electric blue). */
 export function Tag({ variant = "accent", icon, children, title, className }: { variant?: TagVariant; icon?: IconName; children: ReactNode; title?: string; className?: string }) {
   const cls = ["tag", variant !== "accent" && variant, className].filter(Boolean).join(" ");
   return (
@@ -17,122 +17,120 @@ export function Tag({ variant = "accent", icon, children, title, className }: { 
   );
 }
 
-/** Prototype `ver()`: verified → green shield "Verified"; otherwise amber "Identity verified". */
-export function VerifiedTag({ verified, compact }: { verified: boolean; compact?: boolean }) {
-  if (compact) {
-    return verified ? (
-      <span style={{ color: "var(--ok)", display: "inline-flex" }} title="Verified">
-        <Icon name="shield" label="Verified" />
-      </span>
-    ) : null;
-  }
-  return verified ? (
-    <span className="tag ok" title="Identity, capabilities and history verified">
-      <Icon name="shield" />
-      Verified
-    </span>
-  ) : (
-    <span className="tag warn" title="Identity verified; capabilities still under review">
-      Identity verified
-    </span>
-  );
-}
-
-const TASK_STATUS: Record<TaskStatus, { label: string; variant: TagVariant; live?: boolean }> = {
+const STATUS: Record<ObjectiveStatus, { label: string; variant: TagVariant; live?: boolean }> = {
+  DRAFT: { label: "Draft", variant: "gray" },
   PLANNING: { label: "Planning", variant: "accent", live: true },
+  PLANNED: { label: "Planned", variant: "accent" },
+  WAITING_FOR_APPROVAL: { label: "Awaiting approval", variant: "warn" },
   RUNNING: { label: "Running", variant: "accent", live: true },
+  BLOCKED: { label: "Needs attention", variant: "warn" },
+  VERIFYING: { label: "Verifying", variant: "accent", live: true },
   COMPLETED: { label: "Completed", variant: "ok" },
   FAILED: { label: "Failed", variant: "bad" },
-  REFUNDED: { label: "Refunded", variant: "gray" },
+  CANCELLED: { label: "Cancelled", variant: "gray" },
 };
 
-export function taskStatusLabel(s: TaskStatus): string {
-  return TASK_STATUS[s]?.label ?? s;
+export function statusLabel(s: ObjectiveStatus | ExecutionStatus): string {
+  return STATUS[s]?.label ?? s;
 }
 
-/** Task status → tag (running/planning get a live pulse). */
-export function StatusTag({ status, label }: { status: TaskStatus; label?: string }) {
-  const m = TASK_STATUS[status] ?? { label: status, variant: "gray" as TagVariant };
+export function isLiveStatus(s: ObjectiveStatus | ExecutionStatus | undefined | null): boolean {
+  return !!s && !!STATUS[s]?.live;
+}
+
+/** Objective / execution status (running states get a live pulse). */
+export function StatusTag({ status }: { status: ObjectiveStatus | ExecutionStatus }) {
+  const m = STATUS[status] ?? { label: status, variant: "gray" as TagVariant };
   return (
-    <span className={["tag", m.variant !== "accent" && m.variant].filter(Boolean).join(" ")}>
+    <span className={["tag", m.variant !== "accent" && m.variant].filter(Boolean).join(" ")} data-status={status}>
       {m.live && <span className="pulse" aria-hidden="true" />}
-      {label ?? m.label}
+      {m.label}
     </span>
   );
 }
 
-const STEP_STATUS: Record<TaskStep["status"], { label: string; variant: TagVariant }> = {
-  QUEUED: { label: "Queued", variant: "gray" },
+const STEP: Record<StepStatus, { label: string; variant: TagVariant }> = {
+  PENDING: { label: "Waiting", variant: "gray" },
   RUNNING: { label: "Working", variant: "accent" },
   COMPLETED: { label: "Done", variant: "ok" },
   FAILED: { label: "Failed", variant: "bad" },
+  SKIPPED: { label: "Skipped", variant: "gray" },
 };
 
-/** Task step status → tag ("Queued" / "Working" / "Done" / "Failed"), as in the run lanes. */
-export function StepStatusTag({ status }: { status: TaskStep["status"] }) {
-  const m = STEP_STATUS[status];
-  return <Tag variant={m.variant}>{m.label}</Tag>;
-}
-
-/** Outcome feedback → tag. null renders a muted dash. */
-export function OutcomeTag({ outcome }: { outcome: Outcome | null }) {
-  if (!outcome) return <span className="muted">—</span>;
-  const v: TagVariant = outcome === "Achieved" ? "ok" : outcome === "Partially" ? "warn" : "bad";
-  return <Tag variant={v}>{outcome}</Tag>;
-}
-
-/** Compact read-only rating: ★ 4.8 (optionally "/5"). */
-export function Rating({ value, outOf, className }: { value: number; outOf?: boolean; className?: string }) {
+export function StepStatusTag({ status }: { status: StepStatus }) {
+  const m = STEP[status];
   return (
-    <span className={className ? `rating ${className}` : "rating"} aria-label={`Rated ${value.toFixed(1)} out of 5`}>
-      <Icon name="star" />
-      {value.toFixed(1)}
-      {outOf && <span className="muted" style={{ fontWeight: 500 }}>/5</span>}
+    <span className={["tag", m.variant !== "accent" && m.variant].filter(Boolean).join(" ")}>
+      {status === "RUNNING" && <span className="pulse" aria-hidden="true" />}
+      {m.label}
     </span>
   );
 }
 
-/**
- * Five-star input (`.stars`) — pass `onChange` to make it interactive,
- * omit it for a read-only display.
- */
-export function Stars({ value, onChange, label = "Rating" }: { value: number; onChange?: (n: number) => void; label?: string }) {
-  if (!onChange) {
-    const full = Math.round(value);
-    return (
-      <span className="stars ro" role="img" aria-label={`${value} out of 5 stars`}>
-        {[1, 2, 3, 4, 5].map((n) => (
-          <span key={n} className={n <= full ? "on" : ""} aria-hidden="true">
-            ★
-          </span>
-        ))}
-      </span>
-    );
-  }
+const OUTCOME: Record<OutcomeStatus, { label: string; variant: TagVariant; icon: IconName }> = {
+  ACHIEVED: { label: "Achieved", variant: "ok", icon: "check" },
+  PARTIALLY_ACHIEVED: { label: "Partially achieved", variant: "warn", icon: "flag" },
+  NOT_ACHIEVED: { label: "Not achieved", variant: "bad", icon: "x" },
+  UNKNOWN: { label: "Not measured", variant: "gray", icon: "info" },
+};
+
+export function outcomeLabel(o: OutcomeStatus | null | undefined): string {
+  return o ? OUTCOME[o].label : "—";
+}
+
+export function OutcomeTag({ outcome }: { outcome: OutcomeStatus | null | undefined }) {
+  if (!outcome) return null;
+  const m = OUTCOME[outcome];
+  return <Tag variant={m.variant} icon={m.icon}>{m.label}</Tag>;
+}
+
+const VERIFY: Record<VerificationStatus, { label: string; variant: TagVariant }> = {
+  PASS: { label: "Verified", variant: "ok" },
+  PASS_WITH_WARNINGS: { label: "Verified with warnings", variant: "warn" },
+  FAIL: { label: "Failed verification", variant: "bad" },
+};
+
+export function VerificationTag({ status, score }: { status: VerificationStatus | null | undefined; score?: number | null }) {
+  if (!status) return null;
+  const m = VERIFY[status];
   return (
-    <div className="stars" role="radiogroup" aria-label={label}>
-      {[1, 2, 3, 4, 5].map((n) => (
-        <button
-          key={n}
-          type="button"
-          role="radio"
-          aria-checked={value === n}
-          aria-label={`${n} star${n > 1 ? "s" : ""}`}
-          className={value >= n ? "on" : ""}
-          onClick={() => onChange(n)}
-          onKeyDown={(e) => {
-            if (e.key === "ArrowRight" || e.key === "ArrowUp") {
-              e.preventDefault();
-              onChange(Math.min(5, (value || 0) + 1));
-            } else if (e.key === "ArrowLeft" || e.key === "ArrowDown") {
-              e.preventDefault();
-              onChange(Math.max(1, (value || 1) - 1));
-            }
-          }}
-        >
-          ★
-        </button>
-      ))}
-    </div>
+    <Tag variant={m.variant} icon="shield">
+      {m.label}
+      {score != null ? ` · ${score}` : ""}
+    </Tag>
   );
+}
+
+const CRITERION: Record<CriterionResult, { label: string; variant: TagVariant }> = {
+  MET: { label: "Met", variant: "ok" },
+  PARTIALLY_MET: { label: "Partially met", variant: "warn" },
+  NOT_MET: { label: "Not met", variant: "bad" },
+  UNKNOWN: { label: "Not assessed", variant: "gray" },
+};
+
+export function CriterionTag({ result }: { result: CriterionResult }) {
+  const m = CRITERION[result];
+  return <Tag variant={m.variant}>{m.label}</Tag>;
+}
+
+const CLAIM: Record<ClaimStatus, { label: string; variant: TagVariant; title: string }> = {
+  SUPPORTED: { label: "Supported", variant: "ok", title: "The cited evidence contains this claim's figures and key terms." },
+  PARTIALLY_SUPPORTED: { label: "Partly supported", variant: "warn", title: "Only part of the claim appears in the cited evidence." },
+  UNSUPPORTED: { label: "Not found in evidence", variant: "bad", title: "The cited evidence doesn't contain this claim." },
+  UNCITED: { label: "Uncited figure", variant: "warn", title: "A specific figure with no citation and no estimate label." },
+  ESTIMATE: { label: "Estimate", variant: "gray", title: "Labelled as an estimate." },
+};
+
+export function ClaimTag({ status }: { status: ClaimStatus }) {
+  const m = CLAIM[status];
+  return (
+    <span className={["tag", m.variant].join(" ")} title={m.title}>
+      {m.label}
+    </span>
+  );
+}
+
+export function RiskTag({ risk }: { risk: RiskLevel }) {
+  const v: TagVariant = risk === "HIGH" ? "bad" : risk === "MEDIUM" ? "warn" : "ok";
+  return <Tag variant={v}>{risk === "HIGH" ? "High risk" : risk === "MEDIUM" ? "Medium risk" : "Low risk"}</Tag>;
 }

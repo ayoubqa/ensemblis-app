@@ -190,7 +190,8 @@ export function mockLLM(system: string, user: string, opts: LLMOptions): string 
         ],
       });
     case "suggest": {
-      const t = (/"""\n?([\s\S]*?)\n?"""/.exec(user)?.[1] ?? "").trim().split("\n")[0].slice(0, 80) || "Objective";
+      const line = (/"""\n?([\s\S]*?)\n?"""/.exec(user)?.[1] ?? "").trim().split("\n")[0].replace(/[.!?]+$/, "");
+      const t = (line.length > 90 ? `${line.slice(0, 88).replace(/\s+\S*$/, "")}…` : line) || "Objective";
       return JSON.stringify({
         title: t.charAt(0).toUpperCase() + t.slice(1),
         criteria: [

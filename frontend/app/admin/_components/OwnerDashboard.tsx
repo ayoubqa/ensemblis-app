@@ -10,12 +10,11 @@ import { usePolling } from "@/lib/hooks";
 import { ROUTES } from "@/lib/routes";
 import { compact, dayLabelUTC, sumDays, usageTone } from "./adminFormat";
 import { DailyBars } from "./DailyBars";
-import { GalleryManager } from "./GalleryManager";
 
 const REFRESH_MS = 60_000;
 
 /** The real owner dashboard (ADMIN_EMAILS only). Reads GET /api/admin/overview. */
-export function OwnerDashboard({ onPreviewDemo }: { onPreviewDemo: () => void }) {
+export function OwnerDashboard() {
   const toast = useToast();
   const [data, setData] = useState<AdminOverview | null>(null);
   const [error, setError] = useState<unknown>(null);
@@ -52,7 +51,7 @@ export function OwnerDashboard({ onPreviewDemo }: { onPreviewDemo: () => void })
     return () => clearInterval(t);
   }, []);
   useEffect(() => {
-    document.title = "Owner dashboard · Ensemblis";
+    document.title = "Operations · Ensemblis";
   }, []);
 
   const forbidden = error instanceof ApiError && (error.status === 403 || error.status === 401);
@@ -63,23 +62,20 @@ export function OwnerDashboard({ onPreviewDemo }: { onPreviewDemo: () => void })
         <div>
           <span className="tag ok">
             <span className="pulse" aria-hidden="true" />
-            Owner dashboard · live data
+            Operations · live data
           </span>
-          <h1 style={{ marginTop: 12 }}>How Ensemblis is doing</h1>
+          <h1 style={{ marginTop: 12 }}>How this deployment is running</h1>
           <p>
             {data ? (
               <>
                 Updated <span title={dateTime(data.generatedAt)}>{relativeTime(data.generatedAt)}</span> · refreshes every minute. Days are counted in UTC.
               </>
             ) : (
-              "Usage, limits, money and quality for this deployment, at a glance."
+              "Executions, queue health, verification, AI usage and money for this deployment."
             )}
           </p>
         </div>
         <div className="row wrapflex">
-          <button type="button" className="btn ghost sm" onClick={onPreviewDemo} title="See the illustrative console that other visitors get">
-            Preview demo console
-          </button>
           <button type="button" className="btn" onClick={() => load(true)} aria-busy={refreshing} disabled={refreshing}>
             <Icon name="redo" />
             Refresh
@@ -92,7 +88,7 @@ export function OwnerDashboard({ onPreviewDemo }: { onPreviewDemo: () => void })
           <Icon name={forbidden ? "lock" : "alert"} />
           <div className="sp">
             {forbidden
-              ? "The server didn't recognise this account as an owner. Check that your email is listed in ADMIN_EMAILS on the backend, then sign in again."
+              ? "The server didn't recognise this account as an operator. Your email must be listed in ADMIN_EMAILS on the backend and verified."
               : data
                 ? `Couldn't refresh (${errorText(error)}). Showing data from ${relativeTime(data.generatedAt)}.`
                 : errorText(error, "Couldn't load the dashboard.")}
@@ -105,59 +101,80 @@ export function OwnerDashboard({ onPreviewDemo }: { onPreviewDemo: () => void })
         </div>
       )}
 
-      {!data ? error != null ? null : <DashboardSkeleton /> : <Body d={data} reload={() => load()} />}
+      {!data ? error != null ? null : <DashboardSkeleton /> : <Body d={data} />}
     </div>
   );
 }
 
 // ------------------------------------------------------------------ body
-function Body({ d, reload }: { d: AdminOverview; reload: () => Promise<void> }) {
+function Body({ d }: { d: AdminOverview }) {
   const users = d.users;
-  const tasks = d.tasks;
+  const ex = d.executions;
   const ai = d.ai;
   const search = d.search;
+  const q = d.queue;
   const signups14 = sumDays(users.signupsLast14d);
   const tokensToday = (ai.tokensInToday || 0) + (ai.tokensOutToday || 0);
-  const settled = tasks.completed + tasks.failed;
-  const successRate = settled ? Math.round((tasks.completed / settled) * 1000) / 10 : null;
+  const settled = ex.completed + ex.failed;
+  const successRate = settled ? Math.round((ex.completed / settled) * 1000) / 10 : null;
   const signupDays = users.signupsLast14d ?? [];
   const tokenDays = ai.tokensLast14d ?? [];
-  const topAgents = d.topAgents ?? [];
   const failures = d.recentFailures ?? [];
   const recentUsers = d.recentUsers ?? [];
-  const maxRuns = Math.max(1, ...topAgents.map((a) => a.runs));
+  const verified = ex.verification.pass + ex.verification.warnings + ex.verification.failedAccepted;
+  const queueStale = q.oldestQueuedSeconds > 120;
 
   return (
     <>
-      {/* KPI tiles */}
       <h2 className="sr-only">Today at a glance</h2>
       <div className="grid g4 keep2">
         <Tile icon="user" label="Users" value={num(users.total)} delta={signups14 ? `+${num(signups14)} in 14 days` : undefined}>
-          {num(users.guests)} guests · {num(users.developers)} developers
+          {num(users.organizations)} organizations · {num(users.guests)} guests
         </Tile>
         <Tile
           icon="zap"
-          label="Tasks today"
-          value={num(tasks.runsToday)}
-          of={tasks.dailyCapGlobal > 0 ? num(tasks.dailyCapGlobal) : undefined}
-          meter={{ used: tasks.runsToday, limit: tasks.dailyCapGlobal, label: "Tasks today against the global daily cap" }}
+          label="Executions today"
+          value={num(ex.runsToday)}
+          of={ex.dailyCapGlobal > 0 ? num(ex.dailyCapGlobal) : undefined}
+          meter={{ used: ex.runsToday, limit: ex.dailyCapGlobal, label: "Executions today against the global daily cap" }}
         >
-          {tasks.running > 0 ? (
+          {ex.inFlight > 0 ? (
             <span className="row" style={{ gap: 6, display: "inline-flex" }}>
               <i className="pulse" aria-hidden="true" />
-              {num(tasks.running)} running now
+              {num(ex.inFlight)} in flight · {num(ex.waiting)} waiting
             </span>
-          ) : tasks.dailyCapGlobal > 0 ? (
-            "against the global daily cap"
           ) : (
-            "No global daily cap set"
+            `${num(ex.waiting)} waiting on people`
           )}
         </Tile>
-        <Tile icon="spark" label="AI calls today" value={num(ai.callsToday)} flag={ai.failuresToday > 0 ? { tone: "bad", text: `${num(ai.failuresToday)} failed` } : undefined}>
-          {ai.providerLabel || "AI provider"}
+        <Tile
+          icon="layers"
+          label="Job queue"
+          value={num(q.queued)}
+          flag={q.deadLast24h > 0 ? { tone: "bad", text: `${num(q.deadLast24h)} dead (24h)` } : queueStale ? { tone: "warn", text: "Backlog" } : undefined}
+        >
+          {num(q.running)} running · oldest queued {q.queued ? `${num(q.oldestQueuedSeconds)}s` : "—"}
         </Tile>
-        <Tile icon="layers" label="AI tokens today" value={compact(tokensToday)}>
-          {compact(ai.tokensInToday)} in · {compact(ai.tokensOutToday)} out
+        <Tile
+          icon="alert"
+          label="Needs people"
+          value={num(ex.pendingApprovals + ex.openExceptions)}
+        >
+          {plural(ex.pendingApprovals, "pending approval")} · {plural(ex.openExceptions, "open exception")}
+        </Tile>
+        <Tile
+          icon="check"
+          label="Execution success"
+          value={pct(successRate)}
+          flag={successRate !== null && successRate < 80 && settled >= 5 ? { tone: "warn", text: "Below 80%" } : undefined}
+        >
+          {num(ex.completed)} completed · {num(ex.failed)} failed · {num(ex.cancelled)} cancelled
+        </Tile>
+        <Tile icon="shield" label="Verification" value={verified ? pct(Math.round((ex.verification.pass / verified) * 1000) / 10) : "—"}>
+          {num(ex.verification.pass)} pass · {num(ex.verification.warnings)} with warnings · {num(ex.verification.failedAccepted)} failed & accepted
+        </Tile>
+        <Tile icon="spark" label="AI calls today" value={num(ai.callsToday)} flag={ai.failuresToday > 0 ? { tone: "bad", text: `${num(ai.failuresToday)} failed` } : undefined}>
+          {ai.providerLabel || "AI provider"} · {compact(tokensToday)} tokens
         </Tile>
         <Tile
           icon="globe"
@@ -169,22 +186,19 @@ function Body({ d, reload }: { d: AdminOverview; reload: () => Promise<void> }) 
           {num(search.callsThisMonth)} this month · {search.providerLabel || "Off"}
         </Tile>
         <Tile icon="mail" label="Emails today" value={d.email.enabled ? num(d.email.sentToday) : "—"} flag={d.email.enabled ? undefined : { tone: "gray", text: "Email off" }}>
-          {d.email.enabled ? "Task-done notices and password resets" : "Set up email on the backend to send them"}
+          {d.email.enabled ? "Notifications, verification and password resets" : "Set up email on the backend to send them"}
         </Tile>
         <Tile icon="eur" label="Purchases" value={eur(d.money.purchasesCents)}>
           {plural(d.money.purchasesCount, "Stripe payment")} · {eur(d.money.demoTopupsCents)} demo top-ups
         </Tile>
-        <Tile
-          icon="check"
-          label="Task success"
-          value={pct(successRate)}
-          flag={successRate !== null && successRate < 80 && settled >= 5 ? { tone: "warn", text: "Below 80%" } : undefined}
-        >
-          {num(tasks.completed)} completed · {num(tasks.failed)} failed · {num(tasks.total)} total
+        <Tile icon="file" label="Earlier reports" value={num(ex.legacyTasks)}>
+          Read-only reports from before objectives
+        </Tile>
+        <Tile icon="flag" label="All executions" value={num(ex.total)}>
+          since this deployment started
         </Tile>
       </div>
 
-      {/* 14-day charts */}
       <h2 className="sr-only">Last 14 days</h2>
       <div className="grid g3" style={{ marginTop: 16, alignItems: "stretch" }}>
         <div className="card">
@@ -204,11 +218,11 @@ function Body({ d, reload }: { d: AdminOverview; reload: () => Promise<void> }) 
         </div>
         <div className="card">
           <div className="row between" style={{ gap: 8 }}>
-            <h3 style={{ margin: 0 }}>Tasks</h3>
+            <h3 style={{ margin: 0 }}>Executions</h3>
             <span className="tiny muted">last 14 days</span>
           </div>
           <div style={{ marginTop: 12 }}>
-            <DailyBars completed={tasks.completedLast14d ?? []} failed={tasks.failedLast14d ?? []} height={140} label="Completed and failed tasks per day, last 14 days" />
+            <DailyBars completed={ex.completedLast14d ?? []} failed={ex.failedLast14d ?? []} height={140} label="Completed and failed executions per day, last 14 days" />
           </div>
         </div>
         <div className="card">
@@ -228,74 +242,23 @@ function Body({ d, reload }: { d: AdminOverview; reload: () => Promise<void> }) 
         </div>
       </div>
 
-      {/* Agents + failures */}
       <div className="grid g2" style={{ marginTop: 16, alignItems: "start" }}>
-        <section className="card tight" aria-labelledby="h-top-agents" style={{ minWidth: 0 }}>
-          <div className="row between">
-            <h3 id="h-top-agents" style={{ margin: 0 }}>
-              Top agents
-            </h3>
-            <span className="tiny muted">by runs</span>
-          </div>
-          {topAgents.length === 0 ? (
-            <p className="small muted" style={{ marginTop: 10 }}>
-              No agent has run a real task yet.
-            </p>
-          ) : (
-            <div className="tw" style={{ marginTop: 10, border: 0 }}>
-              {/* Half-width card: let this 3-column table shrink (the global 560px minimum would hide "Achieved"). */}
-              <table style={{ minWidth: 0 }}>
-                <thead>
-                  <tr>
-                    <th>Agent</th>
-                    <th style={{ textAlign: "right" }}>Runs</th>
-                    <th style={{ textAlign: "right" }}>Achieved</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {topAgents.slice(0, 8).map((a) => (
-                    <tr key={a.agentId}>
-                      <td style={{ whiteSpace: "normal" }}>
-                        <div className="row" style={{ gap: 10 }}>
-                          <Avatar name={a.name} size="sm" />
-                          <div style={{ minWidth: 0, flex: 1 }}>
-                            <Link href={ROUTES.agent(a.agentId)} style={{ fontWeight: 600, color: "inherit" }}>
-                              {a.name}
-                            </Link>
-                            <div style={{ marginTop: 5, height: 5, maxWidth: 220, background: "var(--line)", borderRadius: 5, overflow: "hidden" }} aria-hidden="true">
-                              <i style={{ display: "block", height: "100%", width: `${(a.runs / maxRuns) * 100}%`, background: "var(--accent)", borderRadius: 5 }} />
-                            </div>
-                          </div>
-                        </div>
-                      </td>
-                      <td style={{ textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{num(a.runs)}</td>
-                      <td style={{ textAlign: "right", fontVariantNumeric: "tabular-nums" }} title={a.achievedRate === null ? "No ratings yet" : undefined}>
-                        {pct(a.achievedRate)}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </section>
-
         <section className="card tight" aria-labelledby="h-failures" style={{ minWidth: 0 }}>
           <div className="row between">
             <h3 id="h-failures" style={{ margin: 0 }}>
-              Recent failures
+              Recent failed executions
             </h3>
             {failures.length > 0 && <span className="tag bad">{num(failures.length)}</span>}
           </div>
           {failures.length === 0 ? (
             <p className="small muted row" style={{ marginTop: 10, gap: 8 }}>
               <Icon name="check" style={{ color: "var(--ok)" }} />
-              No failed tasks recently.
+              No failed executions recently.
             </p>
           ) : (
             <div style={{ marginTop: 4 }}>
               {failures.slice(0, 8).map((f) => (
-                <div key={f.taskId + f.at} className="lane" style={{ alignItems: "flex-start", padding: "10px 4px" }}>
+                <div key={f.executionId} className="lane" style={{ alignItems: "flex-start", padding: "10px 4px" }}>
                   <span style={{ color: "var(--bad)", flex: "none", marginTop: 2 }}>
                     <Icon name="alert" label="Failed" />
                   </span>
@@ -315,68 +278,45 @@ function Body({ d, reload }: { d: AdminOverview; reload: () => Promise<void> }) 
             </div>
           )}
         </section>
-      </div>
 
-      {/* Recent users */}
-      <section aria-labelledby="h-users" style={{ marginTop: 16 }}>
-        <div className="row between" style={{ marginBottom: 10 }}>
-          <h3 id="h-users" style={{ margin: 0 }}>
-            Recent users
-          </h3>
-          <span className="tiny muted">newest first</span>
-        </div>
-        {recentUsers.length === 0 ? (
-          <EmptyState icon="user" title="No users yet">
-            New accounts and guest trials will appear here.
-          </EmptyState>
-        ) : (
-          <div className="tw">
-            <table style={{ minWidth: 620 }}>
-              <thead>
-                <tr>
-                  <th>Name</th>
-                  <th>Email</th>
-                  <th>Type</th>
-                  <th>Joined</th>
-                  <th style={{ textAlign: "right" }}>Tasks</th>
-                </tr>
-              </thead>
-              <tbody>
-                {recentUsers.slice(0, 12).map((u) => (
-                  <tr key={u.id}>
-                    <td>
-                      <div className="row" style={{ gap: 8 }}>
-                        <Avatar name={u.isGuest ? "Guest" : u.name} size="xs" round />
-                        <b className="small">{u.isGuest ? "Guest" : u.name}</b>
-                      </div>
-                    </td>
-                    <td className="small" style={{ maxWidth: 240, overflow: "hidden", textOverflow: "ellipsis" }} title={u.email}>
-                      {u.isGuest ? <span className="muted">—</span> : u.email}
-                    </td>
-                    <td>
-                      {u.isGuest ? (
-                        <span className="tag warn">Guest</span>
-                      ) : (
-                        <span className={u.accountType === "DEVELOPER" ? "tag" : "tag gray"}>{u.accountType === "DEVELOPER" ? "Developer" : "Company"}</span>
-                      )}
-                    </td>
-                    <td className="small" title={dateTime(u.createdAt)}>
-                      {relativeTime(u.createdAt)}
-                    </td>
-                    <td style={{ textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{num(u.tasks)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+        <section className="card tight" aria-labelledby="h-users" style={{ minWidth: 0 }}>
+          <div className="row between">
+            <h3 id="h-users" style={{ margin: 0 }}>
+              Recent users
+            </h3>
+            <span className="tiny muted">newest first</span>
           </div>
-        )}
-      </section>
-
-      <GalleryManager shareable={d.shareableReports ?? []} gallery={d.gallery ?? []} onChanged={reload} />
+          {recentUsers.length === 0 ? (
+            <p className="small muted" style={{ marginTop: 10 }}>
+              No users yet.
+            </p>
+          ) : (
+            <div style={{ marginTop: 4 }}>
+              {recentUsers.slice(0, 10).map((u) => (
+                <div key={u.id} className="lane" style={{ padding: "8px 4px" }}>
+                  <Avatar name={u.isGuest ? "Guest" : u.name} size="xs" round />
+                  <div className="sp" style={{ minWidth: 0 }}>
+                    <b className="small">{u.isGuest ? "Guest" : u.name}</b>
+                    {!u.isGuest && (
+                      <div className="tiny muted" style={{ overflow: "hidden", textOverflow: "ellipsis" }} title={u.email}>
+                        {u.email}
+                      </div>
+                    )}
+                  </div>
+                  {u.isGuest ? <span className="tag warn">Guest</span> : u.verified ? <span className="tag ok">Verified</span> : <span className="tag gray">Unverified</span>}
+                  <span className="tiny muted" style={{ flex: "none", whiteSpace: "nowrap" }} title={dateTime(u.createdAt)}>
+                    {relativeTime(u.createdAt)}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+      </div>
 
       <p className="tiny muted" style={{ marginTop: 22 }}>
         Counts come straight from this deployment&apos;s database. “Today” and the 14-day charts use UTC days. Money: Stripe purchases are real payments;
-        demo top-ups are free credits.
+        demo top-ups are free balance.
       </p>
     </>
   );

@@ -73,7 +73,7 @@ export function shortDate(d: string | number | Date | null | undefined, now: Dat
   return t.toLocaleDateString("en-US", { month: "short", day: "numeric", ...(sameYear ? {} : { year: "numeric" }) });
 }
 
-/** "Today", "Yesterday" or "Sep 25" — matches the prototype's task tables. */
+/** "Today", "Yesterday" or "Sep 25" — used in tables and lists. */
 export function dayLabel(d: string | number | Date | null | undefined, now: Date = new Date()): string {
   if (!d) return "—";
   const t = toDate(d);
@@ -137,7 +137,7 @@ export function initials(name: string | null | undefined): string {
     .toUpperCase();
 }
 
-/** plural(3, "task") → "3 tasks" */
+/** plural(3, "objective") → "3 objectives" */
 export function plural(n: number, word: string, pluralWord?: string): string {
   return `${num(n)} ${n === 1 ? word : pluralWord || word + "s"}`;
 }

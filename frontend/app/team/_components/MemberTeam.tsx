@@ -38,20 +38,20 @@ export function MemberTeam({ team, setTeam }: { team: TeamDetail; setTeam: (t: T
       <div className="pagehead">
         <span className="tag gray">
           <Icon name="share" />
-          Team member
+          Organization member
         </span>
         <h1 style={{ marginTop: 12, overflowWrap: "anywhere" }}>{team.name}</h1>
         <p>
           Owned by <b style={{ color: "var(--ink)" }}>{team.owner.name}</b>
-          {me ? ` · you joined ${longDate(me.joinedAt)}` : ""}. Your tasks are paid from the team wallet, and the team can see what you run.
+          {me ? ` · you joined ${longDate(me.joinedAt)}` : ""}. Executions you start are paid from the organization wallet, and everyone in the organization can see the objectives.
         </p>
       </div>
 
       <div className="grid g3">
         <div className="card tight">
-          <div className="eyebrow">TEAM WALLET</div>
+          <div className="eyebrow">ORGANIZATION WALLET</div>
           <b style={{ fontSize: 30, display: "block", letterSpacing: "-.02em" }}>{eur(team.walletCents)}</b>
-          <div className="tiny muted">Managed by {team.owner.name}. Ask them to add credits when it runs low.</div>
+          <div className="tiny muted">Managed by {team.owner.name}. Ask them to add balance when it runs low.</div>
         </div>
         <div className="card tight">
           <div className="eyebrow">MEMBERS</div>
@@ -59,10 +59,10 @@ export function MemberTeam({ team, setTeam }: { team: TeamDetail; setTeam: (t: T
           <div className="tiny muted">including {team.owner.name} and you</div>
         </div>
         <div className="card tight">
-          <div className="eyebrow">YOUR TASKS THIS MONTH</div>
-          <b style={{ fontSize: 30, display: "block", letterSpacing: "-.02em" }}>{num(me?.tasksThisMonth ?? 0)}</b>
-          <Link className="btn sm" href={`${ROUTES.tasks}?scope=team`} style={{ marginTop: 10 }}>
-            View team tasks
+          <div className="eyebrow">YOUR OBJECTIVES THIS MONTH</div>
+          <b style={{ fontSize: 30, display: "block", letterSpacing: "-.02em" }}>{num(me?.objectivesThisMonth ?? 0)}</b>
+          <Link className="btn sm" href={ROUTES.objectives} style={{ marginTop: 10 }}>
+            View objectives
           </Link>
         </div>
       </div>
@@ -79,7 +79,7 @@ export function MemberTeam({ team, setTeam }: { team: TeamDetail; setTeam: (t: T
               </b>
               <div className="tiny muted" style={{ overflow: "hidden", textOverflow: "ellipsis" }}>
                 {m.email ? `${m.email} · ` : ""}
-                <span title={dateTime(m.joinedAt)}>joined {dayLabel(m.joinedAt)}</span> · {plural(m.tasksThisMonth, "task")} this month
+                <span title={dateTime(m.joinedAt)}>joined {dayLabel(m.joinedAt)}</span> · {plural(m.objectivesThisMonth, "objective")} this month
               </div>
             </div>
             {m.role === "OWNER" ? <span className="tag">Owner</span> : <span className="tag gray hideS">Member</span>}
@@ -91,7 +91,7 @@ export function MemberTeam({ team, setTeam }: { team: TeamDetail; setTeam: (t: T
       <div className="card" aria-labelledby="h-leave">
         <div className="row between wrapflex" style={{ gap: 12 }}>
           <p className="small muted" style={{ margin: 0, maxWidth: "62ch" }}>
-            You&apos;ll go back to your own balance and stop seeing the team&apos;s tasks. To rejoin later you&apos;ll need a new invite link from{" "}
+            You&apos;ll go back to your own organization and stop seeing this one&apos;s objectives. To rejoin later you&apos;ll need a new invite link from{" "}
             {team.owner.name}.
           </p>
           <button type="button" className="btn bad" onClick={() => setLeaving(true)}>
@@ -103,7 +103,7 @@ export function MemberTeam({ team, setTeam }: { team: TeamDetail; setTeam: (t: T
 
       <Modal open={leaving} onClose={() => !busy && setLeaving(false)} title={`Leave ${team.name}?`} dismissible={!busy}>
         <p className="muted small" style={{ margin: "6px 0 16px" }}>
-          You&apos;ll stop spending from the team wallet and lose access to the team&apos;s task history. You&apos;ll need a new invite to come back.
+          You&apos;ll stop spending from the team wallet and lose access to the organization&apos;s objectives and context. You&apos;ll need a new invite to come back.
         </p>
         <div className="row wrapflex">
           <button type="button" className="btn" onClick={() => setLeaving(false)} disabled={busy} data-autofocus>

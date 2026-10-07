@@ -66,7 +66,7 @@ router.get(
       policy: {
         granted: DEFAULT_TOOL_GRANTS,
         notGranted: TOOL_PERMISSION_LEVELS.filter((p) => !DEFAULT_TOOL_GRANTS.includes(p)),
-        note: "Agents research, analyse, draft and recommend. They never send email, publish, change external systems or spend money.",
+        note: "The AI Team researches, analyses, drafts and recommends. It never sends email, publishes, changes external systems or spends money.",
       },
     });
   })

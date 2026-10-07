@@ -44,12 +44,12 @@ export function inviteUrl(token: string): string {
   return `${origin}/join/${encodeURIComponent(token)}`;
 }
 
-/** Explainer tiles: what a team means (shared wallet, shared history, control). */
+/** Explainer tiles: what organization membership means. */
 export function TeamExplainer({ compact }: { compact?: boolean }) {
   const items: [IconName, string, string][] = [
-    ["wallet", "One shared wallet", "The team spends from the owner's balance. Members never need their own credits."],
-    ["list", "Shared task history", "Everyone sees the team's tasks under My work → Team, with who started each one."],
-    ["lock", "Owner stays in control", "Invite with expiring links, remove people any time, or dissolve the team."],
+    ["wallet", "One organization wallet", "Executions are paid from the owner's balance. Members never need their own."],
+    ["list", "Shared objectives & context", "Everyone works from the same Company Context, memory, objectives and AI Team."],
+    ["lock", "Owner stays in control", "The owner sets the approval policy, invites with expiring links and can remove people any time."],
   ];
   return (
     <div className="grid g3" style={{ gap: 10, margin: compact ? "12px 0" : "20px 0" }}>

@@ -10,7 +10,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   if (!data?.report) {
     return {
       title: "Shared report",
-      description: "A report produced by a team of AI agents on Ensemblis.",
+      description: "A verified result produced by an AI Team on Ensemblis.",
       robots: { index: false, follow: false },
     };
   }
@@ -18,7 +18,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
     title: data.report.title,
     markdown: data.report.result,
     kicker: "Shared report",
-    fallbackDescription: "A report produced by a team of AI agents on Ensemblis.",
+    fallbackDescription: "A verified result produced by an AI Team on Ensemblis.",
     // Shared links are unlisted: previews work, search engines stay out.
     noindex: true,
   });

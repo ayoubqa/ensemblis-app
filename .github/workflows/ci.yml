@@ -1,0 +1,114 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend — lint, typecheck, tests, build
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: ensemblis
+          POSTGRES_PASSWORD: ensemblis
+          POSTGRES_DB: ensemblis
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U ensemblis" --health-interval 5s --health-timeout 5s --health-retries 10
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      TEST_DATABASE_URL: postgresql://ensemblis:ensemblis@localhost:5432/ensemblis_test?schema=public
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci
+      - run: npx prisma generate
+      - run: npm run lint
+      - run: npm run typecheck
+      # Migrations must match the schema exactly (no drift between schema.prisma and migrations/).
+      - name: Migrations are in sync with the schema
+        run: |
+          PGPASSWORD=ensemblis psql -h localhost -U ensemblis -d postgres -c 'CREATE DATABASE ensemblis_shadow'
+          npx prisma migrate diff --from-migrations prisma/migrations --to-schema-datamodel prisma/schema.prisma \
+            --shadow-database-url "postgresql://ensemblis:ensemblis@localhost:5432/ensemblis_shadow" --exit-code
+      - run: npm test
+      - run: npm run build
+
+  frontend:
+    name: Frontend — lint, typecheck, unit tests, build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+        env:
+          NEXT_TELEMETRY_DISABLED: "1"
+
+  e2e:
+    name: End-to-end (Playwright)
+    runs-on: ubuntu-latest
+    needs: [backend, frontend]
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: ensemblis
+          POSTGRES_PASSWORD: ensemblis
+          POSTGRES_DB: ensemblis
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U ensemblis" --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      CI: "true"
+      NEXT_TELEMETRY_DISABLED: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: |
+            backend/package-lock.json
+            frontend/package-lock.json
+      - name: Build backend
+        working-directory: backend
+        run: npm ci && npm run build
+      - name: Install frontend + Chromium
+        working-directory: frontend
+        run: npm ci && npx playwright install --with-deps chromium
+      - name: Run E2E
+        working-directory: frontend
+        run: npm run e2e
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: |
+            frontend/playwright-report
+            frontend/test-results
+          retention-days: 7

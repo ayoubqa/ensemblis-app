@@ -9,11 +9,11 @@ export function PrivacyView() {
     <LegalPage
       title="Privacy Policy"
       other="terms"
-      intro="Ensemblis is a free public demo of an AI-agent marketplace, run by an individual based in Spain. This page explains, in plain language, what personal data it handles and what you can do about it."
+      intro="Ensemblis is a free public demo of an AI operating layer for business, run by an individual based in Spain. This page explains, in plain language, what personal data it handles and what you can do about it."
       summary={[
-        "We collect only what's needed to run the demo: your account details, the tasks you submit, the AI results, and your demo-credit history.",
+        "We collect only what's needed to run the demo: your account details, the objectives, Company Context and documents you provide, the AI results, and your usage history.",
         <>
-          The text of your tasks is sent to our AI provider (<AiProvider />) to generate results.
+          The text of your objectives — with the relevant Company Context, document passages and memory — is sent to our AI provider (<AiProvider />) to generate results.
         </>,
         "No advertising, no ad trackers, no selling of data. Your browser stores a login token so you stay signed in.",
         <>
@@ -41,7 +41,7 @@ export function PrivacyView() {
             <tbody>
               <tr>
                 <td>
-                  <b>Account details</b> — name, email, and optionally company, role, and (for developers) what your agents do
+                  <b>Account details</b> — name, email, and optionally company and role
                 </td>
                 <td>To create your account, sign you in and show your profile</td>
                 <td>Performing our agreement with you (Art. 6(1)(b))</td>
@@ -55,23 +55,23 @@ export function PrivacyView() {
               </tr>
               <tr>
                 <td>
-                  <b>Task content</b> — the descriptions you write, the plans and AI-generated outputs, your feedback, and recurring workflows you set up
+                  <b>Objective content</b> — objectives, success criteria, plans, AI-generated outputs, evidence, verification results, and recurring objectives you set up
                 </td>
-                <td>To run your tasks and show you the results</td>
+                <td>To run your objectives and show you the results</td>
                 <td>Art. 6(1)(b)</td>
               </tr>
               <tr>
                 <td>
-                  <b>Usage and credit records</b> — which tasks ran, when, their cost in demo credits, top-ups and refunds
+                  <b>Usage records</b> — which executions ran, when, their cost, top-ups and refunds
                 </td>
-                <td>To run the demo-credit system, apply fair-use limits and prevent abuse</td>
+                <td>To run the balance system, apply fair-use limits and prevent abuse</td>
                 <td>Art. 6(1)(b) and our legitimate interest in keeping the service working (Art. 6(1)(f))</td>
               </tr>
               <tr>
                 <td>
-                  <b>Agents you publish</b> (developers) — name, description, capabilities, pricing and instructions
+                  <b>Company Context and memory</b> — the business profile, documents and website you provide, and learnings you confirm
                 </td>
-                <td>To list your agent in the marketplace and run it. The listing is public; your agent&apos;s instructions are not shown to customers.</td>
+                <td>To ground your objectives in your business. Documents are treated as data, never as instructions to the AI.</td>
                 <td>Art. 6(1)(b)</td>
               </tr>
               <tr>
@@ -108,10 +108,10 @@ export function PrivacyView() {
             <b>Hosting provider</b> — serves the website and the application server.
           </li>
           <li>
-            <b>Database provider</b> — stores accounts, tasks, results and credit records.
+            <b>Database provider</b> — stores accounts, objectives, Company Context, memory, results and usage records.
           </li>
           <li>
-            <b>AI provider: <AiProvider /></b> — when you run a task, its description and the intermediate steps are sent to this provider so its models
+            <b>AI provider: <AiProvider /></b> — when an objective runs, its description, relevant context and the intermediate steps are sent to this provider so its models
             can generate the result. The provider processes that text under its own API terms.
           </li>
         </ul>
@@ -125,7 +125,7 @@ export function PrivacyView() {
 
       <Sec id="retention" title="5. How long we keep it">
         <ul>
-          <li>Account data, tasks and results are kept while your account exists.</li>
+          <li>Account data, objectives, Company Context, memory and results are kept while your account exists. You can edit or delete documents and memory items at any time.</li>
           <li>
             You can ask for your account and everything in it to be deleted at any time. We&apos;ll do it within 30 days; residual copies in backups expire
             on their normal cycle.

@@ -3,35 +3,15 @@
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useRef, useState, type FormEvent } from "react";
-import { Icon, RolePicker, useToast, type SignupRole } from "@/components";
+import { Icon, useToast } from "@/components";
 import { Turnstile, type TurnstileHandle } from "@/components/Turnstile";
 import { api, ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { errorText } from "@/lib/errors";
-import { PLATFORM_FEE_PERCENT } from "@/lib/data";
 import { useConfig } from "@/lib/config";
-import { eur, firstName } from "@/lib/format";
-import { ROUTES, loginUrl, safeNext, signupUrl } from "@/lib/routes";
+import { firstName } from "@/lib/format";
+import { ROUTES, loginUrl, safeNext } from "@/lib/routes";
 import { AuthShell, Divider, EMAIL_RE, Field, FormError, PasswordInput, StrengthMeter } from "../login/_components/AuthUI";
-
-const PERSONA = {
-  company: {
-    title: "You're hiring AI agents",
-    sub: "Confirm a few details — everything here is editable later in Settings.",
-    companyLabel: "Company",
-    companyPh: "Northstar Labs",
-    perk: "{credits} in demo credits preloaded",
-    perkIcon: "eur" as const,
-  },
-  developer: {
-    title: "You're building agents",
-    sub: "Confirm a few details — everything here is editable later in Settings.",
-    companyLabel: "Studio / team name",
-    companyPh: "DataLabs",
-    perk: `Earn ${100 - PLATFORM_FEE_PERCENT}% of every task your agents complete`,
-    perkIcon: "spark" as const,
-  },
-};
 
 type Errors = Partial<Record<"name" | "email" | "password" | "invite" | "terms" | "bot", string>>;
 
@@ -39,38 +19,21 @@ function SignupForm() {
   const params = useSearchParams();
   const router = useRouter();
   const toast = useToast();
-  const { user, loading, signIn, signOut, setUser, refresh } = useAuth();
+  const { user, loading, signIn, signOut, refresh } = useAuth();
   const next = params.get("next");
-  const typeParam = params.get("type");
-  const inviteParam = params.get("invite");
   const claimParam = params.get("claim") === "1";
   /** Set once a claim succeeds, so the page keeps its "save" wording while it redirects. */
   const [claimed, setClaimed] = useState(false);
   /** Signed in as a guest-trial account → this form saves the trial (api.claimAccount) instead of signing up. */
   const claim = !!user?.isGuest || claimed;
-  /** Keep ?invite= and ?claim= when moving between signup steps. */
-  const keepParams = (href: string) => {
-    const extra = new URLSearchParams();
-    if (inviteParam) extra.set("invite", inviteParam);
-    if (claimParam) extra.set("claim", "1");
-    const s = extra.toString();
-    return s ? `${href}${href.includes("?") ? "&" : "?"}${s}` : href;
-  };
   /** Set when the guest session turned out to be expired mid-claim — keep the form on screen. */
   const [lostTrial, setLostTrial] = useState(false);
-  // A trial being saved is a company account unless the visitor switches.
-  const role: SignupRole | null =
-    typeParam === "company" || typeParam === "developer" ? typeParam : claim || claimParam || lostTrial ? "company" : null;
-  const dev = role === "developer";
   const { config } = useConfig();
   const inviteRequired = config.inviteRequired && !claim;
   const botCheck = !!config.turnstileSiteKey && !claim;
 
   const [name, setName] = useState("");
   const [company, setCompany] = useState("");
-  const [jobRole, setJobRole] = useState("");
-  const [builds, setBuilds] = useState("");
-  const [firstTask, setFirstTask] = useState(params.get("q") || "");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [invite, setInvite] = useState(params.get("invite") || "");
@@ -88,13 +51,13 @@ function SignupForm() {
 
   // Real accounts don't need this page; guests stay to save their trial.
   useEffect(() => {
-    if (!loading && user && !user.isGuest && !done.current) router.replace(safeNext(next, user.accountType === "DEVELOPER" ? ROUTES.devDashboard : ROUTES.dashboard));
+    if (!loading && user && !user.isGuest && !done.current) router.replace(safeNext(next, ROUTES.dashboard));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loading, user]);
 
   useEffect(() => {
-    if (role && !loading) nameRef.current?.focus();
-  }, [role, loading]);
+    if (!loading) nameRef.current?.focus();
+  }, [loading]);
 
   const errors: Errors = {
     name: !name.trim() ? "Tell us your name" : undefined,
@@ -105,13 +68,11 @@ function SignupForm() {
     bot: botCheck && !tsToken ? "Complete the quick security check above" : undefined,
   };
   const show = (k: keyof Errors) => (submitted || touched[k]) && errors[k];
-  // Flag a field on blur only once it has content (empty ones are flagged on submit): an error appearing on
-  // mousedown would shift the links below and swallow the click.
+  // Flag a field on blur only once it has content (empty ones are flagged on submit).
   const blur = (k: string) => (e: { currentTarget: { value: string } }) => {
     if (e.currentTarget.value.trim()) setTouched((t) => ({ ...t, [k]: true }));
   };
 
-  // Until we know whether this visitor is a guest, don't flash the wrong form.
   if (loading) {
     return (
       <AuthShell>
@@ -120,36 +81,11 @@ function SignupForm() {
           <div className="sk" style={{ height: 14, width: "90%", marginTop: 12 }} />
           <div className="sk" style={{ height: 44, marginTop: 24 }} />
           <div className="sk" style={{ height: 44, marginTop: 14 }} />
-          <div className="sk" style={{ height: 44, marginTop: 14 }} />
         </div>
       </AuthShell>
     );
   }
 
-  if (!role) {
-    return (
-      <AuthShell wide>
-        <h1 className="serif" style={{ fontSize: 30, fontWeight: 600, letterSpacing: "-.03em" }}>
-          Welcome to Ensemblis
-        </h1>
-        <p className="muted" style={{ margin: "4px 0 22px" }}>
-          How will you use it today?
-        </p>
-        <RolePicker onPick={(r) => router.replace(keepParams(signupUrl(r, next)))} />
-        <p className="small muted" style={{ textAlign: "center", marginTop: 20 }}>
-          Already have an account?{" "}
-          <Link href={loginUrl(next)} style={{ color: "var(--accent)", fontWeight: 600 }}>
-            Log in
-          </Link>
-        </p>
-        <p className="tiny muted" style={{ textAlign: "center", marginTop: 8 }}>
-          This is a self-serve product demo. No payment is required either way.
-        </p>
-      </AuthShell>
-    );
-  }
-
-  const P = PERSONA[role];
   const ORDER = ["name", "email", "password", "invite", "terms"] as const;
 
   const submit = async (e: FormEvent) => {
@@ -171,8 +107,6 @@ function SignupForm() {
       password,
       name: name.trim(),
       company: company.trim() || undefined,
-      accountType: dev ? ("DEVELOPER" as const) : ("COMPANY" as const),
-      builds: dev ? builds.trim() || undefined : undefined,
       acceptedTerms: true as const,
     };
     try {
@@ -186,39 +120,20 @@ function SignupForm() {
       done.current = true;
       if (wasClaim) setClaimed(true);
       signIn(token, u);
-      if (!dev && jobRole.trim()) {
-        try {
-          const r = await api.updateMe({ role: jobRole.trim() });
-          setUser(r.user);
-        } catch {
-          /* non-blocking: role can be set later in Settings */
-        }
-      }
-      if (wasClaim) {
-        toast(`Your trial results are saved — welcome, ${firstName(u.name)}`, { icon: "check" });
-        router.push(safeNext(next, ROUTES.dashboard));
-        return;
-      }
-      toast(`Welcome to Ensemblis, ${firstName(u.name)}`);
-      setTimeout(
-        () => toast.info(dev ? "Your developer dashboard is ready — publish your first agent next." : `${eur(u.credits)} in demo credits preloaded — nothing is ever really charged.`, { icon: dev ? "spark" : "eur" }),
-        1400
-      );
-      const fallback = dev ? ROUTES.devDashboard : firstTask.trim() ? `${ROUTES.newTask}?q=${encodeURIComponent(firstTask.trim())}` : ROUTES.dashboard;
-      router.push(safeNext(next, fallback));
+      toast(wasClaim ? `Your trial work is saved — welcome, ${firstName(u.name)}` : `Welcome to Ensemblis, ${firstName(u.name)}`, { icon: "check" });
+      if (!u.emailVerified) setTimeout(() => toast.info("We sent you a link to verify your email address."), 1400);
+      router.push(safeNext(next, wasClaim ? ROUTES.dashboard : ROUTES.context));
     } catch (err) {
       setBusy(false);
       if (!wasClaim) ts.current?.reset(); // Turnstile tokens are single-use
       const status = err instanceof ApiError ? err.status : -1;
       if (wasClaim && status === 401) {
-        // The guest account is gone (trial expired) — nothing left to save.
         setLostTrial(true);
         signOut();
         setFormError("Your free trial has expired, so there's nothing left to save. You can still create a fresh account below.");
         return;
       }
       if (wasClaim && status === 409 && /already registered/i.test(errorText(err))) {
-        // Saved already (e.g. in another tab): pick up the real account.
         await refresh();
         toast("This trial is already saved to an account");
         router.push(safeNext(next, ROUTES.dashboard));
@@ -230,7 +145,6 @@ function SignupForm() {
         return;
       }
       if (!wasClaim && status === 403) {
-        // Invite missing/invalid, or signups closed on this demo — show the server's reason inline.
         const msg = errorText(err, "Signups need a valid invite code right now.");
         if (inviteRequired || invite.trim()) {
           setInviteError(msg);
@@ -242,33 +156,27 @@ function SignupForm() {
     }
   };
 
-  const other: SignupRole = dev ? "company" : "developer";
-  const title = claim ? "Save your trial results" : P.title;
-  const sub = claim
-    ? "Create your free account — your trial task and report come with you, nothing to redo."
-    : P.sub;
-
   return (
     <AuthShell>
-      <div key={`${role}-${claim ? "claim" : "new"}`} className="reveal">
+      <div className="reveal">
         {claim && (
           <span className="tag ok">
             <Icon name="check" />
             Free trial in progress
           </span>
         )}
-        <h1 className="serif" style={{ fontSize: 28, fontWeight: 600, letterSpacing: "-.03em", lineHeight: 1.1, marginTop: claim ? 10 : 0 }}>
-          {title}
+        <h1 style={{ fontSize: 28, fontWeight: 650, letterSpacing: "-.03em", lineHeight: 1.1, marginTop: claim ? 10 : 0 }}>
+          {claim ? "Save your trial work" : "Create your organization"}
         </h1>
         <p className="muted" style={{ margin: "4px 0 4px" }}>
-          {sub}
+          {claim
+            ? "Create your account — your trial objective and its results come with you."
+            : "Your AI Team — a Chief of Staff and four executives — is ready as soon as you sign up."}
         </p>
         {claimParam && !claim && !lostTrial && (
           <div className="notice" style={{ marginTop: 12, background: "var(--surface2)", color: "var(--muted)" }}>
             <Icon name="info" />
-            <span>
-              We couldn&apos;t find a free-trial session in this browser, so this creates a new account. Trial results stay in the browser where the trial was started.
-            </span>
+            <span>We couldn&apos;t find a free-trial session in this browser, so this creates a new account.</span>
           </div>
         )}
         <form onSubmit={submit} noValidate>
@@ -283,36 +191,13 @@ function SignupForm() {
               onBlur={blur("name")}
               aria-invalid={!!show("name")}
               aria-describedby={show("name") ? "su-name-err" : undefined}
-              placeholder={dev ? "Jordan Lee" : "Alex Morgan"}
+              placeholder="Alex Morgan"
               maxLength={120}
             />
           </Field>
-          <Field id="su-company" label={P.companyLabel} optional>
-            <input id="su-company" className="f" autoComplete="organization" value={company} onChange={(e) => setCompany(e.target.value)} placeholder={P.companyPh} maxLength={160} />
+          <Field id="su-company" label="Company" optional hint="Names your organization and starts your Company Context.">
+            <input id="su-company" className="f" autoComplete="organization" value={company} onChange={(e) => setCompany(e.target.value)} placeholder="Northstar Labs" maxLength={160} />
           </Field>
-          {dev ? (
-            <Field id="su-builds" label="What do your agents do?" optional hint="Shown on your developer profile.">
-              <input
-                id="su-builds"
-                className="f"
-                value={builds}
-                onChange={(e) => setBuilds(e.target.value)}
-                placeholder="e.g. Competitive intelligence, lead research…"
-                maxLength={500}
-              />
-            </Field>
-          ) : (
-            <>
-              <Field id="su-role" label="Your role" optional>
-                <input id="su-role" className="f" autoComplete="organization-title" value={jobRole} onChange={(e) => setJobRole(e.target.value)} placeholder="Founder" maxLength={120} />
-              </Field>
-              {!claim && (
-                <Field id="su-task" label="What do you need done first?" optional hint="We'll take you straight to planning it.">
-                  <input id="su-task" className="f" value={firstTask} onChange={(e) => setFirstTask(e.target.value)} placeholder="e.g. Analyze our top 20 competitors…" maxLength={8000} />
-                </Field>
-              )}
-            </>
-          )}
           <Field
             id="su-email"
             label="Work email"
@@ -362,7 +247,7 @@ function SignupForm() {
             {!show("password") && <StrengthMeter pw={password} />}
           </Field>
           {inviteRequired && (
-            <Field id="su-invite" label="Invite code" error={inviteError || show("invite")} hint="This demo is invite-only for now. Your code came with your invitation link.">
+            <Field id="su-invite" label="Invite code" error={inviteError || show("invite")} hint="Access is invite-only for now. Your code came with your invitation.">
               <input
                 id="su-invite"
                 className="f"
@@ -377,23 +262,10 @@ function SignupForm() {
                 onBlur={blur("invite")}
                 aria-invalid={!!inviteError || !!show("invite")}
                 aria-describedby={inviteError || show("invite") ? "su-invite-err" : "su-invite-hint"}
-                placeholder="e.g. ENSEMBLIS-2026"
                 maxLength={120}
               />
             </Field>
           )}
-
-          <div className="dcard" style={{ marginTop: 18 }}>
-            <div className="row" style={{ gap: 10 }}>
-              <div style={{ color: "var(--accent)" }}>
-                <Icon name={claim ? "check" : P.perkIcon} />
-              </div>
-              <div className="sp">
-                <b className="small">{claim ? "Your trial task and report move to your new account" : P.perk.replace("{credits}", eur(config.startingCreditsCents))}</b>
-                <div className="tiny muted">{claim ? "Saved for good — no more 7-day limit" : "Demo environment · no real charges"}</div>
-              </div>
-            </div>
-          </div>
 
           <div style={{ marginTop: 16 }}>
             <label htmlFor="su-terms" className="small" style={{ display: "flex", gap: 10, alignItems: "flex-start", cursor: "pointer", lineHeight: 1.45 }}>
@@ -403,7 +275,6 @@ function SignupForm() {
                 checked={agreed}
                 onChange={(e) => setAgreed(e.target.checked)}
                 required
-                aria-describedby="su-terms-note"
                 style={{ width: 18, height: 18, marginTop: 1, flex: "none", accentColor: "var(--accent)" }}
               />
               <span>
@@ -417,9 +288,11 @@ function SignupForm() {
                 </a>
               </span>
             </label>
-            <div className="tiny muted" id="su-terms-note" style={{ marginTop: 4, paddingLeft: 28 }}>
-              {agreed ? (claim ? "Thanks — you can save your account now." : "Thanks — you can create your account now.") : "Required to create an account."}
-            </div>
+            {submitted && errors.terms && (
+              <div className="err" role="alert" style={{ paddingLeft: 28 }}>
+                {errors.terms}
+              </div>
+            )}
           </div>
 
           {botCheck && (
@@ -435,21 +308,18 @@ function SignupForm() {
 
           {formError && <FormError>{formError}</FormError>}
 
-          <button type="submit" className="btn p lg" style={{ width: "100%", marginTop: 16 }} disabled={busy || !agreed} aria-busy={busy}>
-            {busy ? (claim ? "Saving your trial…" : "Creating your account…") : claim ? "Save my results" : "Create account"}
+          <button type="submit" className="btn p lg" style={{ width: "100%", marginTop: 16 }} disabled={busy} aria-busy={busy} data-testid="signup-submit">
+            {busy ? (claim ? "Saving…" : "Creating your organization…") : claim ? "Save my work" : "Create account"}
             {!busy && <Icon name="arrow" />}
           </button>
         </form>
         <Divider>or</Divider>
-        <div className="row between wrapflex small" style={{ gap: 8 }}>
-          <Link href={loginUrl(next)} className="muted">
+        <p className="small muted" style={{ textAlign: "center" }}>
+          <Link href={loginUrl(next)}>
             Already have an account? <b style={{ color: "var(--accent)" }}>Log in</b>
-            {claim && <span className="tiny" style={{ display: "block" }}>Logging in ends this trial session.</span>}
           </Link>
-          <Link href={keepParams(signupUrl(other, next))} replace className="muted">
-            {dev ? "Hiring agents instead?" : "Building agents instead?"} <b style={{ color: "var(--ink)" }}>Switch</b>
-          </Link>
-        </div>
+          {claim && <span className="tiny" style={{ display: "block" }}>Logging in ends this trial session.</span>}
+        </p>
       </div>
     </AuthShell>
   );

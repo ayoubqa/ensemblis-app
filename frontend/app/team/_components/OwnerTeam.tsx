@@ -14,7 +14,7 @@ import { SectionHead, TEAM_NAME_MAX, copyText, inviteUrl, teamNameError } from "
 export function OwnerTeam({ team, setTeam }: { team: TeamDetail; setTeam: (t: TeamDetail | null) => void }) {
   const { user, setUser } = useAuth();
   const toast = useToast();
-  const tasksThisMonth = team.members.reduce((n, m) => n + (m.tasksThisMonth || 0), 0);
+  const objectivesThisMonth = team.members.reduce((n, m) => n + (m.objectivesThisMonth || 0), 0);
   const memberCount = team.members.length;
 
   // ---------- rename ----------
@@ -198,20 +198,20 @@ export function OwnerTeam({ team, setTeam }: { team: TeamDetail; setTeam: (t: Te
             </button>
           </div>
         )}
-        <p>Everyone on the team spends from your wallet and sees the team&apos;s tasks. You decide who&apos;s in.</p>
+        <p>Members share your organization&apos;s Company Context, objectives, AI Team and wallet. You decide who&apos;s in and what needs approval.</p>
       </div>
 
       {/* At a glance */}
       <div className="grid g3">
         <div className="card tight">
-          <div className="eyebrow">TEAM WALLET</div>
+          <div className="eyebrow">ORGANIZATION WALLET</div>
           <b style={{ fontSize: 30, display: "block", letterSpacing: "-.02em" }}>{eur(team.walletCents)}</b>
           <div className="tiny muted" style={{ marginBottom: 10 }}>
             Your balance, shared with {plural(Math.max(0, memberCount - 1), "member")}
           </div>
-          <Link className="btn sm p" href={ROUTES.billing}>
+          <Link className="btn sm p" href={ROUTES.usage}>
             <Icon name="plus" />
-            Add credits
+            Add balance
           </Link>
         </div>
         <div className="card tight">
@@ -220,19 +220,19 @@ export function OwnerTeam({ team, setTeam }: { team: TeamDetail; setTeam: (t: Te
           <div className="tiny muted">including you · {plural(team.invites.length, "active invite")}</div>
         </div>
         <div className="card tight">
-          <div className="eyebrow">TASKS THIS MONTH</div>
-          <b style={{ fontSize: 30, display: "block", letterSpacing: "-.02em" }}>{num(tasksThisMonth)}</b>
+          <div className="eyebrow">OBJECTIVES THIS MONTH</div>
+          <b style={{ fontSize: 30, display: "block", letterSpacing: "-.02em" }}>{num(objectivesThisMonth)}</b>
           <div className="tiny muted" style={{ marginBottom: 10 }}>
-            across the whole team
+            defined across the organization
           </div>
-          <Link className="btn sm" href={`${ROUTES.tasks}?scope=team`}>
-            View team tasks
+          <Link className="btn sm" href={ROUTES.objectives}>
+            View objectives
           </Link>
         </div>
       </div>
 
       {/* Members */}
-      <SectionHead id="h-members" title="Members" sub="Removing someone stops them spending from your wallet. Tasks they already ran aren't deleted." />
+      <SectionHead id="h-members" title="Members" sub="Removing someone ends their access to the organization. Objectives they defined stay." />
       <div className="tw" aria-labelledby="h-members">
         <table style={{ minWidth: 640 }}>
           <thead>
@@ -241,7 +241,7 @@ export function OwnerTeam({ team, setTeam }: { team: TeamDetail; setTeam: (t: Te
               <th>Email</th>
               <th>Role</th>
               <th>Joined</th>
-              <th style={{ textAlign: "right" }}>Tasks this month</th>
+              <th style={{ textAlign: "right" }}>Objectives this month</th>
               <th>
                 <span className="sr-only">Actions</span>
               </th>
@@ -268,7 +268,7 @@ export function OwnerTeam({ team, setTeam }: { team: TeamDetail; setTeam: (t: Te
                   <td className="small" title={dateTime(m.joinedAt)}>
                     {dayLabel(m.joinedAt)}
                   </td>
-                  <td style={{ textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{num(m.tasksThisMonth)}</td>
+                  <td style={{ textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{num(m.objectivesThisMonth)}</td>
                   <td style={{ textAlign: "right" }}>
                     {m.role !== "OWNER" && !me && (
                       <button type="button" className="btn sm" onClick={() => setRemoving(m)} aria-label={`Remove ${m.name} from the team`}>
@@ -292,7 +292,7 @@ export function OwnerTeam({ team, setTeam }: { team: TeamDetail; setTeam: (t: Te
       <SectionHead
         id="h-invites"
         title="Invite links"
-        sub="Anyone with an active link can join until it expires, is used up or you revoke it. Share links only with people you trust to spend team credits."
+        sub="Anyone with an active link can join until it expires, is used up or you revoke it. Share links only with people you trust to run objectives on your organization's balance."
         right={
           <button type="button" className="btn p" onClick={createInvite} disabled={creating} aria-busy={creating}>
             <Icon name="link" />
@@ -384,7 +384,7 @@ export function OwnerTeam({ team, setTeam }: { team: TeamDetail; setTeam: (t: Te
       {/* Modals */}
       <Modal open={!!removing} onClose={() => !busy && setRemoving(null)} title={`Remove ${removing?.name ?? "member"}?`} dismissible={!busy}>
         <p className="muted small" style={{ margin: "6px 0 16px" }}>
-          They&apos;ll leave {team.name} straight away and can&apos;t spend from your wallet anymore. Tasks they already ran aren&apos;t deleted.
+          They&apos;ll leave {team.name} straight away and can&apos;t spend from your wallet anymore. Objectives they defined stay with the organization.
           You can invite them again later.
         </p>
         <div className="row wrapflex">
@@ -414,7 +414,7 @@ export function OwnerTeam({ team, setTeam }: { team: TeamDetail; setTeam: (t: Te
       <Modal open={dissolveOpen} onClose={() => !busy && setDissolveOpen(false)} title="Dissolve the team?" dismissible={!busy}>
         <form onSubmit={dissolve}>
           <p className="muted small" style={{ margin: "6px 0 14px" }}>
-            {plural(Math.max(0, memberCount - 1), "member")} will lose access to the team wallet and team tasks. This can&apos;t be undone.
+            {plural(Math.max(0, memberCount - 1), "member")} will lose access to the organization&apos;s wallet, objectives and context. This can&apos;t be undone.
           </p>
           <label className="l" htmlFor="dissolve-confirm">
             Type <b style={{ color: "var(--ink)" }}>{team.name}</b> to confirm

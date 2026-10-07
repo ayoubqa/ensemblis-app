@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import type { ReactNode } from "react";
 
 export const metadata: Metadata = {
-  title: "Team",
-  description: "Share one credit wallet and one task history with your colleagues.",
+  title: "Organization members",
+  description: "Invite colleagues into your organization: shared Company Context, objectives, AI Team and wallet.",
   robots: { index: false },
 };
 

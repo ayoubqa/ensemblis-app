@@ -68,7 +68,7 @@ export class Worker {
 
   constructor(private readonly opts: WorkerOptions = {}) {
     this.concurrency = Math.max(1, opts.concurrency ?? (Number(process.env.WORKER_CONCURRENCY) || 2));
-    this.pollMs = opts.pollMs ?? 1000;
+    this.pollMs = opts.pollMs ?? (Number(process.env.WORKER_POLL_MS) || 1000);
   }
 
   start(): void {

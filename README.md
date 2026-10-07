@@ -1,221 +1,181 @@
-# Ensemblis — real backend + frontend
+# Ensemblis
 
-This is the real, deployable version of the Ensemblis demo you saw as a single HTML
-artifact. The difference that matters: **the AI work is no longer faked**. The
-prototype simulated task execution with timers and canned reports; this version
-creates a real account, stores real data in Postgres, and actually calls a real
-model to do the work when you start a task.
+**The AI operating layer for business. Describe the outcome. We do the work.**
 
-By default that model is a **free local model running through [Ollama](https://ollama.com)**
-— no account, no payment, nothing leaves your machine. Swap one env var
-(`AI_PROVIDER=anthropic`) to switch to the real Claude API later, for
-noticeably better output quality once you're ready to pay for it.
+You define a business objective and what success looks like. A Chief of Staff
+plans it, assigns the steps to an AI organization (Heads of Marketing, Sales,
+Finance and Operations and their specialists), runs the work, checks the result
+against evidence and your success criteria, and tells you whether the objective
+was achieved — with every claim traceable to a source.
+
+```
+BUSINESS OBJECTIVE → Chief of Staff → AI Team → PLAN → (approval) → EXECUTION
+  → VERIFICATION → EVIDENCE → MEASURED OUTCOME → MEMORY
+```
+
+Safety by design: the AI Team only **reads, researches, analyses, drafts and
+recommends**. It never sends email, publishes, changes external systems or
+spends money on its own. Executions are charged only after you approve the plan
+(or automatically, within a budget and approval threshold you set), and work
+that fails or never runs is refunded.
 
 ```
 ensemblis-app/
-  backend/     Express + TypeScript + Prisma + Postgres API
-  frontend/    Next.js (App Router) + Tailwind
-  docker-compose.yml   local Postgres for development
+  backend/     Express + TypeScript + Prisma + Postgres: API, execution engine, worker
+  frontend/    Next.js 14 (App Router)
+  docker-compose.yml     local Postgres
+  render.yaml            production blueprint: API + worker
+  .github/workflows/ci.yml
 ```
 
-## What's real here vs. what's still a scaffold
+---
 
-**Real:** accounts and auth (bcrypt + JWT), the role-based sign-up flow (company vs.
-developer persona, same idea as the prototype), a Postgres-backed data model for
-users/tasks/agents/workflows, and — the important part — tasks that actually call
-a real model (`backend/src/tasks/llmProvider.ts`) with an agent's system prompt
-and return a real markdown report.
+## How it works
 
-**Still scaffolding, listed so you don't assume otherwise:**
-- Payments are optional: credits are an integer on the user row (team members
-  share their owner's balance). Real money only flows once you add Stripe keys
-  (see "v3 setup" below); until then only demo top-ups exist.
-- Tasks run with simple fire-and-forget `async` calls and the frontend polls every
-  2 seconds. Fine at low volume; swap in a real job queue (BullMQ + Redis, or a
-  hosted queue) once you have enough concurrent tasks that a server restart
-  losing an in-flight task would actually matter.
-- Workflows (recurring tasks) are run by a simple in-process scheduler that checks
-  every minute. With more than one backend instance you'd want a single external
-  cron/queue scheduler instead, so a workflow isn't picked up twice.
-- No published-agent moderation/review step — a developer's agent goes live the
-  moment they publish it.
-- The frontend is a clean, working rebuild of the core flows, not a pixel-for-pixel
-  port of the prototype's full visual design (the command palette, confetti,
-  performance graph, etc. from the HTML version aren't ported). Treat it as the
-  real foundation to keep building the experience on top of, with Claude Code.
+| Piece | Where | What it does |
+|---|---|---|
+| Objectives | `backend/src/engine/objectives.ts`, `api/objectives.ts` | Statement, success criteria (yours, or proposed and editable), deadline, budget, autonomy (`REVIEW_PLAN` / `AUTO_WITHIN_BUDGET`), context notes. |
+| Chief of Staff planner | `engine/planner.ts` | One model call returning strict JSON (zod-validated), normalised against the registry (unknown capabilities dropped, framing first, synthesis last, ≤ 7 steps, deterministic cost). A labelled keyword fallback plan when the model output is unusable. Asks instead of guessing when company information is missing. No tool access. |
+| AI Team registry | `org/registry.ts`, `org/tools.ts`, `org/policy.ts` | Executives → versioned capabilities → specialists, each with a tool allow-list. Every tool today is `READ_ONLY`; `WRITE`, `EXTERNAL_ACTION`, `FINANCIAL` and `DESTRUCTIVE` are modelled and denied by default. |
+| Execution state machine | `engine/machine.ts`, `engine/lifecycle.ts` | `PLANNING → WAITING_FOR_APPROVAL → RUNNING → VERIFYING → COMPLETED`, plus `BLOCKED`, `FAILED`, `CANCELLED`. Guarded transitions, step fencing, bounded retries with back-off, then an exception for a person. |
+| Durable queue + worker | `engine/queue.ts`, `engine/worker.ts`, `src/worker.ts` | Postgres `Job` table (`FOR UPDATE SKIP LOCKED`, leases, heartbeats, dead-lettering). Runs embedded in the API in development or as a separate process in production. |
+| Recovery | `engine/recovery.ts` | Orphaned executions are re-enqueued, stalled ones failed and refunded, waits expire; nothing stays `RUNNING` forever. |
+| Evidence & trust boundary | `engine/evidence.ts`, `engine/prompts.ts`, `engine/executor.ts` | Company context, document passages, website and web results become numbered `Evidence`. Untrusted content is fenced and neutralised in prompts; documents can't override instructions. |
+| Verification gate | `engine/verification/*` | Deterministic claim ↔ evidence matching, citation checks, completeness and criteria coverage, plus a model assessment. PASS / PASS_WITH_WARNINGS / FAIL with a score; FAIL triggers one automatic revision, then an exception. An LLM agreeing is never enough on its own. |
+| Outcome & value | `engine/outcome.ts` | Per-criterion measurement (deterministic where a numeric target exists), overall ACHIEVED / PARTIALLY / NOT / UNKNOWN, user confirmation, and value records (cost, criteria met, cycle time; time saved only as a labelled estimate). |
+| Memory | `memory/*`, `engine/learning.ts` | Learnings proposed after each execution; low-risk preferences are active, anything sensitive waits for confirmation. Review, edit, delete. |
+| Live updates | `api/stream.ts`, `frontend/lib/stream.ts` | SSE tail of the persistent `ExecutionEvent` log, resumable from the last event id. |
+| Billing | `engine/billing.ts`, `lib/wallet.ts`, `billing/*` | EUR wallet, atomic debit at execution start inside the same transaction as the status change, capped refunds, idempotent Stripe webhooks. |
+| Tenancy | `org/organization.ts` | Every objective, execution, document and memory item belongs to an Organization (derived from the existing Team/wallet model). |
+
+---
 
 ## Local setup
 
 **1. Database**
 
 ```bash
-docker compose up -d
+docker compose up -d          # Postgres 16 on localhost:5432 (user/pass/db: ensemblis)
 ```
 
-**2. Ollama (the free AI provider — skip this only if you're using Anthropic instead)**
-
-```bash
-# Install from https://ollama.com, then:
-ollama pull llama3.2
-ollama serve   # the desktop app does this automatically if you installed that way
-```
-
-**3. Backend**
+**2. Backend**
 
 ```bash
 cd backend
-cp .env.example .env
-# defaults are already set for Ollama — just set JWT_SECRET to any random string
+cp .env.example .env          # set JWT_SECRET to any long random string
 npm install
-npx prisma migrate dev --name v3   # creates/updates all tables (fresh DB or an older one)
-npm run seed                        # upserts the full 20-agent catalog (safe to re-run)
-npm run dev                         # http://localhost:4000
+npm run build                 # prisma generate + tsc
+npm run migrate:deploy        # applies prisma/migrations (baselines a v3 `db push` database first)
+npm run dev                   # API on http://localhost:4000, worker embedded
 ```
 
-Already ran an earlier version? Pull the new code, then from `backend/` run
-`npm install && npx prisma migrate dev --name v3 && npm run seed`. The change
-only adds a nullable `termsAcceptedAt` column, so existing data is kept.
+AI provider (`AI_PROVIDER` in `.env`):
 
-Optional checks: `npm run typecheck` (TypeScript) and `npm run sanity:classify`
-(prints how sample briefs are routed to agent teams, with prices — no DB needed).
+- `mock` — deterministic scripted output; no model needed. For UI work and tests only (refused in production, labelled "Mock AI — test output" in the UI). Add `MOCK_AI_DELAY_MS=1500` to watch executions progress.
+- `ollama` (default) — a free local model: install [Ollama](https://ollama.com), `ollama pull llama3.2`.
+- `openai` — any OpenAI-compatible API (defaults to Groq's free tier).
+- `anthropic` — the Claude API.
 
-How a task runs: `POST /api/tasks/estimate` plans a team (Research → lead
-specialist → Verification → Report, depending on depth) and prices it;
-`POST /api/tasks` charges credits and runs those agents one after another in the
-background, each step a real model call that sees the previous steps' output.
-Failed runs are refunded automatically, and tasks interrupted by a server
-restart are failed and refunded on the next start. Active workflows are run by
-an in-process scheduler (checked every minute) when the user has credits.
+To run the worker as its own process (as in production): set `EMBEDDED_WORKER=false` and run `npm run dev:worker` next to `npm run dev`.
 
-**4. Frontend**
+Changing the schema: edit `prisma/schema.prisma`, then `npm run migrate:dev -- --name <change>` and commit the new folder under `prisma/migrations/`. Production applies migrations with `migrate deploy` only.
+
+**3. Frontend**
 
 ```bash
 cd frontend
-cp .env.example .env.local
+cp .env.example .env.local    # NEXT_PUBLIC_API_URL=http://localhost:4000
 npm install
-npm run dev           # http://localhost:3000
+npm run dev                   # http://localhost:3000
 ```
 
-Open `http://localhost:3000`, sign up (pick Company or Developer), and start a
-task — it actually runs against your local model and shows you a real
-generated report. The first run after `ollama pull` may take a little longer
-while the model loads into memory.
+---
 
-**Switching to the real Claude API later:** set `AI_PROVIDER="anthropic"` and
-`ANTHROPIC_API_KEY="sk-ant-..."` in `backend/.env` (get a key at
-[console.anthropic.com](https://console.anthropic.com) — note this requires
-adding a payment method; there's no free trial credit at the time of writing).
-Nothing else changes — same code, same data model, just a better model behind it.
+## Tests
 
-## Deploying (public demo link)
+```bash
+# backend — real Postgres (database ensemblis_test is reset by the test run)
+cd backend && npm run lint && npm run typecheck && npm test
 
-The free setup this repo is wired for:
+# frontend — unit tests
+cd frontend && npm run lint && npm run typecheck && npm test
 
-| Piece | Host | Notes |
-|---|---|---|
-| Database | [Neon](https://neon.tech) free Postgres | |
-| Backend | [Render](https://render.com) free web service | `render.yaml` at the repo root; sleeps after 15 min idle, first request then takes ~30–60 s |
-| AI model | [Groq](https://console.groq.com) free API | via `AI_PROVIDER=openai` (any OpenAI-compatible API works) |
-| Frontend | [Vercel](https://vercel.com) | |
+# end to end — real browser, real API, separate worker, mock AI
+cd backend && npm run build && cd ../frontend && npm run e2e
+```
 
-**1. Neon.** Create a project (pick a region, e.g. Europe Central / Frankfurt).
-Copy the **direct** connection string (Connection details → turn *off*
-"Connection pooling"). It must end with `?sslmode=require`. That one URL is all
-you need.
+What the suites cover: the full objective lifecycle; step retries, exhausted
+retries → exception → retry without double charge; config errors; crash
+mid-step with lease recovery and fencing; dead jobs; orphan and stall
+recovery; approval policy, budget threshold, insufficient funds, concurrent
+approvals; missing information → answer → re-plan; verification failure →
+automatic revision → exception → accept/retry/cancel; cancel refunds;
+organization isolation (API and browser); wallet atomicity, refund caps and
+Stripe idempotency; email verification and admin gating; SSE resume; legacy
+report sharing; and in the browser: sign up → context → define → plan →
+approve → refresh mid-execution → verified result → evidence → outcome →
+public link → sharing off, plus the exception and cancel/refund paths.
 
-**2. Groq.** Create a free API key at [console.groq.com/keys](https://console.groq.com/keys).
+CI (`.github/workflows/ci.yml`) runs backend lint, typecheck, a schema ↔
+migrations drift check, tests and build; frontend lint, typecheck, unit tests
+and build; then the Playwright suite.
 
-**3. Render.** Push the repo to GitHub, then Render → **New → Blueprint** → pick
-the repo. It reads `render.yaml` and asks for:
-- `DATABASE_URL` — the Neon string from step 1
-- `OPENAI_API_KEY` — the Groq key
-- `CORS_ORIGIN` — your Vercel URL (fill in after step 4 if you don't have it yet; no trailing slash needed)
-- `SIGNUP_INVITE_CODE` — leave empty for open sign-up, or set a code to share only with testers
+---
 
-`JWT_SECRET` is generated for you. Every deploy/boot runs `npm run start:render`:
-it syncs the schema with `prisma db push` (adds new tables/columns; it never
-drops data — if a change *would* lose data it stops with an error instead),
-re-seeds the agent catalog (safe to repeat), then starts the API. Check
-`https://<your-service>.onrender.com/health` returns `{"ok":true}`.
+## Deploying
 
-**4. Vercel.** Import the repo, set the root directory to `frontend`, and set
-two environment variables: `NEXT_PUBLIC_API_URL` = your Render URL, and
-`NEXT_PUBLIC_CONTACT_EMAIL` = the address shown on the Privacy and Terms pages
-(until it's set those pages show a red placeholder). Then put the Vercel URL into Render's
-`CORS_ORIGIN` (Render redeploys automatically).
-
-**Protection built in** (all env vars, documented in `backend/.env.example`;
-production values are in `render.yaml`): per-IP rate limits on sign-up, login,
-estimates and task runs; a daily task cap per account and for the whole server
-(the "kill switch" on your AI bill); a lifetime cap on free demo top-ups; a max
-brief length; optional invite code; Terms acceptance at sign-up; and a
-concurrency limiter + retries so bursts queue instead of hitting the AI
-provider's rate limits. The server refuses to boot in production without a real
-`JWT_SECRET` and a `DATABASE_URL`.
-
-**Know the free-tier limits.** Groq's free plan caps tokens per minute and per
-day per model (see [console.groq.com/settings/limits](https://console.groq.com/settings/limits)).
-A team task makes 2–4 model calls of several thousand tokens each, so the
-free daily allowance covers only a modest number of tasks. When it runs
-out, tasks fail with "the free AI quota is used up for now" and are refunded
-automatically. For more headroom set `OPENAI_MODEL=openai/gpt-oss-20b`
-(smaller and faster, lower quality) or upgrade to Groq's paid tier. Groq retires
-models from time to time — if tasks fail with "doesn't recognise the model",
-pick a current one from [console.groq.com/docs/models](https://console.groq.com/docs/models).
-
-## v3 setup (optional keys)
-
-Everything below is **off or on a free default** until you set it — the app
-runs fine without any of it. Set the values in Render (`render.yaml` lists them;
-the ones marked `sync: false` are asked for in the dashboard) and see
-`backend/.env.example` for details.
-
-| Set this | What it unlocks |
+| Piece | Host |
 |---|---|
-| `APP_URL` | Your Vercel URL. Correct links in emails, share links and Stripe redirects (defaults to the first `CORS_ORIGIN`). |
-| `ADMIN_EMAILS` | Your email(s). Opens the owner dashboard at `/admin`: sign-ups, runs vs. daily cap, AI/search/email usage, purchases, failures, and featuring shared reports in the public gallery. |
-| `TAVILY_API_KEY` | Real web search ([free key](https://app.tavily.com), 1,000 searches/month) so agents cite live sources. Without it agents research Wikipedia (no key needed). `SEARCH_DAILY_BUDGET` caps calls per day; `SEARCH_PROVIDER=off` disables research. |
-| `RESEND_API_KEY` + `EMAIL_FROM` | Emails from [Resend](https://resend.com): "your report is ready" / "your task failed (refunded)" and **password reset** links. Verify your sending domain in Resend first. Users can turn task emails off in Settings. |
-| `STRIPE_SECRET_KEY` + `STRIPE_WEBHOOK_SECRET` | Real credit packs via Stripe Checkout. In Stripe → Developers → Webhooks add the endpoint `https://<your-api>.onrender.com/api/billing/stripe/webhook` with the events `checkout.session.completed`, `checkout.session.async_payment_succeeded` and `checkout.session.expired`, then copy its signing secret. Use **test** keys first. Credits are added only by the signed webhook, exactly once. |
-| `TURNSTILE_SITE_KEY` + `TURNSTILE_SECRET_KEY` | A [Cloudflare Turnstile](https://dash.cloudflare.com) bot check on sign-up and the guest trial. |
-| `GUEST_*` | "Try without signing up": a temporary account with `GUEST_CREDITS_CENTS` that can run `GUEST_MAX_TASKS` focused task(s), limited per network and per day, deleted after `GUEST_RETENTION_DAYS` unless the visitor creates an account (which keeps their work). On by default; `GUEST_TRIAL_ENABLED=false` turns it off. |
-| `FOLLOWUP_COST_CENTS`, `CLARIFY_ENABLED`, `MAX_ATTACHMENTS`, `MAX_ATTACHMENT_CHARS`, `DEV_TEST_RUNS_PER_DAY` | Price of a follow-up refinement, clarifying questions before vague briefs, client attachments per task, and free developer test runs per day. |
+| Database | Managed Postgres, e.g. [Neon](https://neon.tech) (direct, non-pooled URL with `?sslmode=require`) |
+| API + worker | [Render](https://render.com) via `render.yaml`, or any Docker host via `backend/Dockerfile` |
+| AI model | Groq free tier (`AI_PROVIDER=openai`) or any supported provider |
+| Frontend | [Vercel](https://vercel.com) (root directory `frontend`) |
 
-Teams, share links (`/r/<token>`), the example gallery and developer test runs
-need no keys. Teams share one wallet — the owner's balance — and only the owner
-can add credits.
+**Render.** New → Blueprint → this repo. It creates `ensemblis-api` (web) and
+`ensemblis-worker` (background worker) sharing the `ensemblis-shared` env
+group, and asks for `DATABASE_URL`, `CORS_ORIGIN`, `APP_URL`, `OPENAI_API_KEY`
+and the optional keys. The API start command is `npm run start:render`:
+`dist/ops/migrate.js` (apply pending migrations; a database created by v3's
+`prisma db push` is first marked as baseline `0_init`, no data touched) then
+the server. **`prisma db push` is no longer used anywhere.** Background workers
+need a paid plan; on the free plan delete the worker service and set
+`EMBEDDED_WORKER=true` on the API.
 
-The `backend/Dockerfile` still works for Docker-based hosts (Fly.io, Railway).
-There, run `npx prisma db push` and `npm run seed` against the database yourself.
+**Docker.** One image: the default command migrates then serves the API; run
+the worker with `node dist/worker.js`.
 
-## Staying connected with Claude for ongoing development
+**Vercel.** Root directory `frontend`; set `NEXT_PUBLIC_API_URL` (the API URL)
+and `NEXT_PUBLIC_CONTACT_EMAIL` (shown on the legal pages). Put the Vercel URL
+in the API's `CORS_ORIGIN` and `APP_URL`.
 
-The practical setup:
+**Health.** `GET /health` checks the database and reports queue depth, oldest
+queued job age and dead jobs (503 when the database is unreachable).
+`GET /health/live` is a plain liveness probe.
 
-1. **The code lives on GitHub** (`ayoubqa/ensemblis-app`). Claude pushes changes
-   there; on your Mac, `git pull` brings them down.
-2. **Keep working with Claude Code against that repo** — either locally (the
-   `claude` CLI in your terminal, pointed at this folder) or in a cloud session
-   like this one with the repo attached. Either way you get real version control:
-   every feature becomes a commit, not a one-off edit to a single file.
-3. From there, treat it like a normal engineering backlog. Good next things to ask
-   for, in roughly the order they start to matter:
-   - Port more of the prototype's UI polish (command palette, dashboard charts,
-     settings page) into the real Next.js app, backed by the real API instead of
-     fake state.
-   - Add a job queue for task execution instead of fire-and-forget + polling.
-   - Add a scheduler for workflows (a hosted cron hitting a "run now" endpoint).
-   - Add tests (the backend's route handlers are straightforward to test with
-     something like Vitest + Supertest).
-   - Move the per-IP rate limits to Redis if you ever run more than one
-     backend instance (they're in-memory, per process, today).
+**Operators.** `ADMIN_EMAILS` lists who may open `/admin`, and the address
+must also be verified (email link, or `npm run ops:verify-email -- you@example.com`
+run against the production database). Signing up with a listed address grants
+nothing by itself.
 
-## Why this structure
+Optional services (all off until configured; see `backend/.env.example`):
+`TAVILY_API_KEY` (web search; otherwise Wikipedia, or `SEARCH_PROVIDER=off`),
+`RESEND_API_KEY` + `EMAIL_FROM` (verification, notifications, password reset),
+`STRIPE_SECRET_KEY` + `STRIPE_WEBHOOK_SECRET` (real top-ups; webhook
+`/api/billing/stripe/webhook`), `TURNSTILE_*` (bot check), `GUEST_*` (trial
+without an account).
 
-Frontend and backend are separate so you can deploy, scale, and redeploy them
-independently, and so the backend can later serve a mobile app or other clients
-without changes. Prisma gives you migrations and type-safe queries instead of
-hand-written SQL. None of this is mandatory — a monolith (e.g. Next.js API routes
-only, no separate Express app) is a perfectly reasonable alternative that's even
-simpler to deploy — but the separate-backend approach scales better once the
-agent-execution logic gets more complex (job queues, webhooks, workers).
+---
+
+## Upgrading from v3 (task marketplace)
+
+Nothing is deleted. Users, balances, transactions, teams, invites, tasks,
+reports and share links are kept:
+
+- The first deploy baselines the existing schema and applies one additive
+  migration (new tables and nullable columns only).
+- Each user gets an Organization on first use; team members share their team
+  owner's organization, mirroring the existing shared-wallet rule.
+- Earlier task reports are listed under **Objectives → Earlier reports**,
+  read-only, and their `/r/<token>` links keep working.
+- Marketplace pages and APIs (agents, developers, publishing, payouts, gallery)
+  are retired; old public URLs redirect to the home page.

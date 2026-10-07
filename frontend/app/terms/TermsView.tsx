@@ -22,7 +22,7 @@ export function TermsView() {
     >
       <Sec id="about" title="1. About this demo">
         <p>
-          Ensemblis is a demonstration of an AI-agent marketplace, operated by an individual based in Spain (&ldquo;we&rdquo;, &ldquo;the operator&rdquo;).
+          Ensemblis is a demonstration of an AI operating layer for business — you define an outcome and an AI Team plans, executes and verifies the work — operated by an individual based in Spain (&ldquo;we&rdquo;, &ldquo;the operator&rdquo;).
           It&apos;s offered free of charge so people can try the idea. It is not a commercial service and no real payments are taken. By creating an account or
           using the demo you agree to these terms and to our <Link href={ROUTES.privacy}>Privacy Policy</Link>.
         </p>
@@ -49,7 +49,7 @@ export function TermsView() {
 
       <Sec id="content" title="4. What you submit">
         <ul>
-          <li>You keep any rights you have in the task descriptions you write and the results you receive.</li>
+          <li>You keep any rights you have in the objectives, Company Context and documents you provide and the results you receive.</li>
           <li>
             You allow us to store and process that content — including sending it to our AI provider — only to run the service for you.
           </li>
@@ -68,29 +68,26 @@ export function TermsView() {
           <li>generate spam, malware, phishing, or disinformation, or impersonate anyone;</li>
           <li>attack, overload, scrape, or probe the service, or try to bypass usage limits or access other users&apos; data;</li>
           <li>try to extract other users&apos; content or the platform&apos;s internal instructions through the AI (for example by prompt injection);</li>
-          <li>publish agents that are misleading or designed to do any of the above.</li>
-        </ul>
+                  </ul>
         <p>We may remove content, limit usage, or suspend accounts that break these rules.</p>
       </Sec>
 
       <Sec id="credits" title="6. Demo credits">
         <p>
           New accounts receive {eur(config.startingCreditsCents)} in demo credits to try the service.
-          {config.maxTasksPerUserPerDay > 0 && <> Each account can run up to {config.maxTasksPerUserPerDay} tasks per day.</>} Demo credits:
+          {config.maxTasksPerUserPerDay > 0 && <> Each account can start up to {config.maxTasksPerUserPerDay} executions per day.</>} Demo credits:
         </p>
         <ul>
           <li>have no monetary value and can&apos;t be bought, sold, transferred, refunded or exchanged for money;</li>
           <li>may be limited, adjusted, reset or removed at any time;</li>
-          <li>
-            also cover developer &ldquo;revenue&rdquo;, which is simulated — no real payouts are made.
-          </li>
         </ul>
       </Sec>
 
-      <Sec id="catalog" title="7. The agent catalog">
+      <Sec id="actions" title="7. What the AI Team does — and doesn&apos;t do">
         <p>
-          Some agents, ratings, success rates and task counts in the catalog are sample data created to show how the marketplace would look
-          {config.sampleCatalogStats ? " — they're marked as such" : ""}. Agents published by other users are theirs; we don&apos;t endorse them.
+          The AI Team researches, analyses, drafts and recommends. It does not send email, publish content, change records in other systems or spend
+          money on your behalf. Executions run only after you approve them, or automatically within a budget and approval policy you set. Verification
+          scores and outcome assessments are automated checks, not guarantees of accuracy.
         </p>
       </Sec>
 

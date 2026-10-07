@@ -678,6 +678,8 @@ function modelFor(provider: Provider, tier: ModelTier): string {
   return ollamaModel(tier);
 }
 
+const MOCK_AI_DELAY_MS = Math.max(0, Math.min(60_000, Number(process.env.MOCK_AI_DELAY_MS) || 0));
+
 async function runWithHandler(
   handler: LLMHandler,
   provider: Provider,
@@ -689,8 +691,14 @@ async function runWithHandler(
   const text = await handler(systemPrompt, userContent, opts);
   if (!text || !text.trim()) throw new Error("The AI model returned an empty response");
   // Stream it in a few chunks so live-output code paths are exercised too.
+  // MOCK_AI_DELAY_MS (mock provider only) spreads a step's output over that
+  // long, so live progress and refresh-mid-run can be seen in dev and E2E.
+  const delay = handler === mockLLM && opts.purpose === "step" ? MOCK_AI_DELAY_MS : 0;
   const size = Math.max(200, Math.ceil(text.length / 4));
-  for (let i = 0; i < text.length; i += size) sink.add(text.slice(i, i + size));
+  for (let i = 0; i < text.length; i += size) {
+    sink.add(text.slice(i, i + size));
+    if (delay) await new Promise((r) => setTimeout(r, delay / 4));
+  }
   return { text, provider, model: "mock", tokensIn: approxTokens(systemPrompt + userContent), tokensOut: approxTokens(text) };
 }
 

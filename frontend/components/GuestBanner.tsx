@@ -123,7 +123,7 @@ export function GuestBanner() {
             <>
               <b>You&apos;re on a free trial</b> — save your work by creating a free account.
               <span className="tiny muted" style={{ display: "block" }}>
-                Your task and report come with you. Unsaved trial results are deleted after 7 days.
+                Your trial objective and its results come with you. Unsaved trial results are deleted after 7 days.
               </span>
             </>
           )}

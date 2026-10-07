@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Avatar, Icon, Modal, RequireAuth, Tag, ThemeSwitch, useToast } from "@/components";
-import { api, setToken, type User } from "@/lib/api";
+import { api, setToken, type Autonomy, type Organization, type User } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { useConfig } from "@/lib/config";
 import { toastApiError } from "@/lib/errors";
@@ -23,6 +23,7 @@ export default function SettingsPage() {
 const SECTIONS = [
   ["profile", "Profile"],
   ["security", "Password"],
+  ["organization", "Organization"],
   ["appearance", "Appearance"],
   ["notifications", "Notifications"],
   ["account", "Account"],
@@ -50,7 +51,7 @@ function Settings() {
     <div className="wrap" style={{ paddingBottom: 40 }}>
       <div className="pagehead">
         <h1>Settings</h1>
-        <p>Manage your profile, password, appearance, email and team.</p>
+        <p>Your profile, password, organization policy, appearance and email.</p>
       </div>
       <nav aria-label="Settings sections" className="row wrapflex" style={{ gap: 6, marginBottom: 18 }}>
         {SECTIONS.map(([id, label]) => (
@@ -65,6 +66,7 @@ function Settings() {
           <PasswordCard />
         </div>
         <div className="stack">
+          <OrganizationCard />
           <AppearanceCard />
           <NotificationsCard user={user} />
           <AccountCard user={user} />
@@ -82,8 +84,8 @@ function ProfileCard({ user }: { user: User }) {
   const { setUser } = useAuth();
   const toast = useToast();
   const initial = useMemo(
-    () => ({ name: user.name, role: user.role ?? "", company: user.company ?? "", builds: user.builds ?? "" }),
-    [user.name, user.role, user.company, user.builds]
+    () => ({ name: user.name, role: user.role ?? "", company: user.company ?? "" }),
+    [user.name, user.role, user.company]
   );
   const [form, setForm] = useState(initial);
   const [saving, setSaving] = useState(false);
@@ -92,7 +94,6 @@ function ProfileCard({ user }: { user: User }) {
 
   const dirty = (Object.keys(form) as (keyof typeof form)[]).some((k) => form[k].trim() !== initial[k]);
   const nameErr = form.name.trim() ? null : "Your name can't be empty.";
-  const isDev = user.accountType === "DEVELOPER";
 
   const save = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -105,7 +106,6 @@ function ProfileCard({ user }: { user: User }) {
         role: form.role.trim() || null,
         company: form.company.trim() || null,
       };
-      if (isDev) body.builds = form.builds.trim() || null;
       const { user: u } = await api.updateMe(body);
       setUser(u);
       toast("Profile saved");
@@ -149,14 +149,6 @@ function ProfileCard({ user }: { user: User }) {
           </label>
           <input id="pf-company" className="f" value={form.company} onChange={set("company")} autoComplete="organization" maxLength={160} />
         </div>
-        {isDev && (
-          <div>
-            <label className="l" htmlFor="pf-builds">
-              What you build
-            </label>
-            <textarea id="pf-builds" className="f" rows={3} value={form.builds} onChange={set("builds")} maxLength={500} placeholder="e.g. Research and data-extraction agents" />
-          </div>
-        )}
         <div>
           <label className="l" htmlFor="pf-email">
             Email
@@ -165,6 +157,7 @@ function ProfileCard({ user }: { user: User }) {
           <div className="hint" id="pf-email-hint">
             Your sign-in email. Contact support to change it.
           </div>
+          <EmailVerification user={user} />
         </div>
       </div>
       {err && (
@@ -311,7 +304,7 @@ function NotificationsCard({ user }: { user: User }) {
     try {
       const { user: u } = await api.updateMe({ emailOnTaskDone: next });
       setUser(u);
-      toast(next ? "You'll get an email when a task finishes" : "Task emails turned off", { icon: next ? "mail" : "bell", duration: 2200 });
+      toast(next ? "You'll get an email when an objective finishes or needs you" : "Objective emails turned off", { icon: next ? "mail" : "bell", duration: 2200 });
     } catch (e) {
       setUser((u) => (u ? { ...u, emailOnTaskDone: on } : u));
       toastApiError(toast, e, "Couldn't save your email preference");
@@ -328,10 +321,10 @@ function NotificationsCard({ user }: { user: User }) {
       <div className={S.toggleRow} style={{ marginTop: 4 }}>
         <span>
           <span className="small" id="nt-done-label" style={{ fontWeight: 600, display: "block" }}>
-            Email me when a task finishes
+            Email me when an objective finishes or needs me
           </span>
           <span className="tiny muted" id="nt-done-hint" style={{ display: "block", marginTop: 2 }}>
-            A short note with a link to the report, sent to <b style={{ color: "var(--ink)", wordBreak: "break-all" }}>{user.email}</b>.
+            A short note with a link to the objective, sent to <b style={{ color: "var(--ink)", wordBreak: "break-all" }}>{user.email}</b>.
           </span>
         </span>
         <button
@@ -354,7 +347,7 @@ function NotificationsCard({ user }: { user: User }) {
         </div>
       )}
       <p className="tiny muted" style={{ marginTop: 12 }}>
-        In-app alerts for finished, failed and refunded tasks always appear under the bell in the header.
+        Approvals and exceptions always appear in the header, the briefing and their own centers.
       </p>
     </section>
   );
@@ -362,77 +355,188 @@ function NotificationsCard({ user }: { user: User }) {
 
 // ------------------------------------------------------------- account
 function AccountCard({ user }: { user: User }) {
-  const isDev = user.accountType === "DEVELOPER";
-  const { config } = useConfig();
   const teamWallet = user.walletOwner === "team";
   return (
     <section className="card" id="account" style={anchor} aria-labelledby="h-acct">
       <h3 id="h-acct">Account</h3>
       <div style={{ marginTop: 8 }}>
         <div className="kv">
-          <span className="muted">Account type</span>
-          <Tag variant={isDev ? "accent" : "gray"} icon={isDev ? "code" : "user"}>
-            {isDev ? "Developer" : "Company"}
-          </Tag>
-        </div>
-        <div className="kv">
           <span className="muted">Member since</span>
           <b>{longDate(user.createdAt)}</b>
         </div>
         <div className="kv" id="team" style={anchor}>
-          <span className="muted">Team</span>
-          {user.team ? (
-            <Link href={ROUTES.team} className="row" style={{ gap: 8, color: "var(--ink)", minWidth: 0 }}>
-              <b style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 180 }}>{user.team.name}</b>
-              <Tag variant={user.team.role === "OWNER" ? "accent" : "gray"}>{user.team.role === "OWNER" ? "Owner" : "Member"}</Tag>
-              <Icon name="chev" size={14} />
-              <span className="sr-only">Manage team</span>
-            </Link>
-          ) : (
-            <Link href={ROUTES.team} className="small" style={{ color: "var(--accent)", fontWeight: 600 }}>
-              Create or join a team
-            </Link>
-          )}
+          <span className="muted">Organization members</span>
+          <Link href={ROUTES.members} className="row" style={{ gap: 8, color: "var(--ink)", minWidth: 0 }}>
+            {user.team ? (
+              <>
+                <b style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 180 }}>{user.team.name}</b>
+                <Tag variant={user.team.role === "OWNER" ? "accent" : "gray"}>{user.team.role === "OWNER" ? "Owner" : "Member"}</Tag>
+              </>
+            ) : (
+              <span className="small" style={{ color: "var(--accent)", fontWeight: 600 }}>
+                Invite colleagues
+              </span>
+            )}
+            <Icon name="chev" size={14} />
+          </Link>
         </div>
         <div className="kv">
           <span className="muted">
-            {config.paymentsEnabled ? "Credits" : "Demo credits"}
-            {teamWallet && <span className="tiny"> · team wallet</span>}
+            Balance
+            {teamWallet && <span className="tiny"> · organization wallet</span>}
           </span>
           <b>{eur(user.credits)}</b>
         </div>
         <div className="kv" style={{ borderBottom: 0 }}>
           <span className="muted">Plan</span>
-          <b>Pay as you go</b>
+          <b>Usage-based</b>
         </div>
       </div>
-      <p className="small muted" style={{ margin: "8px 0 12px" }}>
-        {isDev
-          ? "You can publish agents to the marketplace and earn 80% of every task they run — and hire agents for your own work too."
-          : "You hire agent teams for outcomes. Building agents yourself? Developer accounts can publish to the marketplace."}
-      </p>
-      <div className="row wrapflex">
-        {isDev ? (
-          <Link className="btn sm" href={ROUTES.devDashboard}>
-            <Icon name="chart" />
-            Developer dashboard
-          </Link>
-        ) : (
-          <Link className="btn sm" href={ROUTES.developers}>
-            <Icon name="code" />
-            For developers
-          </Link>
-        )}
-        <Link className="btn sm" href={ROUTES.billing}>
+      <div className="row wrapflex" style={{ marginTop: 12 }}>
+        <Link className="btn sm" href={ROUTES.usage}>
           <Icon name="wallet" />
-          Payments
+          Usage & balance
         </Link>
-        <Link className="btn sm" href={ROUTES.team}>
+        <Link className="btn sm" href={ROUTES.members}>
           <Icon name="user" />
-          {user.team ? "Team" : "Start a team"}
+          Members
         </Link>
       </div>
     </section>
+  );
+}
+
+// ------------------------------------------------------------- email verification
+function EmailVerification({ user }: { user: User }) {
+  const toast = useToast();
+  const { loaded, config } = useConfig();
+  const [busy, setBusy] = useState(false);
+  const [sent, setSent] = useState(false);
+  if (user.emailVerified) {
+    return (
+      <div className="tiny" style={{ marginTop: 6, color: "var(--ok)" }}>
+        <Icon name="check" size={12} /> Verified
+      </div>
+    );
+  }
+  const send = async () => {
+    setBusy(true);
+    try {
+      const r = await api.requestEmailVerification();
+      setSent(true);
+      toast(r.sent ? "Verification link sent — check your inbox" : "Verification requested", { icon: "mail" });
+    } catch (e) {
+      toastApiError(toast, e, "Couldn't send the verification email");
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="row wrapflex" style={{ marginTop: 8, gap: 8 }}>
+      <Tag variant="warn">Not verified</Tag>
+      <button type="button" className="btn sm" onClick={send} disabled={busy || sent} aria-busy={busy}>
+        {sent ? "Link sent" : "Send verification link"}
+      </button>
+      {loaded && !config.emailEnabled && <span className="tiny muted">Email isn&apos;t enabled on this server — an operator can verify you instead.</span>}
+    </div>
+  );
+}
+
+// ------------------------------------------------------------- organization policy
+function OrganizationCard() {
+  const toast = useToast();
+  const [org, setOrg] = useState<Organization | null>(null);
+  const [name, setName] = useState("");
+  const [autonomy, setAutonomy] = useState<Autonomy>("REVIEW_PLAN");
+  const [threshold, setThreshold] = useState(20);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    api
+      .getOrg()
+      .then(({ organization: o }) => {
+        setOrg(o);
+        setName(o.name);
+        setAutonomy(o.defaultAutonomy);
+        setThreshold(Math.round(o.approvalThresholdCents / 100));
+      })
+      .catch(() => undefined);
+  }, []);
+
+  if (!org) {
+    return (
+      <section className="card" id="organization" style={anchor}>
+        <h3>Organization</h3>
+        <div className="sk" style={{ height: 80, marginTop: 10 }} />
+      </section>
+    );
+  }
+  const owner = org.role === "OWNER";
+  const thresholdCents = Math.max(0, Math.min(50_000, Math.round(threshold * 100)));
+  const dirty = name.trim() !== org.name || autonomy !== org.defaultAutonomy || thresholdCents !== org.approvalThresholdCents;
+
+  const save = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!dirty || name.trim().length < 2) return;
+    setSaving(true);
+    try {
+      const { organization } = await api.updateOrg({ name: name.trim(), defaultAutonomy: autonomy, approvalThresholdCents: thresholdCents });
+      setOrg(organization);
+      toast("Organization policy saved");
+    } catch (e2) {
+      toastApiError(toast, e2, "Couldn't save the organization policy");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <form className="card" id="organization" style={anchor} onSubmit={save} aria-labelledby="h-org">
+      <h3 id="h-org">Organization</h3>
+      <p className="small muted" style={{ margin: "4px 0 12px" }}>
+        How much the AI Team may do without asking. {owner ? "" : "Only the organization owner can change this."}
+      </p>
+      <fieldset disabled={!owner} style={{ border: 0, padding: 0, margin: 0 }} className="stack">
+        <div>
+          <label className="l" htmlFor="org-name">
+            Name
+          </label>
+          <input id="org-name" className="f" value={name} onChange={(e) => setName(e.target.value)} maxLength={120} />
+        </div>
+        <div>
+          <label className="l">Default autonomy for new objectives</label>
+          <div className="seg" role="radiogroup" aria-label="Default autonomy">
+            <button type="button" role="radio" aria-checked={autonomy === "REVIEW_PLAN"} className={autonomy === "REVIEW_PLAN" ? "on" : ""} onClick={() => setAutonomy("REVIEW_PLAN")}>
+              Review the plan first
+            </button>
+            <button type="button" role="radio" aria-checked={autonomy === "AUTO_WITHIN_BUDGET"} className={autonomy === "AUTO_WITHIN_BUDGET" ? "on" : ""} onClick={() => setAutonomy("AUTO_WITHIN_BUDGET")}>
+              Run automatically within budget
+            </button>
+          </div>
+        </div>
+        <div>
+          <label className="l" htmlFor="org-threshold">
+            Approval threshold
+          </label>
+          <div className="row" style={{ gap: 8, maxWidth: 200 }}>
+            <span className="muted">€</span>
+            <input id="org-threshold" className="f" type="number" min={0} max={500} step={1} value={threshold} onChange={(e) => setThreshold(Number(e.target.value || 0))} />
+          </div>
+          <p className="hint">Any execution estimated above this needs explicit approval, whatever the objective&apos;s autonomy. €0 means every execution asks.</p>
+        </div>
+      </fieldset>
+      {owner && (
+        <div className="row" style={{ marginTop: 14 }}>
+          <button type="submit" className="btn p sm" disabled={!dirty || saving || name.trim().length < 2} aria-busy={saving}>
+            Save policy
+          </button>
+          {!dirty && <span className="tiny muted">All changes saved</span>}
+        </div>
+      )}
+      <p className="tiny muted" style={{ marginTop: 12 }}>
+        Whatever the policy, the AI Team only reads, researches, analyses and drafts. It never sends, publishes, changes external systems or spends money outside an approved execution.
+      </p>
+    </form>
   );
 }
 
@@ -464,7 +568,7 @@ function GuestSettings({ user }: { user: User }) {
             <span className={S.guestIco} aria-hidden="true">
               <Icon name="spark" size={20} />
             </span>
-            <h3 id="h-guest" className="serif" style={{ fontSize: 24, fontWeight: 600, letterSpacing: "-.02em", lineHeight: 1.15 }}>
+            <h3 id="h-guest" style={{ fontSize: 24, fontWeight: 600, letterSpacing: "-.02em", lineHeight: 1.15 }}>
               Create a free account
             </h3>
             <p className="small muted" style={{ marginTop: 6 }}>
@@ -472,10 +576,10 @@ function GuestSettings({ user }: { user: User }) {
             </p>
             <ul className={S.perks}>
               {[
-                "Keep your trial task and report — no 7-day limit",
+                "Keep your trial objective and its results — no 7-day limit",
                 "Sign in from any device with your email and password",
-                "Get an email when a task finishes",
-                "Run more tasks, follow-ups and recurring workflows",
+                "Get an email when an objective finishes or needs you",
+                "Company Context, memory and recurring objectives",
               ].map((p) => (
                 <li key={p}>
                   <Icon name="check" size={15} />
@@ -525,11 +629,11 @@ function GuestSettings({ user }: { user: User }) {
 
       <Modal open={confirmEnd} onClose={() => setConfirmEnd(false)} title="End your free trial?">
         <p className="muted small" style={{ margin: "6px 0 16px" }}>
-          Guest sessions don&apos;t have a password, so once you end this one your trial task and report can&apos;t be opened again. Save them with a free account first if you want to keep them.
+          Guest sessions don&apos;t have a password, so once you end this one your trial objective and its results can&apos;t be opened again. Save them with a free account first if you want to keep them.
         </p>
         <div className="row wrapflex">
           <Link className="btn p" href={claimHref} data-autofocus>
-            Save my results
+            Save my work
           </Link>
           <button type="button" className="btn bad" onClick={endSession}>
             End session
@@ -571,7 +675,7 @@ function DangerCard() {
       <div className="lane" style={{ borderBottom: 0 }}>
         <div className="sp">
           <b className="small">Delete account</b>
-          <div className="tiny muted">Permanently remove your account, tasks and workflows.</div>
+          <div className="tiny muted">Permanently remove your account, objectives and reports.</div>
         </div>
         <button type="button" className="btn bad sm" onClick={() => setDel(true)}>
           <Icon name="trash" />
@@ -581,7 +685,7 @@ function DangerCard() {
 
       <Modal open={confirmOut} onClose={() => setConfirmOut(false)} title="Sign out?">
         <p className="muted small" style={{ margin: "6px 0 16px" }}>
-          You'll need your email and password to get back in. Running tasks keep going while you're away.
+          You&apos;ll need your email and password to get back in. Objectives in progress keep running while you&apos;re away.
         </p>
         <div className="row">
           <button type="button" className="btn" onClick={() => setConfirmOut(false)} data-autofocus>
@@ -595,11 +699,11 @@ function DangerCard() {
 
       <Modal open={del} onClose={() => setDel(false)} title="Delete your account">
         <p className="muted small" style={{ margin: "6px 0 12px" }}>
-          Self-service account deletion isn't available yet. To delete your account and all its data, contact support and we'll take care of it — usually within two business days.
+          Self-service account deletion isn&apos;t available yet. To delete your account and all its data, contact support and we&apos;ll take care of it — usually within two business days.
         </p>
         <div className="notice" style={{ marginBottom: 16, background: "var(--surface2)", color: "var(--muted)" }}>
           <Icon name="info" />
-          <span>Your demo credits, tasks and workflows stay untouched until then.</span>
+          <span>Your balance, objectives and reports stay untouched until then.</span>
         </div>
         <div className="row">
           <button type="button" className="btn" onClick={() => setDel(false)} data-autofocus>
