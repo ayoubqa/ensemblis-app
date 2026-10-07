@@ -6,12 +6,13 @@ import { useCallback, useEffect, useMemo, useRef, useState, KeyboardEvent as Rea
 import { api, type Task } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { eur, relativeTime } from "@/lib/format";
-import { useOnClickOutside, usePolling } from "@/lib/hooks";
+import { useMediaQuery, useOnClickOutside, usePolling } from "@/lib/hooks";
 import { ROUTES } from "@/lib/routes";
 import { storage } from "@/lib/utils";
 import { Avatar } from "./Avatar";
 import { Icon, type IconName } from "./Icon";
 import { Logo } from "./Logo";
+import { Modal } from "./Modal";
 import { useShell } from "./Shell";
 import { ThemeSwitch } from "./ThemeSwitch";
 import { useToast } from "./Toast";
@@ -43,7 +44,7 @@ export const SIGNED_NAV: NavItem[] = [
   {
     href: ROUTES.dashboard,
     label: "Dashboard",
-    match: (p) => p === "/dashboard" || starts(p, "/billing", "/settings"),
+    match: (p) => p === "/dashboard" || starts(p, "/billing", "/settings", "/team", "/admin"),
   },
   {
     href: ROUTES.tasks,
@@ -193,19 +194,46 @@ function MenuLink({
   children,
   onSelect,
   right,
+  style,
 }: {
   href: string;
   icon: IconName;
   children: React.ReactNode;
   onSelect: () => void;
   right?: React.ReactNode;
+  style?: React.CSSProperties;
 }) {
   return (
-    <Link href={href} role="menuitem" onClick={onSelect}>
+    <Link href={href} role="menuitem" onClick={onSelect} style={style}>
       <Icon name={icon} />
       {children}
       {right && <span style={{ marginLeft: "auto" }}>{right}</span>}
     </Link>
+  );
+}
+
+/** Where a guest goes to turn the trial into a real account (keeps their work). */
+export const CLAIM_HREF = `${ROUTES.signup}?claim=1`;
+
+/** Tiny "TEAM" marker shown next to a balance that is the shared team wallet. */
+function TeamMark() {
+  return (
+    <span
+      aria-hidden="true"
+      style={{
+        fontSize: 9.5,
+        fontWeight: 800,
+        letterSpacing: ".06em",
+        textTransform: "uppercase",
+        padding: "1px 6px",
+        borderRadius: 999,
+        background: "var(--accent)",
+        color: "var(--accent-ink)",
+        lineHeight: 1.5,
+      }}
+    >
+      team
+    </span>
   );
 }
 
@@ -227,6 +255,17 @@ export function Header() {
   const pMenu = useRef<HTMLDivElement>(null);
   const notif = useNotifications(!!user, user?.id);
   const [seenSnapshot, setSeenSnapshot] = useState(0);
+  const [confirmExit, setConfirmExit] = useState(false);
+  const phone = useMediaQuery("(max-width: 560px)");
+  const isGuest = !!user?.isGuest;
+  const teamWallet = !!user && user.walletOwner === "team";
+  const walletTitle = !user
+    ? ""
+    : teamWallet
+      ? `Team wallet — ${user.team?.name ?? "your team"}`
+      : isGuest
+        ? "Trial credits — save your work to keep going"
+        : "Credit balance — top up in Billing";
 
   const close = useCallback(() => setMenu(null), []);
   useOnClickOutside([nRef, pRef], close, menu !== null);
@@ -243,12 +282,14 @@ export function Header() {
     if (viaKeyboard) requestAnimationFrame(() => focusItem(m === "n" ? nMenu.current : pMenu.current, "first"));
   };
 
-  const nav = user ? SIGNED_NAV : PUBLIC_NAV;
+  // Guests carry a wider right-hand cluster ("Save your work"); keep their nav to the essentials so nothing overlaps.
+  const nav = user ? (isGuest ? SIGNED_NAV.slice(0, 3) : SIGNED_NAV) : PUBLIC_NAV;
 
   const doSignOut = () => {
     setMenu(null);
+    setConfirmExit(false);
     signOut();
-    toast("Signed out");
+    toast(isGuest ? "Guest session ended" : "Signed out");
     router.push(ROUTES.home);
   };
 
@@ -266,8 +307,7 @@ export function Header() {
             );
           })}
         </nav>
-        <div className="sp" />
-        <div className="hdr-r">
+        <div className={isGuest ? "hdr-r crowded guest" : teamWallet ? "hdr-r crowded" : "hdr-r"}>
           <button
             type="button"
             className="ibtn"
@@ -275,6 +315,7 @@ export function Header() {
             aria-label="Search or jump to anything"
             title="Search or jump to anything (⌘K)"
             aria-keyshortcuts="Meta+K Control+K /"
+            data-hdr-search
           >
             <Icon name="search" />
           </button>
@@ -292,22 +333,35 @@ export function Header() {
             />
           ) : user ? (
             <>
-              <Link href={ROUTES.newTask} className="btn p sm hdr-new hideS" aria-label="New task" aria-keyshortcuts="N">
+              <Link href={ROUTES.newTask} className={isGuest ? "btn sm hdr-new hideS" : "btn p sm hdr-new hideS"} aria-label="New task" aria-keyshortcuts="N">
                 <Icon name="plus" />
                 <span className="lbl">New task</span>
               </Link>
               <Link
                 href={ROUTES.billing}
                 className="credpill hideS"
-                title="Credit balance — top up in Billing"
-                aria-label={`Credit balance ${eur(user.credits)}`}
+                title={walletTitle}
+                aria-label={`Credit balance ${eur(user.credits)}${teamWallet ? ` — team wallet${user.team ? `, ${user.team.name}` : ""}` : isGuest ? " — trial credits" : ""}`}
               >
                 <Icon name="eur" size={14} />
                 {eur(user.credits)}
+                {teamWallet && <TeamMark />}
               </Link>
 
-              {/* Notifications */}
-              <div className="rel" ref={nRef}>
+              {isGuest && (
+                <>
+                  <span className="tag warn hdr-guest-tag" title="You're trying Ensemblis without an account. Save your work to keep it.">
+                    <Icon name="user" />
+                    Guest
+                  </span>
+                  <Link href={CLAIM_HREF} className="btn p sm" title="Create a free account and keep everything you've done as a guest">
+                    {phone ? "Save work" : "Save your work"}
+                  </Link>
+                </>
+              )}
+
+              {/* Notifications (guests on phones: hidden to make room for "Save work") */}
+              <div className={isGuest ? "rel hideS" : "rel"} ref={nRef}>
                 <button
                   type="button"
                   className="ibtn"
@@ -396,9 +450,9 @@ export function Header() {
                     style={{ minWidth: 270 }}
                   >
                     <div className="mi">
-                      <Avatar name={user.name} hue={250} round style={{ width: 36, height: 36 }} />
+                      <Avatar name={isGuest ? "Guest" : user.name} hue={250} round style={{ width: 36, height: 36 }} />
                       <div style={{ minWidth: 0 }}>
-                        <b>{user.name}</b>
+                        <b>{isGuest ? "Guest session" : user.name}</b>
                         <div
                           className="tiny muted"
                           style={{
@@ -406,30 +460,83 @@ export function Header() {
                             textOverflow: "ellipsis",
                           }}
                         >
-                          {[user.company, user.role].filter(Boolean).join(" · ") || user.email}
+                          {isGuest
+                            ? `${eur(user.credits)} trial credits · not saved yet`
+                            : user.team
+                              ? `${user.team.name} · ${user.team.role === "OWNER" ? "Team owner" : "Team member"}`
+                              : [user.company, user.role].filter(Boolean).join(" · ") || user.email}
                         </div>
                       </div>
                     </div>
                     <hr />
-                    <MenuLink href={ROUTES.profile} icon="user" onSelect={close}>
-                      Profile
-                    </MenuLink>
-                    <MenuLink href={ROUTES.settings} icon="settings" onSelect={close}>
-                      Settings
-                    </MenuLink>
-                    <MenuLink href={ROUTES.billing} icon="eur" onSelect={close} right={<span className="tiny muted">{eur(user.credits)}</span>}>
-                      Billing
-                    </MenuLink>
-                    <MenuLink href={ROUTES.workflows} icon="redo" onSelect={close}>
-                      Workflows
-                    </MenuLink>
-                    <MenuLink href={ROUTES.workforce} icon="layers" onSelect={close}>
-                      My Workforce
-                    </MenuLink>
-                    {user.accountType === "DEVELOPER" && (
-                      <MenuLink href={ROUTES.devDashboard} icon="code" onSelect={close}>
-                        Developer dashboard
-                      </MenuLink>
+                    {isGuest ? (
+                      <>
+                        <MenuLink href={CLAIM_HREF} icon="check" onSelect={close} style={{ color: "var(--accent)", fontWeight: 700 }}>
+                          Save your work
+                        </MenuLink>
+                        <p className="tiny muted" style={{ padding: "0 10px 6px 36px", margin: 0, maxWidth: 260 }}>
+                          Create a free account to keep your tasks and unlock workflows, teams and more.
+                        </p>
+                        <MenuLink href={ROUTES.tasks} icon="list" onSelect={close}>
+                          My work
+                        </MenuLink>
+                        <MenuLink href={ROUTES.examples} icon="file" onSelect={close}>
+                          Examples
+                        </MenuLink>
+                      </>
+                    ) : (
+                      <>
+                        <MenuLink href={ROUTES.profile} icon="user" onSelect={close}>
+                          Profile
+                        </MenuLink>
+                        <MenuLink href={ROUTES.settings} icon="settings" onSelect={close}>
+                          Settings
+                        </MenuLink>
+                        <MenuLink
+                          href={ROUTES.billing}
+                          icon="eur"
+                          onSelect={close}
+                          right={
+                            <span className="tiny muted row" style={{ gap: 6 }} title={walletTitle}>
+                              {eur(user.credits)}
+                              {teamWallet && <TeamMark />}
+                            </span>
+                          }
+                        >
+                          Billing
+                        </MenuLink>
+                        <MenuLink
+                          href={ROUTES.team}
+                          icon="share"
+                          onSelect={close}
+                          right={
+                            <span className="tiny muted" style={{ maxWidth: 110, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "block" }}>
+                              {user.team ? user.team.name : "Invite people"}
+                            </span>
+                          }
+                        >
+                          Team
+                        </MenuLink>
+                        <MenuLink href={ROUTES.workflows} icon="redo" onSelect={close}>
+                          Workflows
+                        </MenuLink>
+                        <MenuLink href={ROUTES.workforce} icon="layers" onSelect={close}>
+                          My Workforce
+                        </MenuLink>
+                        <MenuLink href={ROUTES.examples} icon="file" onSelect={close}>
+                          Examples
+                        </MenuLink>
+                        {user.accountType === "DEVELOPER" && (
+                          <MenuLink href={ROUTES.devDashboard} icon="code" onSelect={close}>
+                            Developer dashboard
+                          </MenuLink>
+                        )}
+                        {user.isAdmin && (
+                          <MenuLink href={ROUTES.admin} icon="chart" onSelect={close}>
+                            Owner dashboard
+                          </MenuLink>
+                        )}
+                      </>
                     )}
                     <hr />
                     <div className="mi-row">
@@ -449,13 +556,42 @@ export function Header() {
                       <kbd className="kbd">?</kbd>
                     </button>
                     <hr />
-                    <button type="button" role="menuitem" onClick={doSignOut}>
-                      <Icon name="out" />
-                      Sign out
-                    </button>
+                    {isGuest ? (
+                      <button
+                        type="button"
+                        role="menuitem"
+                        onClick={() => {
+                          close();
+                          setConfirmExit(true);
+                        }}
+                      >
+                        <Icon name="out" />
+                        End guest session
+                      </button>
+                    ) : (
+                      <button type="button" role="menuitem" onClick={doSignOut}>
+                        <Icon name="out" />
+                        Sign out
+                      </button>
+                    )}
                   </div>
                 )}
               </div>
+
+              <Modal open={confirmExit} onClose={() => setConfirmExit(false)} title="End your guest session?">
+                <p className="muted small" style={{ margin: "6px 0 16px" }}>
+                  Guest work isn&apos;t saved to an account. If you end the session now, you won&apos;t be able to get back to your tasks or
+                  results. Create a free account first to keep them.
+                </p>
+                <div className="row wrapflex">
+                  <Link href={CLAIM_HREF} className="btn p" onClick={() => setConfirmExit(false)} data-autofocus>
+                    Save your work
+                  </Link>
+                  <button type="button" className="btn bad" onClick={doSignOut}>
+                    End session
+                  </button>
+                </div>
+              </Modal>
             </>
           ) : (
             <>
@@ -505,18 +641,23 @@ export function BottomNav() {
           icon: "plus",
           on: starts(pathname, "/new"),
         },
-        {
-          href: ROUTES.workflows,
-          label: "Flows",
-          icon: "layers",
-          on: starts(pathname, "/workflows"),
-        },
-        {
-          href: ROUTES.settings,
-          label: "Profile",
-          icon: "user",
-          on: starts(pathname, "/settings", "/billing", "/workforce"),
-        },
+        // Guests can't use workflows or settings yet: show examples + the "save your work" path instead.
+        user.isGuest
+          ? { href: ROUTES.examples, label: "Examples", icon: "file", on: starts(pathname, "/examples") }
+          : {
+              href: ROUTES.workflows,
+              label: "Flows",
+              icon: "layers",
+              on: starts(pathname, "/workflows"),
+            },
+        user.isGuest
+          ? { href: CLAIM_HREF, label: "Save", icon: "check", on: starts(pathname, "/signup") }
+          : {
+              href: ROUTES.settings,
+              label: "Profile",
+              icon: "user",
+              on: starts(pathname, "/settings", "/billing", "/workforce", "/team"),
+            },
       ]
     : [
         {

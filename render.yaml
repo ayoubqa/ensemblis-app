@@ -73,3 +73,65 @@ services:
         value: "150"
       - key: MAX_DESCRIPTION_LENGTH
         value: "4000"
+
+      # --- v3: public URL + owner dashboard (entered by you) ---
+      - key: APP_URL # your Vercel URL, e.g. https://ensemblis.vercel.app — used in emails, share links, Stripe redirects
+        sync: false
+      - key: ADMIN_EMAILS # your own email(s), comma-separated: unlocks /admin
+        sync: false
+
+      # --- v3: web research (Tavily when the key is set, otherwise free Wikipedia) ---
+      - key: TAVILY_API_KEY # optional, free at https://app.tavily.com
+        sync: false
+      - key: SEARCH_DAILY_BUDGET
+        value: "30"
+      # Smaller, faster Groq model for quick helper calls (clarifying questions).
+      - key: OPENAI_FAST_MODEL
+        value: openai/gpt-oss-20b
+
+      # --- v3: email via Resend (optional; off until both are set) ---
+      - key: RESEND_API_KEY
+        sync: false
+      - key: EMAIL_FROM # e.g. Ensemblis <hello@yourdomain.com>
+        sync: false
+
+      # --- v3: Stripe Checkout (optional; off until both are set — use test keys first) ---
+      - key: STRIPE_SECRET_KEY
+        sync: false
+      - key: STRIPE_WEBHOOK_SECRET # endpoint: https://<this service>/api/billing/stripe/webhook
+        sync: false
+
+      # --- v3: Cloudflare Turnstile bot check (optional; off until both are set) ---
+      - key: TURNSTILE_SITE_KEY
+        sync: false
+      - key: TURNSTILE_SECRET_KEY
+        sync: false
+
+      # --- v3: guest trial ("try without signing up") ---
+      - key: GUEST_TRIAL_ENABLED
+        value: "true"
+      # Enough for any one "focused" task with the default catalog (max ≈ €45).
+      - key: GUEST_CREDITS_CENTS
+        value: "5000"
+      - key: GUEST_MAX_TASKS
+        value: "1"
+      - key: GUEST_TRIALS_PER_IP_PER_DAY
+        value: "2"
+      - key: GUEST_TRIALS_PER_DAY
+        value: "30"
+      - key: GUEST_RETENTION_DAYS
+        value: "7"
+      - key: IP_HASH_SALT
+        generateValue: true
+
+      # --- v3: task features ---
+      - key: FOLLOWUP_COST_CENTS
+        value: "200"
+      - key: CLARIFY_ENABLED
+        value: "true"
+      - key: MAX_ATTACHMENTS
+        value: "3"
+      - key: MAX_ATTACHMENT_CHARS
+        value: "40000"
+      - key: DEV_TEST_RUNS_PER_DAY
+        value: "3"

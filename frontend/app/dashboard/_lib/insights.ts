@@ -72,14 +72,19 @@ export function untilLabel(iso: string | null, now = new Date()): string {
   return shortDate(t, now);
 }
 
+/** One CSV cell, quoted when needed and safe to open in a spreadsheet. */
+export function csvCell(v: string | number | null | undefined): string {
+  let s = v === null || v === undefined ? "" : String(v);
+  // Formula injection: a cell such as =HYPERLINK(…) (a teammate's name, a task
+  // title) would run when the file is opened in Excel/Sheets. Plain numbers like "-2.00" stay numbers.
+  if (/^[=+\-@\t\r]/.test(s) && !/^-?\d+(\.\d+)?$/.test(s)) s = `'${s}`;
+  return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
+
 /** Download rows as a CSV file. Returns false if the browser blocked it. */
 export function downloadCsv(filename: string, rows: (string | number | null | undefined)[][]): boolean {
   try {
-    const esc = (v: string | number | null | undefined) => {
-      const s = v === null || v === undefined ? "" : String(v);
-      return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-    };
-    const csv = rows.map((r) => r.map(esc).join(",")).join("\r\n");
+    const csv = rows.map((r) => r.map(csvCell).join(",")).join("\r\n");
     const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");

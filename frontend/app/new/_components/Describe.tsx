@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
 import { api, type AgentDetail, type Depth, type TaskEstimate } from "@/lib/api";
 import { Avatar, CharCount, Icon, VerifiedTag } from "@/components";
 import { useConfig } from "@/lib/config";
@@ -23,6 +23,11 @@ export function Describe({
   directLoading,
   onClearDirect,
   onSubmit,
+  materials,
+  canAttach = false,
+  attachBusy = 0,
+  depthAllowed,
+  depthNote,
 }: {
   description: string;
   onDescription: (v: string) => void;
@@ -33,9 +38,25 @@ export function Describe({
   directLoading: boolean;
   onClearDirect: () => void;
   onSubmit: () => void;
+  /** Attachments panel (or the sign-up prompt); omitted when attachments are off. */
+  materials?: ReactNode;
+  /** The signed-in user can attach materials (changes the privacy note). */
+  canAttach?: boolean;
+  /** Files still being read or uploaded. */
+  attachBusy?: number;
+  depthAllowed?: Depth[];
+  depthNote?: ReactNode;
 }) {
   const taRef = useRef<HTMLTextAreaElement>(null);
   const [error, setError] = useState<string | null>(null);
+  const [waitingForFiles, setWaitingForFiles] = useState(false);
+  // Once the files finish, drop the "still reading" message.
+  useEffect(() => {
+    if (waitingForFiles && attachBusy === 0) {
+      setWaitingForFiles(false);
+      setError(null);
+    }
+  }, [waitingForFiles, attachBusy]);
   const { config } = useConfig();
   const maxLen = config.maxDescriptionLength;
 
@@ -78,6 +99,11 @@ export function Describe({
     if (description.length > maxLen) {
       setError(`Please shorten your brief to ${maxLen.toLocaleString("en")} characters or fewer.`);
       taRef.current?.focus();
+      return;
+    }
+    if (attachBusy > 0) {
+      setWaitingForFiles(true);
+      setError(`Hang on — still reading ${attachBusy === 1 ? "1 file" : `${attachBusy} files`}. Try again in a moment.`);
       return;
     }
     setError(null);
@@ -176,11 +202,13 @@ export function Describe({
           </span>
         </div>
 
+        {materials}
+
         <div style={{ marginTop: 22 }}>
           <div className="tiny muted" id="depth-label" style={{ marginBottom: 8 }}>
             Depth · how thorough the team should be
           </div>
-          <DepthPicker value={depth} onChange={onDepth} />
+          <DepthPicker value={depth} onChange={onDepth} allowed={depthAllowed} note={depthNote} />
         </div>
 
         <div className="tiny muted" style={{ margin: "22px 0 8px" }}>
@@ -208,7 +236,7 @@ export function Describe({
         <div className="small muted" style={{ marginTop: 16, display: "flex", gap: 7, alignItems: "flex-start" }}>
           <Icon name="lock" />
           <span>
-            Your task description is sent to our AI provider ({config.aiProviderLabel}) to produce the result. It&apos;s never sold. Don&apos;t include confidential or other people&apos;s personal information.
+            Your task description{canAttach ? " and any materials you attach are" : " is"} sent to our AI provider ({config.aiProviderLabel}) to produce the result. It&apos;s never sold. Don&apos;t include confidential or other people&apos;s personal information.
           </span>
         </div>
       </div>

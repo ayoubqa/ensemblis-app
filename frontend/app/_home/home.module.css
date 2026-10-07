@@ -1,0 +1,346 @@
+/* Home page — guest trial + example-report promotion (team F3). */
+
+/* ---------- hero composer: trial button ---------- */
+.trialBtn {
+  white-space: nowrap;
+}
+.trialBtn small {
+  font-size: inherit;
+  font-weight: 500;
+  color: var(--muted);
+}
+@media (max-width: 560px) {
+  /* Three actions on a phone: let the two main ones share a full row evenly. */
+  .previewBtn,
+  .trialBtn,
+  .goBtn {
+    flex: 1 1 auto;
+    justify-content: center;
+  }
+}
+
+/* ---------- trial modal ---------- */
+.facts {
+  list-style: none;
+  margin: 14px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+.fact {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  font-size: 14px;
+  line-height: 1.4;
+}
+.fact b {
+  font-weight: 600;
+}
+.factIco {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.brief {
+  margin-top: 18px;
+}
+.brief textarea {
+  resize: vertical;
+  min-height: 84px;
+  max-height: 220px;
+  line-height: 1.45;
+}
+.costLine {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  margin-top: 7px;
+  font-size: 12.5px;
+  line-height: 1.4;
+  color: var(--muted);
+  min-height: 18px;
+}
+.costLine > svg,
+.costLine > .spinWrap {
+  flex: none;
+  margin-top: 1px;
+}
+.costOk {
+  color: var(--ok);
+}
+.costWarn {
+  color: var(--warn);
+}
+.agree {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  cursor: pointer;
+  line-height: 1.45;
+  font-size: 13px;
+  margin-top: 16px;
+}
+.agree input {
+  width: 18px;
+  height: 18px;
+  margin-top: 1px;
+  flex: none;
+  accent-color: var(--accent);
+}
+.agree a {
+  color: var(--accent);
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.problem {
+  margin-top: 16px;
+  border-radius: 12px;
+  padding: 12px 14px;
+  font-size: 13px;
+  line-height: 1.45;
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}
+.problem > svg {
+  flex: none;
+  margin-top: 2px;
+}
+.problem b {
+  display: block;
+  font-size: 14px;
+  margin-bottom: 2px;
+}
+.problem p {
+  margin: 0;
+}
+.problemBad {
+  background: var(--bad-soft);
+  color: var(--bad);
+}
+.problemWarn {
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+.problemInfo {
+  background: var(--accent-soft);
+  color: var(--ink);
+}
+.problemInfo > svg {
+  color: var(--accent);
+}
+.problemActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+.session {
+  margin-top: 16px;
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px dashed var(--line2);
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--muted);
+}
+.session > svg {
+  flex: none;
+  color: var(--ok);
+  margin-top: 1px;
+}
+.session b {
+  color: var(--ink);
+}
+.fine {
+  text-align: center;
+  margin-top: 14px;
+}
+
+/* ---------- "See a finished report" ---------- */
+.exCard {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  height: 100%;
+  min-height: 330px;
+  color: var(--ink);
+}
+.exCard h3 {
+  font-family: var(--serif);
+  font-weight: 600;
+  font-size: 20px;
+  line-height: 1.22;
+  letter-spacing: -0.02em;
+  margin: 0;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.exSummary {
+  margin: 0 0 auto; /* push the footer down without stretching the clamped box (no half-cut 4th line) */
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.paper {
+  position: relative;
+  height: 112px;
+  margin: -6px -6px 2px;
+  border-radius: 11px;
+  overflow: hidden;
+  background:
+    radial-gradient(120% 90% at 100% 0%, color-mix(in srgb, var(--cyan) 22%, transparent), transparent 60%),
+    linear-gradient(135deg, var(--accent-soft), var(--surface2));
+  border: 1px solid var(--line);
+}
+.sheet {
+  position: absolute;
+  left: 18px;
+  top: 16px;
+  width: 58%;
+  bottom: -14px;
+  background: var(--surface);
+  border: 1px solid var(--line2);
+  border-radius: 8px;
+  padding: 12px 12px 0;
+  box-shadow: 0 8px 24px color-mix(in srgb, var(--ink) 10%, transparent);
+  transform: rotate(-2.5deg);
+  transition: transform 0.25s ease;
+}
+.exCard:hover .sheet,
+.exCard:focus-visible .sheet {
+  transform: rotate(0deg) translateY(-3px);
+}
+.sheet i {
+  display: block;
+  height: 5px;
+  border-radius: 3px;
+  background: var(--line2);
+  margin-bottom: 7px;
+}
+.sheet i:first-child {
+  height: 7px;
+  width: 62%;
+  background: color-mix(in srgb, var(--accent) 55%, var(--line2));
+  margin-bottom: 10px;
+}
+.sheet i:nth-child(3) {
+  width: 84%;
+}
+.sheet i:nth-child(4) {
+  width: 70%;
+}
+.cites {
+  position: absolute;
+  right: 12px;
+  top: 14px;
+  bottom: 12px;
+  width: 36%;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: flex-end;
+  gap: 6px;
+}
+.cite {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 100%;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 8px 3px 4px;
+  border-radius: 999px;
+  background: var(--surface);
+  border: 1px solid var(--line2);
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.cite span {
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-size: 10px;
+}
+.cite em {
+  font-style: normal;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.exFacts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.exFact {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  color: var(--muted);
+  padding: 3px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--surface2);
+}
+.exFoot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+  font-size: 13px;
+  min-width: 0;
+}
+.exFoot b {
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.exRead {
+  margin-left: auto;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--accent);
+  font-weight: 600;
+}
+.exMore {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px 14px;
+  margin-top: 18px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .sheet,
+  .exCard:hover .sheet,
+  .exCard:focus-visible .sheet {
+    transition: none;
+    transform: rotate(-2.5deg);
+  }
+}

@@ -5,24 +5,50 @@
 //                 No account, no payment, nothing leaves your machine.
 //   - "openai"    (hosted, has free tiers): any OpenAI-compatible Chat
 //                 Completions API. Defaults target Groq's free plan
-//                 (Llama 3.3 70B). Use this for a public deployment — a hosted
+//                 (GPT-OSS 120B). Use this for a public deployment — a hosted
 //                 server can't reach the Ollama on your laptop.
 //   - "anthropic" (paid): the real Claude API.
 //
 // Switch between them with AI_PROVIDER in backend/.env — no code changes.
 //
-// Every call, whatever the provider, goes through one process-wide
-// concurrency limiter (MAX_CONCURRENT_LLM) so a burst of tasks queues up
-// instead of tripping a free tier's rate limits, and has a timeout
-// (LLM_TIMEOUT_MS).
+// v3: every call STREAMS. Pass `onDelta` to receive text as it is generated
+// (the orchestrator shows it live in the UI). `model: "fast"` picks a smaller,
+// cheaper model for small JSON jobs (search queries, clarifying questions).
+// Every call is metered with recordUsage (owner dashboard).
+//
+// Every call, whatever the provider, goes through a process-wide concurrency
+// limiter (MAX_CONCURRENT_LLM, one pool for the main model and one for the
+// fast model) so a burst of tasks queues up instead of tripping a free tier's
+// rate limits, and has a timeout (LLM_TIMEOUT_MS).
 
 import Anthropic from "@anthropic-ai/sdk";
+import { recordUsage } from "../lib/usage";
+
+export type Provider = "ollama" | "openai" | "anthropic";
+export type ModelTier = "main" | "fast";
+
+export interface LLMOptions {
+  /** Called with each new piece of text as it streams in. Errors thrown by it are ignored. */
+  onDelta?: (text: string) => void;
+  /** "main" (default) = the configured model; "fast" = a smaller model for quick JSON jobs. */
+  model?: ModelTier;
+  /** Links the usage event to a task (owner dashboard). */
+  taskId?: string | null;
+  /** Output token cap for this call (defaults: OPENAI_MAX_TOKENS / 4096 for Claude). */
+  maxTokens?: number;
+  /** Sampling temperature (default 0.5). */
+  temperature?: number;
+  /** Optional shorter deadline for this call, in ms (never longer than LLM_TIMEOUT_MS). */
+  timeoutMs?: number;
+}
 
 export interface LLMResult {
   text: string;
+  provider: Provider;
+  model: string;
+  tokensIn: number;
+  tokensOut: number;
 }
-
-type Provider = "ollama" | "openai" | "anthropic";
 
 function currentProvider(): Provider {
   const p = (process.env.AI_PROVIDER || "ollama").trim().toLowerCase();
@@ -31,10 +57,10 @@ function currentProvider(): Provider {
 }
 
 /** Per-call deadline. Local CPU models are slow, so Ollama gets a longer default. */
-function timeoutMs(provider: Provider): number {
+function timeoutMs(provider: Provider, override?: number): number {
   const n = Number(process.env.LLM_TIMEOUT_MS);
-  if (Number.isFinite(n) && n > 0) return n;
-  return provider === "ollama" ? 600_000 : 120_000;
+  const base = Number.isFinite(n) && n > 0 ? n : provider === "ollama" ? 600_000 : 120_000;
+  return override && override > 0 ? Math.min(base, override) : base;
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -45,6 +71,11 @@ function isAbort(err: unknown): boolean {
 
 const timeoutError = (ms: number) =>
   new Error(`The AI model took too long to respond (over ${Math.round(ms / 1000)}s). Please try again.`);
+
+const errMsg = (err: unknown) => (err instanceof Error ? err.message : String(err));
+
+/** Rough token estimate (≈4 chars/token) used only when a provider reports no usage. */
+const approxTokens = (s: string) => Math.ceil(s.length / 4);
 
 // ---------------------------------------------------------------------------
 // Concurrency limiter (shared by all providers)
@@ -79,26 +110,164 @@ export class Semaphore {
   }
 }
 
-let limiter: Semaphore | null = null;
-function getLimiter(): Semaphore {
-  if (!limiter) {
+// Separate pools so a quick "fast" call (e.g. clarifying questions while a
+// visitor waits) never queues behind minutes-long report steps. On Groq the
+// two models also have separate rate limits.
+const limiters: Partial<Record<ModelTier, Semaphore>> = {};
+function getLimiter(tier: ModelTier): Semaphore {
+  let l = limiters[tier];
+  if (!l) {
     const n = Number(process.env.MAX_CONCURRENT_LLM);
-    limiter = new Semaphore(Number.isFinite(n) && n >= 1 ? Math.floor(n) : 2);
+    l = new Semaphore(Number.isFinite(n) && n >= 1 ? Math.floor(n) : 2);
+    limiters[tier] = l;
   }
-  return limiter;
+  return l;
 }
+
+/** Calls currently waiting for a free slot of this tier (lets optional work back off under load). */
+export function llmQueueLength(tier: ModelTier): number {
+  return getLimiter(tier).queued;
+}
+
+// ---------------------------------------------------------------------------
+// Stream parsers (exported for unit tests)
+// ---------------------------------------------------------------------------
+
+/**
+ * Incremental Server-Sent Events parser. Feed it decoded text in arbitrary
+ * chunks; it calls `onData` once per complete event with the event's `data`
+ * (multiple data lines joined by "\n"). Comments (": …") and other fields are
+ * ignored.
+ */
+export class SSEParser {
+  private buf = "";
+  private data: string[] = [];
+  constructor(private readonly onData: (data: string) => void) {}
+
+  push(text: string): void {
+    this.buf += text;
+    let nl: number;
+    while ((nl = this.buf.indexOf("\n")) !== -1) {
+      let line = this.buf.slice(0, nl);
+      this.buf = this.buf.slice(nl + 1);
+      if (line.endsWith("\r")) line = line.slice(0, -1);
+      this.line(line);
+    }
+  }
+
+  /** Flushes a trailing line / pending event when the stream ends. */
+  end(): void {
+    if (this.buf) {
+      const line = this.buf.endsWith("\r") ? this.buf.slice(0, -1) : this.buf;
+      this.buf = "";
+      this.line(line);
+    }
+    this.dispatch();
+  }
+
+  private line(line: string): void {
+    if (line === "") return this.dispatch();
+    if (line.startsWith(":")) return; // comment / keep-alive
+    const colon = line.indexOf(":");
+    const field = colon === -1 ? line : line.slice(0, colon);
+    if (field !== "data") return; // event:, id:, retry: are not needed here
+    let value = colon === -1 ? "" : line.slice(colon + 1);
+    if (value.startsWith(" ")) value = value.slice(1);
+    this.data.push(value);
+  }
+
+  private dispatch(): void {
+    if (!this.data.length) return;
+    const payload = this.data.join("\n");
+    this.data = [];
+    this.onData(payload);
+  }
+}
+
+/** Incremental newline-delimited JSON parser (Ollama). Calls `onLine` per non-empty line. */
+export class NDJSONParser {
+  private buf = "";
+  constructor(private readonly onLine: (line: string) => void) {}
+
+  push(text: string): void {
+    this.buf += text;
+    let nl: number;
+    while ((nl = this.buf.indexOf("\n")) !== -1) {
+      const line = this.buf.slice(0, nl).trim();
+      this.buf = this.buf.slice(nl + 1);
+      if (line) this.onLine(line);
+    }
+  }
+
+  end(): void {
+    const line = this.buf.trim();
+    this.buf = "";
+    if (line) this.onLine(line);
+  }
+}
+
+/** Reads a fetch body as text chunks, decoding UTF-8 safely across chunk boundaries. */
+async function readTextStream(body: ReadableStream<Uint8Array>, onText: (text: string) => void): Promise<void> {
+  const reader = body.getReader();
+  const decoder = new TextDecoder("utf-8");
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (value && value.byteLength) {
+        const text = decoder.decode(value, { stream: true });
+        if (text) onText(text);
+      }
+    }
+    const rest = decoder.decode();
+    if (rest) onText(rest);
+  } finally {
+    try {
+      reader.releaseLock();
+    } catch {
+      /* already released */
+    }
+  }
+}
+
+/** Accumulates streamed text and forwards each delta to the caller. */
+class TextSink {
+  text = "";
+  emitted = false;
+  constructor(private readonly onDelta?: (text: string) => void) {}
+  add(delta: string) {
+    if (!delta) return;
+    this.text += delta;
+    this.emitted = true;
+    if (this.onDelta) {
+      try {
+        this.onDelta(delta);
+      } catch {
+        /* a broken listener must not break the model call */
+      }
+    }
+  }
+}
+
+/** An error that stops the retry loop immediately. */
+class FatalLLMError extends Error {}
 
 // ---------------------------------------------------------------------------
 // Ollama
 // ---------------------------------------------------------------------------
 
-async function runWithOllama(systemPrompt: string, userContent: string): Promise<LLMResult> {
-  const baseUrl = (process.env.OLLAMA_BASE_URL || "http://localhost:11434").replace(/\/+$/, "");
+function ollamaModel(tier: ModelTier): string {
   // llama3.2 is small and fast enough to run on a laptop CPU. Swap in a
   // bigger pulled model (e.g. llama3.1, mistral) via OLLAMA_MODEL if your
   // machine can handle it and you want better output quality.
-  const model = process.env.OLLAMA_MODEL || "llama3.2";
-  const ms = timeoutMs("ollama");
+  const main = process.env.OLLAMA_MODEL?.trim() || "llama3.2";
+  return tier === "fast" ? process.env.OLLAMA_FAST_MODEL?.trim() || main : main;
+}
+
+async function runWithOllama(systemPrompt: string, userContent: string, opts: LLMOptions, sink: TextSink): Promise<LLMResult> {
+  const baseUrl = (process.env.OLLAMA_BASE_URL || "http://localhost:11434").replace(/\/+$/, "");
+  const model = ollamaModel(opts.model ?? "main");
+  const ms = timeoutMs("ollama", opts.timeoutMs);
 
   let res: Response;
   try {
@@ -108,11 +277,19 @@ async function runWithOllama(systemPrompt: string, userContent: string): Promise
       signal: AbortSignal.timeout(ms),
       body: JSON.stringify({
         model,
-        stream: false,
+        stream: true,
         messages: [
           { role: "system", content: systemPrompt },
           { role: "user", content: userContent },
         ],
+        ...(opts.maxTokens || opts.temperature !== undefined
+          ? {
+              options: {
+                ...(opts.maxTokens ? { num_predict: opts.maxTokens } : {}),
+                ...(opts.temperature !== undefined ? { temperature: opts.temperature } : {}),
+              },
+            }
+          : {}),
       }),
     });
   } catch (err) {
@@ -120,7 +297,7 @@ async function runWithOllama(systemPrompt: string, userContent: string): Promise
     throw new Error(
       `Could not reach Ollama at ${baseUrl}. Is it running? Start it with \`ollama serve\` ` +
         `(or just open the Ollama app), and make sure you've run \`ollama pull ${model}\` at least once. ` +
-        `Original error: ${err instanceof Error ? err.message : String(err)}`
+        `Original error: ${errMsg(err)}`
     );
   }
 
@@ -128,11 +305,39 @@ async function runWithOllama(systemPrompt: string, userContent: string): Promise
     const body = await res.text().catch(() => "");
     throw new Error(`Ollama returned ${res.status}: ${body.slice(0, 300) || res.statusText}`);
   }
+  if (!res.body) throw new Error("Ollama returned an empty response");
 
-  const data = (await res.json()) as { message?: { content?: string } };
-  const text = data.message?.content;
-  if (!text) throw new Error("Ollama returned an empty response");
-  return { text };
+  let tokensIn = 0;
+  let tokensOut = 0;
+  const parser = new NDJSONParser((line) => {
+    let obj: {
+      message?: { content?: unknown };
+      error?: unknown;
+      done?: boolean;
+      prompt_eval_count?: unknown;
+      eval_count?: unknown;
+    };
+    try {
+      obj = JSON.parse(line);
+    } catch {
+      return; // ignore a malformed line
+    }
+    if (obj.error) throw new Error(`Ollama error: ${String(obj.error).slice(0, 300)}`);
+    if (typeof obj.message?.content === "string") sink.add(obj.message.content);
+    if (typeof obj.prompt_eval_count === "number") tokensIn = obj.prompt_eval_count;
+    if (typeof obj.eval_count === "number") tokensOut = obj.eval_count;
+  });
+
+  try {
+    await readTextStream(res.body, (t) => parser.push(t));
+    parser.end();
+  } catch (err) {
+    if (isAbort(err)) throw timeoutError(ms);
+    throw err;
+  }
+
+  if (!sink.text.trim()) throw new Error("Ollama returned an empty response");
+  return { text: sink.text, provider: "ollama", model, tokensIn, tokensOut };
 }
 
 // ---------------------------------------------------------------------------
@@ -142,6 +347,7 @@ async function runWithOllama(systemPrompt: string, userContent: string): Promise
 const DEFAULT_OPENAI_BASE_URL = "https://api.groq.com/openai/v1";
 // Groq retired llama-3.3-70b-versatile on 2026-08-16; gpt-oss-120b is its recommended replacement.
 const DEFAULT_OPENAI_MODEL = "openai/gpt-oss-120b";
+const DEFAULT_GROQ_FAST_MODEL = "openai/gpt-oss-20b";
 const MAX_RETRIES = 3;
 const MAX_RETRY_WAIT_MS = 20_000;
 const RETRYABLE = new Set([429, 502, 503, 504]);
@@ -162,7 +368,68 @@ function backoffMs(attempt: number, retryAfter: string | null): number {
   return Math.min(base, MAX_RETRY_WAIT_MS);
 }
 
-async function runWithOpenAI(systemPrompt: string, userContent: string): Promise<LLMResult> {
+function openaiBaseUrl(): string {
+  return (process.env.OPENAI_BASE_URL || DEFAULT_OPENAI_BASE_URL).trim().replace(/\/+$/, "");
+}
+
+function hostOf(url: string): string {
+  try {
+    return new URL(url).hostname.toLowerCase();
+  } catch {
+    return "";
+  }
+}
+
+const isGroq = (baseUrl: string) => {
+  const h = hostOf(baseUrl);
+  return h === "groq.com" || h.endsWith(".groq.com");
+};
+
+/** The model name used for a tier (exported for GET /api/config labels and tests). */
+export function openaiModel(tier: ModelTier): string {
+  const main = process.env.OPENAI_MODEL?.trim() || DEFAULT_OPENAI_MODEL;
+  if (tier === "main") return main;
+  const fast = process.env.OPENAI_FAST_MODEL?.trim();
+  if (fast) return fast;
+  return isGroq(openaiBaseUrl()) ? DEFAULT_GROQ_FAST_MODEL : main;
+}
+
+interface OpenAIChunk {
+  error?: { message?: unknown } | string;
+  choices?: { delta?: { content?: unknown }; message?: { content?: unknown }; finish_reason?: unknown }[];
+  usage?: { prompt_tokens?: unknown; completion_tokens?: unknown } | null;
+  x_groq?: { usage?: { prompt_tokens?: unknown; completion_tokens?: unknown } | null };
+}
+
+/**
+ * Applies one parsed OpenAI-compatible stream chunk. Returns usage if the
+ * chunk carried it. Throws on an in-stream error object.
+ */
+function applyOpenAIChunk(
+  obj: OpenAIChunk,
+  sink: TextSink,
+  state: { usage: { in: number; out: number } | null; finish: string | null }
+): void {
+  if (obj.error) {
+    const m = typeof obj.error === "string" ? obj.error : String(obj.error.message ?? "unknown error");
+    throw new FatalLLMError(`The AI provider reported an error mid-response: ${m.slice(0, 300)}`);
+  }
+  const choice = obj.choices?.[0];
+  // Only `content` is the answer. Reasoning models also stream `reasoning` /
+  // `reasoning_content` — deliberately ignored.
+  const piece = choice?.delta?.content ?? choice?.message?.content;
+  if (typeof piece === "string") sink.add(piece);
+  if (typeof choice?.finish_reason === "string") state.finish = choice.finish_reason;
+  const u = obj.usage ?? obj.x_groq?.usage;
+  if (u && (typeof u.prompt_tokens === "number" || typeof u.completion_tokens === "number")) {
+    state.usage = {
+      in: typeof u.prompt_tokens === "number" ? u.prompt_tokens : 0,
+      out: typeof u.completion_tokens === "number" ? u.completion_tokens : 0,
+    };
+  }
+}
+
+async function runWithOpenAI(systemPrompt: string, userContent: string, opts: LLMOptions, sink: TextSink): Promise<LLMResult> {
   const apiKey = process.env.OPENAI_API_KEY?.trim();
   if (!apiKey) {
     throw new Error(
@@ -170,13 +437,16 @@ async function runWithOpenAI(systemPrompt: string, userContent: string): Promise
         "(Owner: add your Groq/OpenAI-compatible API key to the backend's environment variables.)"
     );
   }
-  const baseUrl = (process.env.OPENAI_BASE_URL || DEFAULT_OPENAI_BASE_URL).trim().replace(/\/+$/, "");
-  const model = process.env.OPENAI_MODEL || DEFAULT_OPENAI_MODEL;
+  const baseUrl = openaiBaseUrl();
+  const model = openaiModel(opts.model ?? "main");
   // Reasoning models (gpt-oss, o-series) spend part of this budget "thinking" before answering.
-  const maxTokens = Number(process.env.OPENAI_MAX_TOKENS) || 8192;
+  const maxTokens = opts.maxTokens || Number(process.env.OPENAI_MAX_TOKENS) || 8192;
   // "low" | "medium" | "high" — only sent when set, since non-reasoning models reject it.
   const reasoningEffort = process.env.OPENAI_REASONING_EFFORT?.trim() || "";
-  const ms = timeoutMs("openai");
+  // Only api.openai.com is known to accept stream_options; other compatible
+  // providers may reject unknown fields (Groq reports usage in x_groq anyway).
+  const includeUsage = hostOf(baseUrl) === "api.openai.com";
+  const ms = timeoutMs("openai", opts.timeoutMs);
   const deadline = Date.now() + ms;
 
   for (let attempt = 0; ; attempt++) {
@@ -187,7 +457,7 @@ async function runWithOpenAI(systemPrompt: string, userContent: string): Promise
     try {
       res = await fetch(`${baseUrl}/chat/completions`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}`, Accept: "text/event-stream" },
         signal: AbortSignal.timeout(remaining),
         body: JSON.stringify({
           model,
@@ -196,30 +466,93 @@ async function runWithOpenAI(systemPrompt: string, userContent: string): Promise
             { role: "user", content: userContent },
           ],
           max_tokens: maxTokens,
-          temperature: 0.5,
+          temperature: opts.temperature ?? 0.5,
+          stream: true,
+          ...(includeUsage ? { stream_options: { include_usage: true } } : {}),
           ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
         }),
       });
     } catch (err) {
       if (isAbort(err)) throw timeoutError(ms);
-      throw new Error(`Could not reach the AI provider at ${baseUrl}: ${err instanceof Error ? err.message : String(err)}`);
+      throw new Error(`Could not reach the AI provider at ${baseUrl}: ${errMsg(err)}`);
     }
 
     if (res.ok) {
-      const data = (await res.json().catch(() => null)) as { choices?: { message?: { content?: string | null } }[] } | null;
-      const text = data?.choices?.[0]?.message?.content;
-      if (!text || !text.trim()) {
+      const state: { usage: { in: number; out: number } | null; finish: string | null } = { usage: null, finish: null };
+      const contentType = (res.headers.get("content-type") || "").toLowerCase();
+      try {
+        if (contentType.includes("application/json")) {
+          // Provider ignored stream:true and sent a normal completion.
+          const data = (await res.json().catch(() => null)) as OpenAIChunk | null;
+          if (data) applyOpenAIChunk(data, sink, state);
+        } else if (res.body) {
+          let finished = false;
+          const parser = new SSEParser((payload) => {
+            if (finished) return;
+            if (payload.trim() === "[DONE]") {
+              finished = true;
+              return;
+            }
+            let obj: OpenAIChunk | null = null;
+            try {
+              obj = JSON.parse(payload);
+            } catch {
+              // Non-compliant servers sometimes put several JSON objects on
+              // consecutive data lines without a blank line between them.
+              for (const part of payload.split("\n")) {
+                if (part.trim() === "[DONE]") {
+                  finished = true;
+                  return;
+                }
+                try {
+                  applyOpenAIChunk(JSON.parse(part), sink, state);
+                } catch (e) {
+                  if (e instanceof FatalLLMError) throw e;
+                }
+              }
+              return;
+            }
+            if (obj && typeof obj === "object") applyOpenAIChunk(obj, sink, state);
+          });
+          await readTextStream(res.body, (t) => parser.push(t));
+          parser.end();
+        }
+      } catch (err) {
+        if (err instanceof FatalLLMError) throw err;
+        if (isAbort(err)) throw timeoutError(ms);
+        // The stream broke. Retry only if nothing reached the caller yet —
+        // otherwise the live output would show the text twice.
+        if (!sink.emitted && attempt < MAX_RETRIES) {
+          const wait = backoffMs(attempt, null);
+          if (Date.now() + wait < deadline) {
+            console.warn(`[llm] stream interrupted before any output (${errMsg(err)}) — retry ${attempt + 1}/${MAX_RETRIES} in ${wait}ms`);
+            await sleep(wait);
+            continue;
+          }
+        }
+        throw new Error(`The connection to the AI provider was interrupted mid-response (${errMsg(err)}). Please try again.`);
+      }
+
+      if (!sink.text.trim()) {
         throw new Error(
           "The AI model returned an empty response" +
-            (reasoningEffort ? "" : " (for reasoning models like gpt-oss, set OPENAI_REASONING_EFFORT=low or raise OPENAI_MAX_TOKENS)")
+            (state.finish === "length" || !reasoningEffort
+              ? " (for reasoning models like gpt-oss, set OPENAI_REASONING_EFFORT=low or raise OPENAI_MAX_TOKENS)"
+              : "")
         );
       }
-      return { text };
+      return {
+        text: sink.text,
+        provider: "openai",
+        model,
+        tokensIn: state.usage?.in ?? approxTokens(systemPrompt + userContent),
+        tokensOut: state.usage?.out ?? approxTokens(sink.text),
+      };
     }
 
     const body = (await res.text().catch(() => "")).slice(0, 300);
 
-    if (RETRYABLE.has(res.status) && attempt < MAX_RETRIES) {
+    if (RETRYABLE.has(res.status) && attempt < MAX_RETRIES && !sink.emitted) {
       const wait = backoffMs(attempt, res.headers.get("retry-after"));
       if (Date.now() + wait < deadline) {
         console.warn(`[llm] ${res.status} from AI provider — retry ${attempt + 1}/${MAX_RETRIES} in ${wait}ms`);
@@ -241,7 +574,7 @@ async function runWithOpenAI(systemPrompt: string, userContent: string): Promise
       throw new Error("This request is too large for the AI model's free-tier limits. Try a shorter brief or a lighter depth.");
     }
     if (res.status === 404) {
-      throw new Error(`The AI provider doesn't recognise the model "${model}" (check OPENAI_MODEL). ${body}`.trim());
+      throw new Error(`The AI provider doesn't recognise the model "${model}" (check OPENAI_MODEL / OPENAI_FAST_MODEL). ${body}`.trim());
     }
     if (res.status >= 500) {
       throw new Error(`The AI provider is having problems right now (HTTP ${res.status}). Please try again later.`);
@@ -254,38 +587,107 @@ async function runWithOpenAI(systemPrompt: string, userContent: string): Promise
 // Anthropic
 // ---------------------------------------------------------------------------
 
-async function runWithAnthropic(systemPrompt: string, userContent: string): Promise<LLMResult> {
+function claudeModel(tier: ModelTier): string {
+  // Defaults to Haiku — the cheapest current model. Bump via CLAUDE_MODEL
+  // once quality matters more than cost.
+  const main = process.env.CLAUDE_MODEL?.trim() || "claude-haiku-4-5-20251001";
+  return tier === "fast" ? process.env.CLAUDE_FAST_MODEL?.trim() || main : main;
+}
+
+async function runWithAnthropic(systemPrompt: string, userContent: string, opts: LLMOptions, sink: TextSink): Promise<LLMResult> {
   if (!process.env.ANTHROPIC_API_KEY) {
     throw new Error("The AI provider isn't configured: ANTHROPIC_API_KEY is missing on the server.");
   }
-  const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY, timeout: timeoutMs("anthropic"), maxRetries: 2 });
-  // Defaults to Haiku — the cheapest current model. Bump via CLAUDE_MODEL
-  // once quality matters more than cost.
-  const model = process.env.CLAUDE_MODEL || "claude-haiku-4-5-20251001";
+  const ms = timeoutMs("anthropic", opts.timeoutMs);
+  // The SDK retries 429/5xx itself, before any text has streamed.
+  const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY, timeout: ms, maxRetries: 2 });
+  const model = claudeModel(opts.model ?? "main");
 
-  const message = await anthropic.messages.create({
-    model,
-    max_tokens: 4096,
-    system: systemPrompt,
-    messages: [{ role: "user", content: userContent }],
-  });
-
-  const text = message.content
-    .filter((block): block is Anthropic.TextBlock => block.type === "text")
-    .map((block) => block.text)
-    .join("\n\n");
-
-  return { text };
+  const controller = new AbortController();
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, ms);
+  try {
+    const stream = anthropic.messages.stream(
+      {
+        model,
+        max_tokens: opts.maxTokens || 4096,
+        system: systemPrompt,
+        messages: [{ role: "user", content: userContent }],
+        ...(opts.temperature !== undefined ? { temperature: opts.temperature } : {}),
+      },
+      { signal: controller.signal }
+    );
+    stream.on("text", (delta) => sink.add(delta));
+    const message = await stream.finalMessage();
+    const text = message.content
+      .filter((block): block is Anthropic.TextBlock => block.type === "text")
+      .map((block) => block.text)
+      .join("\n\n");
+    if (!text.trim()) throw new Error("The AI model returned an empty response");
+    return {
+      text,
+      provider: "anthropic",
+      model,
+      tokensIn: message.usage?.input_tokens ?? approxTokens(systemPrompt + userContent),
+      tokensOut: message.usage?.output_tokens ?? approxTokens(text),
+    };
+  } catch (err) {
+    if (timedOut || isAbort(err)) throw timeoutError(ms);
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 // ---------------------------------------------------------------------------
 
-export async function runLLM(systemPrompt: string, userContent: string): Promise<LLMResult> {
+function modelFor(provider: Provider, tier: ModelTier): string {
+  if (provider === "openai") return openaiModel(tier);
+  if (provider === "anthropic") return claudeModel(tier);
+  return ollamaModel(tier);
+}
+
+/**
+ * Runs one model call. Backwards compatible: `runLLM(system, user)` still
+ * works. Streams internally; `opts.onDelta` receives the text as it arrives.
+ */
+export async function runLLM(systemPrompt: string, userContent: string, opts: LLMOptions = {}): Promise<LLMResult> {
   const provider = currentProvider();
-  return getLimiter().run(() => {
-    if (provider === "anthropic") return runWithAnthropic(systemPrompt, userContent);
-    if (provider === "openai") return runWithOpenAI(systemPrompt, userContent);
-    return runWithOllama(systemPrompt, userContent);
+  const tier: ModelTier = opts.model === "fast" ? "fast" : "main";
+  const sink = new TextSink(opts.onDelta);
+  return getLimiter(tier).run(async () => {
+    try {
+      const result =
+        provider === "anthropic"
+          ? await runWithAnthropic(systemPrompt, userContent, opts, sink)
+          : provider === "openai"
+            ? await runWithOpenAI(systemPrompt, userContent, opts, sink)
+            : await runWithOllama(systemPrompt, userContent, opts, sink);
+      void recordUsage({
+        kind: "llm",
+        provider,
+        model: result.model,
+        tokensIn: result.tokensIn,
+        tokensOut: result.tokensOut,
+        ok: true,
+        taskId: opts.taskId ?? null,
+      }).catch(() => undefined);
+      return result;
+    } catch (err) {
+      void recordUsage({
+        kind: "llm",
+        provider,
+        model: modelFor(provider, tier),
+        tokensIn: approxTokens(systemPrompt + userContent),
+        tokensOut: approxTokens(sink.text),
+        ok: false,
+        taskId: opts.taskId ?? null,
+      }).catch(() => undefined);
+      throw err;
+    }
   });
 }
 

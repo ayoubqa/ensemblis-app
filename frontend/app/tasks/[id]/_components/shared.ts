@@ -1,8 +1,63 @@
 import { useEffect, useState } from "react";
-import type { Task, TaskStep } from "@/lib/api";
+import type { Task, TaskRevision, TaskStep } from "@/lib/api";
 import { PLATFORM_FEE_PERCENT } from "@/lib/data";
 
 export const isLive = (t: Pick<Task, "status"> | null) => !!t && (t.status === "RUNNING" || t.status === "PLANNING");
+
+/** A follow-up revision is being written (v3). */
+export const hasPendingRevision = (t: Pick<Task, "revisions"> | null) => !!t && (t.revisions ?? []).some((r) => r.status === "RUNNING");
+
+/** One entry per report version (v1 = original). */
+export interface Version {
+  version: number;
+  label: string;
+  instruction: string;
+  status: TaskRevision["status"];
+  result: string | null;
+  costCents: number;
+  errorMessage: string | null;
+  createdAt: string | null;
+  completedAt: string | null;
+  id: string;
+}
+
+export function versionsOf(task: Task): Version[] {
+  const revs = [...(task.revisions ?? [])].sort((a, b) => a.version - b.version);
+  if (!revs.length) {
+    return [
+      {
+        id: "v1",
+        version: 1,
+        label: "Original",
+        instruction: "Original report",
+        status: "COMPLETED",
+        result: task.result,
+        costCents: task.costCents,
+        errorMessage: null,
+        createdAt: task.createdAt,
+        completedAt: task.completedAt,
+      },
+    ];
+  }
+  return revs.map((r) => ({
+    id: r.id,
+    version: r.version,
+    label: r.version === 1 ? "Original" : short(r.instruction, 28),
+    instruction: r.instruction,
+    status: r.status,
+    // task.result is the latest completed version, so it can stand in for v1 only while nothing newer completed.
+    result: r.result ?? (r.version === 1 && !revs.some((x) => x.version > 1 && x.status === "COMPLETED") ? task.result : null),
+    costCents: r.costCents,
+    errorMessage: r.errorMessage,
+    createdAt: r.createdAt,
+    completedAt: r.completedAt,
+  }));
+}
+
+export function short(s: string, max: number): string {
+  const t = (s || "").replace(/\s+/g, " ").trim();
+  return t.length > max ? `${t.slice(0, max - 1).trimEnd()}…` : t;
+}
 
 const ts = (iso: string | null) => (iso ? new Date(iso).getTime() : NaN);
 

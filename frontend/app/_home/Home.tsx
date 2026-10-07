@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { Fragment, useCallback, useEffect, useRef, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { Fragment, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { Avatar, CountUp, Icon, PerfGraph, Reveal, SampleTag, SkeletonCard, VerifiedTag, useShell, type IconName } from "@/components";
 import { useConfig } from "@/lib/config";
 import { api, type Agent, type PlatformStats } from "@/lib/api";
@@ -21,9 +22,11 @@ import {
 import { duration, eur, num, pct } from "@/lib/format";
 import { prefersReducedMotion } from "@/lib/utils";
 import { ROUTES } from "@/lib/routes";
+import { ExampleReports } from "./ExampleReports";
 import { Hero } from "./Hero";
 import { HowItWorks } from "./HowItWorks";
 import { Orch } from "./Orch";
+import { TrialModal } from "./TrialModal";
 
 function Chain({ items, bad }: { items: string[]; bad?: boolean }) {
   return (
@@ -217,14 +220,41 @@ function FeaturedAgents() {
   );
 }
 
+// ------------------------------------------------------------- ?trial=1
+/**
+ * The command palette's "Try a free task" links to /?trial=1: open the trial
+ * modal once auth + config are known, then tidy the URL.
+ */
+function TrialParam({ onOpen }: { onOpen: () => void }) {
+  const params = useSearchParams();
+  const router = useRouter();
+  const { user, loading } = useAuth();
+  const { config, loaded } = useConfig();
+  const want = params.get("trial") === "1";
+
+  useEffect(() => {
+    if (!want || loading || !loaded) return;
+    if (!user && config.guestTrialEnabled) onOpen();
+    router.replace(ROUTES.home, { scroll: false });
+  }, [want, loading, loaded, user, config.guestTrialEnabled, onOpen, router]);
+
+  return null;
+}
+
 // ------------------------------------------------------------- page
 export function Home() {
-  const { user } = useAuth();
+  const { user, loading } = useAuth();
   const { openRoleSelect } = useShell();
   const [stats, setStats] = useState<PlatformStats | null>(null);
   const [statsFailed, setStatsFailed] = useState(false);
   const [draft, setDraft] = useState("");
+  const [trialOpen, setTrialOpen] = useState(false);
   const taRef = useRef<HTMLTextAreaElement>(null);
+  const { startingCreditsCents: startingCredits, sampleCatalogStats: sampleStats, guestTrialEnabled } = useConfig().config;
+
+  // "Try it free — no sign-up" is for signed-out visitors when the server allows guest trials.
+  const trialOn = guestTrialEnabled && !loading && !user;
+  const openTrial = useCallback(() => setTrialOpen(true), []);
 
   useEffect(() => {
     api
@@ -243,11 +273,14 @@ export function Home() {
     stats ? stats.categories.filter((c) => catGroup(c.category) === group).reduce((n, c) => n + c.agents, 0) : null;
 
   const creator = 100 - PLATFORM_FEE_PERCENT;
-  const { startingCreditsCents: startingCredits, sampleCatalogStats: sampleStats } = useConfig().config;
 
   return (
     <>
-      <Hero ref={taRef} stats={stats} draft={draft} setDraft={setDraft} />
+      <Hero ref={taRef} stats={stats} draft={draft} setDraft={setDraft} onTry={trialOn ? openTrial : undefined} />
+      <TrialModal open={trialOpen} onClose={() => setTrialOpen(false)} brief={draft} setBrief={setDraft} />
+      <Suspense fallback={null}>
+        <TrialParam onOpen={openTrial} />
+      </Suspense>
 
       {/* ---------- fragmented / contrast ---------- */}
       <section className="sect wrap">
@@ -299,6 +332,9 @@ export function Home() {
         </p>
         <HowItWorks />
       </section>
+
+      {/* ---------- finished reports (gallery) ---------- */}
+      <ExampleReports onTry={trialOn ? openTrial : undefined} />
 
       {/* ---------- ensemble ---------- */}
       <section className="sect wrap" style={{ paddingTop: 24 }}>

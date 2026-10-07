@@ -1,13 +1,18 @@
+import { randomBytes } from "crypto";
 import { Router } from "express";
 import { z } from "zod";
 import { prisma } from "../db";
 import { requireAuth, AuthedRequest } from "../auth/middleware";
 import { ah, HttpError, parse } from "../lib/http";
+import { accessibleTasksWhere, findAccessibleTask } from "../lib/access";
 import { TASK_INCLUDE, toPublicTask } from "../lib/serializers";
 import { config } from "../config";
 import { estimateLimiter, taskRunLimiter } from "../lib/rateLimits";
 import { createTaskForUser, estimate, retryTaskForUser, toPublicEstimate } from "./service";
 
+// NOTE: tasks/researchRoutes.ts is mounted at the same /api/tasks prefix right
+// after this router, so auth is applied per route here (never with a blanket
+// router.use) — otherwise its public routes would be blocked.
 const router = Router();
 
 const depthSchema = z.enum(["focused", "standard", "deep"]);
@@ -20,7 +25,7 @@ const description = z
 const estimateSchema = z.object({
   description,
   depth: depthSchema.optional(),
-  agentId: z.string().min(1).optional(),
+  agentId: z.string().min(1).max(200).optional(),
 });
 
 // Public: lets anyone see the plan, team and price before signing up. No charge.
@@ -34,34 +39,32 @@ router.post(
   })
 );
 
-router.use(requireAuth);
+const listSchema = z.object({ scope: z.enum(["mine", "team"]).optional() }).passthrough();
 
+// scope=mine: tasks you started; scope=team: your team's tasks; omitted: both.
 router.get(
   "/",
+  requireAuth,
   ah<AuthedRequest>(async (req, res) => {
-    const tasks = await prisma.task.findMany({
-      where: { userId: req.userId },
-      orderBy: { createdAt: "desc" },
-      include: TASK_INCLUDE,
-    });
+    const { scope } = parse(listSchema, req.query);
+    const where = await accessibleTasksWhere(req.userId!, scope);
+    const tasks = await prisma.task.findMany({ where, orderBy: { createdAt: "desc" }, include: TASK_INCLUDE });
     res.json({ tasks: tasks.map(toPublicTask) });
   })
 );
 
 router.get(
   "/:id",
+  requireAuth,
   ah<AuthedRequest>(async (req, res) => {
-    const task = await prisma.task.findFirst({
-      where: { id: req.params.id, userId: req.userId },
-      include: TASK_INCLUDE,
-    });
-    if (!task) throw new HttpError(404, "Task not found");
+    const task = await findAccessibleTask(req.userId!, req.params.id, TASK_INCLUDE);
     res.json({ task: toPublicTask(task) });
   })
 );
 
 const createSchema = estimateSchema.extend({
   title: z.string().trim().max(200).optional(),
+  attachmentIds: z.array(z.string().min(1).max(64)).max(20, "Too many attachments").optional(),
 });
 
 // Re-estimates server-side, charges credits, creates the task + team steps,
@@ -69,6 +72,7 @@ const createSchema = estimateSchema.extend({
 // GET /:id to watch steps move QUEUED -> RUNNING -> COMPLETED.
 router.post(
   "/",
+  requireAuth,
   taskRunLimiter,
   ah<AuthedRequest>(async (req, res) => {
     const body = parse(createSchema, req.body);
@@ -79,6 +83,7 @@ router.post(
 
 router.post(
   "/:id/retry",
+  requireAuth,
   taskRunLimiter,
   ah<AuthedRequest>(async (req, res) => {
     const result = await retryTaskForUser(req.userId!, req.params.id);
@@ -96,10 +101,10 @@ const feedbackSchema = z.object({
 // developer/routes.ts), computed live from these rows.
 router.post(
   "/:id/feedback",
+  requireAuth,
   ah<AuthedRequest>(async (req, res) => {
     const { outcome } = parse(feedbackSchema, req.body);
-    const task = await prisma.task.findFirst({ where: { id: req.params.id, userId: req.userId } });
-    if (!task) throw new HttpError(404, "Task not found");
+    const task = await findAccessibleTask(req.userId!, req.params.id, {});
     if (task.status === "RUNNING" || task.status === "PLANNING") {
       throw new HttpError(409, "You can rate a task once it has finished");
     }
@@ -108,6 +113,40 @@ router.post(
       data: { outcome },
       include: TASK_INCLUDE,
     });
+    res.json({ task: toPublicTask(updated) });
+  })
+);
+
+const shareSchema = z.object({ enabled: z.boolean({ required_error: "enabled must be true or false" }) });
+
+// v3: turn the public read-only link (/r/<token>) on or off. COMPLETED tasks only.
+// Turning it off clears the token, so re-enabling creates a NEW link (old links stay dead).
+router.post(
+  "/:id/share",
+  requireAuth,
+  ah<AuthedRequest>(async (req, res) => {
+    const { enabled } = parse(shareSchema, req.body);
+    const task = await findAccessibleTask(req.userId!, req.params.id, {});
+    if (enabled) {
+      if (task.status !== "COMPLETED") {
+        throw new HttpError(409, "Only completed reports can be shared");
+      }
+      if (!task.shareToken) {
+        const token = randomBytes(24).toString("base64url");
+        await prisma.task.updateMany({
+          where: { id: task.id, status: "COMPLETED", shareToken: null },
+          data: { shareToken: token, sharedAt: new Date() },
+        });
+      }
+    } else {
+      // Turning the link off withdraws consent: a featured gallery copy of this
+      // report (a snapshot made by the site owner) must stop being public too.
+      await prisma.$transaction([
+        prisma.task.update({ where: { id: task.id }, data: { shareToken: null, sharedAt: null } }),
+        prisma.galleryItem.deleteMany({ where: { taskId: task.id, isExample: false } }),
+      ]);
+    }
+    const updated = await prisma.task.findUniqueOrThrow({ where: { id: task.id }, include: TASK_INCLUDE });
     res.json({ task: toPublicTask(updated) });
   })
 );

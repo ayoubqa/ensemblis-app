@@ -3,13 +3,16 @@
 
 import rateLimit from "express-rate-limit";
 import { config } from "../config";
+import { clientIpKey } from "./clientIp";
 
-function limiter(windowMs: number, limit: number, error: string) {
+/** Per-client limiter keyed on the real client IP (lib/clientIp.ts; IPv6 grouped by /64). */
+export function limiter(windowMs: number, limit: number, error: string) {
   return rateLimit({
     windowMs,
     limit,
     standardHeaders: "draft-7",
     legacyHeaders: false,
+    keyGenerator: (req) => clientIpKey(req),
     handler: (_req, res) => {
       res.status(429).json({ error });
     },
@@ -27,5 +30,17 @@ export const loginLimiter = limiter(15 * MIN, r.loginPer15Min, "Too many sign-in
 
 export const estimateLimiter = limiter(MIN, r.estimatePerMin, "You're requesting estimates too quickly. Please wait a minute and try again.");
 
-/** Shared bucket for everything that starts an AI run: create, retry, workflow run. */
+/** Shared bucket for everything that starts an AI run: create, retry, workflow run, test run. */
 export const taskRunLimiter = limiter(MIN, r.taskRunsPerMin, "You're starting tasks too quickly. Please wait a minute and try again.");
+
+// v3
+export const forgotPasswordLimiter = limiter(60 * MIN, 5, "Too many password reset requests from your network. Please try again in an hour.");
+
+export const resetPasswordLimiter = limiter(15 * MIN, 20, "Too many attempts. Please wait 15 minutes and try again.");
+
+/** Burst guard in front of the per-IP-per-day guest trial limit (which lives in the database). */
+export const guestStartLimiter = limiter(60 * MIN, 10, "Too many trial requests from your network. Please try again in an hour.");
+
+export const checkoutLimiter = limiter(MIN, 10, "Too many checkout attempts. Please wait a minute and try again.");
+
+export const teamJoinLimiter = limiter(15 * MIN, 30, "Too many attempts. Please wait 15 minutes and try again.");

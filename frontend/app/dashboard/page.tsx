@@ -23,6 +23,7 @@ import {
 import { api, type Agent, type Billing, type Task, type Workflow } from "@/lib/api";
 import { toastApiError } from "@/lib/errors";
 import { useAuth } from "@/lib/auth-context";
+import { useConfig } from "@/lib/config";
 import { EXAMPLES, EX_FULL, ONBOARDING_STEPS } from "@/lib/data";
 import { dayLabel, eur, firstName, greeting, plural } from "@/lib/format";
 import { useKeyboardShortcut, useLocalStorage, usePolling } from "@/lib/hooks";
@@ -39,6 +40,7 @@ export default function DashboardPage() {
 
 function Dashboard() {
   const { user, setUser, refresh } = useAuth();
+  const { config, loaded: configLoaded } = useConfig();
   const toast = useToast();
   const router = useRouter();
   const [tasks, setTasks] = useState<Task[] | null>(null);
@@ -179,6 +181,8 @@ function Dashboard() {
     result: !!stats?.completed.length,
   };
   const showOnb = tasks !== null && !onbDismissed && !(onb.described && onb.reviewed && onb.result);
+  const teamWallet = user.walletOwner === "team" && !!user.team;
+  const creditWord = configLoaded && config.paymentsEnabled ? "credits" : "demo credits";
 
   return (
     <div className="wrap" style={{ paddingBottom: 40 }}>
@@ -197,10 +201,18 @@ function Dashboard() {
                   : "Here's what your AI workforce has been up to."}
           </p>
         </div>
-        <Link href={ROUTES.billing} className="credpill" title="Payments and demo credits">
-          <Icon name="eur" />
-          {eur(user.credits)} demo credits
-        </Link>
+        <div style={{ display: "grid", justifyItems: "end", gap: 6 }}>
+          <Link href={ROUTES.billing} className="credpill" title={teamWallet ? `Team wallet — ${user.team?.name}` : "Payments and credits"}>
+            <Icon name="eur" />
+            {eur(user.credits)} {teamWallet ? "team credits" : creditWord}
+          </Link>
+          {teamWallet && (
+            <Link href={ROUTES.team} className="tiny muted row" style={{ gap: 5, color: "var(--muted)" }}>
+              <Icon name="share" size={12} />
+              {user.team?.role === "OWNER" ? `Your wallet, shared with ${user.team?.name}` : `Paid from the ${user.team?.name} wallet`}
+            </Link>
+          )}
+        </div>
       </div>
 
       {error && (
@@ -258,7 +270,7 @@ function Dashboard() {
               delta={stats.thisMonth > stats.lastMonth && stats.lastMonth > 0 ? `+${stats.thisMonth - stats.lastMonth} vs last month` : undefined}
             />
             <Stat value={billing ? eur(billing.monthSpendCents) : "—"} label="spent this month" />
-            <Stat value={eur(user.credits)} label="demo credits left" />
+            <Stat value={eur(user.credits)} label={teamWallet ? `left in the ${user.team?.name} wallet` : `${creditWord} left`} />
             <Stat
               value={stats.achievedRate === null ? "—" : <CountUp to={stats.achievedRate} suffix="%" />}
               label={stats.achievedRate === null ? "achieved · rate a result" : `achieved · ${plural(stats.rated, "rated task")}`}
@@ -366,12 +378,18 @@ function Dashboard() {
                     </Link>
                   ))}
                 </div>
+                <Link href={ROUTES.examples} className="btn sm" style={{ marginTop: 12 }}>
+                  <Icon name="file" />
+                  See example reports
+                </Link>
               </div>
             )}
           </section>
 
           <Tips
             credits={user.credits}
+            teamMember={user.team?.role === "MEMBER"}
+            demo={!(configLoaded && config.paymentsEnabled)}
             unrated={stats?.unrated ?? []}
             completedCount={stats?.completed.length ?? 0}
             workflowCount={workflows?.length ?? 0}
@@ -436,7 +454,10 @@ function Dashboard() {
             {billing && series ? (
               <>
                 <b style={{ fontSize: 34, letterSpacing: "-.02em", display: "block", marginTop: 8 }}>{eur(billing.monthSpendCents)}</b>
-                <div className="small muted">This month, in demo credits · {eur(billing.lifetimeSpendCents)} all time</div>
+                <div className="small muted">
+                  This month, in {creditWord}
+                  {teamWallet ? " (team wallet)" : ""} · {eur(billing.lifetimeSpendCents)} all time
+                </div>
                 <div style={{ marginTop: 8 }}>
                   <LineChart values={series.values.map((v) => v / 100)} xLabels={series.labels} height={100} label={`Spending over the last ${chartMode}`} format={(v) => eur(Math.round(v * 100))} />
                 </div>
@@ -564,6 +585,8 @@ function QuickBrief({ autoFocus }: { autoFocus?: boolean }) {
 // ------------------------------------------------------------- contextual tips
 function Tips({
   credits,
+  teamMember,
+  demo,
   unrated,
   completedCount,
   workflowCount,
@@ -571,6 +594,8 @@ function Tips({
   isNew,
 }: {
   credits: number;
+  teamMember?: boolean;
+  demo?: boolean;
   unrated: Task[];
   completedCount: number;
   workflowCount: number;
@@ -587,7 +612,17 @@ function Tips({
       cta: "Start a task",
     });
   if (credits < 1500)
-    tips.push({ icon: "wallet", title: "Credits running low", body: `You have ${eur(credits)} left. Top up demo credits — they're never charged.`, href: ROUTES.billing, cta: "Add credits" });
+    tips.push(
+      teamMember
+        ? { icon: "wallet", title: "Team credits running low", body: `The team wallet has ${eur(credits)} left. Your team owner manages credits — give them a nudge.`, href: ROUTES.team, cta: "View team" }
+        : {
+            icon: "wallet",
+            title: "Credits running low",
+            body: demo ? `You have ${eur(credits)} left. Top up demo credits — they're never charged.` : `You have ${eur(credits)} left. Add credits in Payments to keep work flowing.`,
+            href: ROUTES.billing,
+            cta: "Add credits",
+          }
+    );
   if (unrated.length)
     tips.push({
       icon: "star",

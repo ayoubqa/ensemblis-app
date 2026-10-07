@@ -4,8 +4,11 @@
 import type { Workflow } from "@prisma/client";
 import { prisma } from "../db";
 import { HttpError } from "../lib/http";
-import { createTaskForUser } from "../tasks/service";
-import { DailyLimitError } from "../lib/usageLimits";
+import { createTaskForUser, sweepOrphanedTasks } from "../tasks/service";
+import { sweepOrphanedRevisions } from "../tasks/revisions";
+import { DailyLimitError, startOfTodayUTC } from "../lib/usageLimits";
+import { cleanupExpiredGuests } from "../guest/cleanup";
+import { cleanupOrphanAttachments } from "../attachments/cleanup";
 
 export type Frequency = "Weekly" | "Monthly" | "Quarterly";
 
@@ -60,20 +63,40 @@ export async function schedulerTick() {
       take: 25,
     });
     for (const w of due) {
+      // Claim this run atomically before charging anyone: during a deploy the
+      // old and the new server both run this scheduler for a moment, and only
+      // the one whose compare-and-set succeeds may start (and charge) the run.
+      const claimedNext = nextRunFrom(now, w.frequency);
+      const claimed = await prisma.workflow.updateMany({
+        where: { id: w.id, isActive: true, nextRun: w.nextRun },
+        data: { nextRun: claimedNext },
+      });
+      if (claimed.count === 0) continue; // another tick/instance took it, or it was paused/edited
+      // Un-claims the run: the skipped run is not lost, it is retried at `retryAt`.
+      const release = (retryAt: Date | null) =>
+        prisma.workflow
+          .updateMany({ where: { id: w.id, nextRun: claimedNext }, data: { nextRun: retryAt } })
+          .catch(() => undefined);
       try {
         const { task } = await runWorkflow(w);
         console.log(`Scheduler: ran workflow "${w.name}" (${w.id}) -> task ${task.id}`);
       } catch (err) {
         if (err instanceof DailyLimitError) {
-          // Daily cap reached: skip quietly; nextRun is left as-is so it runs
-          // once the cap resets. A global cap stops this whole pass.
+          // Daily cap reached: skip quietly. A global cap stops this whole pass
+          // (nextRun restored: it runs once the cap resets). A user's own cap
+          // retries after midnight UTC — never at its old due time, which would
+          // keep it at the head of the queue (take: 25) and starve every other
+          // user's workflows all day.
+          await release(err.scope === "global" ? w.nextRun : new Date(startOfTodayUTC(now).getTime() + 24 * 3600_000));
           console.log(`Scheduler: skipped workflow ${w.id} — daily ${err.scope} task limit reached`);
           if (err.scope === "global") break;
           continue;
         }
         if (err instanceof HttpError && err.status === 402) {
-          // Not enough credits: skip for now. nextRun is left as-is, so it runs
-          // on the first tick after the user tops up.
+          // Not enough credits: retry in an hour (so it runs soon after a
+          // top-up), not at its old due time — 25 unaffordable workflows would
+          // otherwise block the scheduler for everyone until their owner tops up.
+          await release(new Date(now.getTime() + 60 * 60_000));
           continue;
         }
         console.error(`Scheduler: workflow ${w.id} failed to start:`, err);
@@ -88,8 +111,28 @@ export async function schedulerTick() {
   }
 }
 
+let maintaining = false;
+
+/** Housekeeping on every tick (cheap when idle): expired guest trials, orphan attachments. */
+export async function maintenanceTick() {
+  if (maintaining) return;
+  maintaining = true;
+  try {
+    await cleanupExpiredGuests().catch((err) => console.error("Guest cleanup failed:", err));
+    await cleanupOrphanAttachments().catch((err) => console.error("Attachment cleanup failed:", err));
+    // Runs stuck RUNNING with no live run behind them: fail + refund (money is never held indefinitely).
+    await sweepOrphanedTasks().catch((err) => console.error("Orphaned task sweep failed:", err));
+    await sweepOrphanedRevisions().catch((err) => console.error("Orphaned follow-up sweep failed:", err));
+  } finally {
+    maintaining = false;
+  }
+}
+
 export function startScheduler(intervalMs = 60_000) {
-  const tick = () => schedulerTick().catch((err) => console.error("Scheduler tick failed:", err));
+  const tick = async () => {
+    await schedulerTick().catch((err) => console.error("Scheduler tick failed:", err));
+    await maintenanceTick().catch((err) => console.error("Maintenance tick failed:", err));
+  };
   setTimeout(tick, 5_000); // shortly after boot
   return setInterval(tick, intervalMs);
 }

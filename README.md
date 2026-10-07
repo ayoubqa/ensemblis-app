@@ -27,8 +27,9 @@ a real model (`backend/src/tasks/llmProvider.ts`) with an agent's system prompt
 and return a real markdown report.
 
 **Still scaffolding, listed so you don't assume otherwise:**
-- No payments. Everything uses a `credits` integer on the user row. Wire in Stripe
-  before charging anyone for real.
+- Payments are optional: credits are an integer on the user row (team members
+  share their owner's balance). Real money only flows once you add Stripe keys
+  (see "v3 setup" below); until then only demo top-ups exist.
 - Tasks run with simple fire-and-forget `async` calls and the frontend polls every
   2 seconds. Fine at low volume; swap in a real job queue (BullMQ + Redis, or a
   hosted queue) once you have enough concurrent tasks that a server restart
@@ -162,6 +163,28 @@ automatically. For more headroom set `OPENAI_MODEL=openai/gpt-oss-20b`
 models from time to time — if tasks fail with "doesn't recognise the model",
 pick a current one from [console.groq.com/docs/models](https://console.groq.com/docs/models).
 
+## v3 setup (optional keys)
+
+Everything below is **off or on a free default** until you set it — the app
+runs fine without any of it. Set the values in Render (`render.yaml` lists them;
+the ones marked `sync: false` are asked for in the dashboard) and see
+`backend/.env.example` for details.
+
+| Set this | What it unlocks |
+|---|---|
+| `APP_URL` | Your Vercel URL. Correct links in emails, share links and Stripe redirects (defaults to the first `CORS_ORIGIN`). |
+| `ADMIN_EMAILS` | Your email(s). Opens the owner dashboard at `/admin`: sign-ups, runs vs. daily cap, AI/search/email usage, purchases, failures, and featuring shared reports in the public gallery. |
+| `TAVILY_API_KEY` | Real web search ([free key](https://app.tavily.com), 1,000 searches/month) so agents cite live sources. Without it agents research Wikipedia (no key needed). `SEARCH_DAILY_BUDGET` caps calls per day; `SEARCH_PROVIDER=off` disables research. |
+| `RESEND_API_KEY` + `EMAIL_FROM` | Emails from [Resend](https://resend.com): "your report is ready" / "your task failed (refunded)" and **password reset** links. Verify your sending domain in Resend first. Users can turn task emails off in Settings. |
+| `STRIPE_SECRET_KEY` + `STRIPE_WEBHOOK_SECRET` | Real credit packs via Stripe Checkout. In Stripe → Developers → Webhooks add the endpoint `https://<your-api>.onrender.com/api/billing/stripe/webhook` with the events `checkout.session.completed`, `checkout.session.async_payment_succeeded` and `checkout.session.expired`, then copy its signing secret. Use **test** keys first. Credits are added only by the signed webhook, exactly once. |
+| `TURNSTILE_SITE_KEY` + `TURNSTILE_SECRET_KEY` | A [Cloudflare Turnstile](https://dash.cloudflare.com) bot check on sign-up and the guest trial. |
+| `GUEST_*` | "Try without signing up": a temporary account with `GUEST_CREDITS_CENTS` that can run `GUEST_MAX_TASKS` focused task(s), limited per network and per day, deleted after `GUEST_RETENTION_DAYS` unless the visitor creates an account (which keeps their work). On by default; `GUEST_TRIAL_ENABLED=false` turns it off. |
+| `FOLLOWUP_COST_CENTS`, `CLARIFY_ENABLED`, `MAX_ATTACHMENTS`, `MAX_ATTACHMENT_CHARS`, `DEV_TEST_RUNS_PER_DAY` | Price of a follow-up refinement, clarifying questions before vague briefs, client attachments per task, and free developer test runs per day. |
+
+Teams, share links (`/r/<token>`), the example gallery and developer test runs
+need no keys. Teams share one wallet — the owner's balance — and only the owner
+can add credits.
+
 The `backend/Dockerfile` still works for Docker-based hosts (Fly.io, Railway).
 There, run `npx prisma db push` and `npm run seed` against the database yourself.
 
@@ -180,7 +203,6 @@ The practical setup:
    - Port more of the prototype's UI polish (command palette, dashboard charts,
      settings page) into the real Next.js app, backed by the real API instead of
      fake state.
-   - Add Stripe for real payments.
    - Add a job queue for task execution instead of fire-and-forget + polling.
    - Add a scheduler for workflows (a hosted cron hitting a "run now" endpoint).
    - Add tests (the backend's route handlers are straightforward to test with

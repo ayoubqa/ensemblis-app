@@ -8,6 +8,7 @@ import { PageTransition } from "@/components/PageTransition";
 import { ShellProvider } from "@/components/Shell";
 import { ToastProvider } from "@/components/Toast";
 import { DemoBanner } from "@/components/DemoBanner";
+import { GuestBanner } from "@/components/GuestBanner";
 import { ConfigProvider } from "@/lib/config";
 import { demoInitScript } from "@/lib/demo-flags";
 
@@ -67,6 +68,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                 </a>
                 <DemoBanner />
                 <Header />
+                <GuestBanner />
                 <PageTransition>{children}</PageTransition>
                 <Footer />
                 <BottomNav />

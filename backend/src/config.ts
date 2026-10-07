@@ -23,6 +23,17 @@ function bool(name: string, fallback: boolean): boolean {
 
 export const isProduction = process.env.NODE_ENV === "production";
 
+const corsOrigins = (process.env.CORS_ORIGIN || "http://localhost:3000")
+  .split(",")
+  .map((s) => s.trim().replace(/\/+$/, ""))
+  .filter(Boolean);
+
+const searchProvider = ((): "tavily" | "wikipedia" | "off" => {
+  const raw = process.env.SEARCH_PROVIDER?.trim().toLowerCase();
+  if (raw === "tavily" || raw === "wikipedia" || raw === "off") return raw;
+  return process.env.TAVILY_API_KEY?.trim() ? "tavily" : "wikipedia";
+})();
+
 export const config = {
   demoMode: bool("DEMO_MODE", false),
 
@@ -50,16 +61,107 @@ export const config = {
     taskRunsPerMin: int("RATE_LIMIT_TASK_RUNS_PER_MIN", 10, 1),
   },
 
-  // Number of reverse proxies in front of the app (Render = 1), so rate
-  // limits see the real client IP.
+  // Number of reverse proxies in front of the app, so `req.ip` is the client.
   trustProxy: int("TRUST_PROXY", 1),
 
+  // Headers (lower-case, tried in order) that carry the real client IP, set by
+  // the platform's edge and NOT forgeable by the client. Render puts several
+  // proxies in front of the app and only appends to X-Forwarded-For, so with
+  // TRUST_PROXY=1 `req.ip` is a shared proxy address — every visitor would
+  // share one rate-limit / guest-trial bucket. Render is fronted by Cloudflare,
+  // which sets CF-Connecting-IP / True-Client-IP itself. Default: those two on
+  // Render (the RENDER env var is set there), none elsewhere. "none" = off.
+  clientIpHeaders: ((): string[] => {
+    const raw = process.env.CLIENT_IP_HEADER?.trim().toLowerCase();
+    if (raw === "none" || raw === "off" || raw === "false") return [];
+    if (raw) return raw.split(",").map((s) => s.trim()).filter(Boolean);
+    return process.env.RENDER ? ["cf-connecting-ip", "true-client-ip"] : [];
+  })(),
+
   // Exact origins, comma-separated; trailing slashes are ignored.
-  corsOrigins: (process.env.CORS_ORIGIN || "http://localhost:3000")
+  corsOrigins,
+
+  // ---------------------------------------------------------------- v3
+  // Public URL of the frontend, used in emails, share links and Stripe redirects.
+  appUrl: (process.env.APP_URL?.trim() || corsOrigins[0] || "http://localhost:3000").replace(/\/+$/, ""),
+
+  // Emails allowed to open the owner dashboard (comma-separated, case-insensitive).
+  adminEmails: (process.env.ADMIN_EMAILS || "")
     .split(",")
-    .map((s) => s.trim().replace(/\/+$/, ""))
+    .map((s) => s.trim().toLowerCase())
     .filter(Boolean),
+
+  // Web research. Default: Tavily when a key is set, otherwise keyless Wikipedia.
+  search: {
+    provider: searchProvider,
+    tavilyApiKey: process.env.TAVILY_API_KEY?.trim() || "",
+    // Max search API calls per UTC day across the server (Tavily free = 1,000/month ≈ 30/day).
+    dailyBudget: int("SEARCH_DAILY_BUDGET", 30),
+  },
+
+  // Transactional email via Resend (https://resend.com). Off unless both are set.
+  email: {
+    resendApiKey: process.env.RESEND_API_KEY?.trim() || "",
+    from: process.env.EMAIL_FROM?.trim() || "", // e.g. "Ensemblis <hello@yourdomain.com>"
+    get enabled() {
+      return !!(this.resendApiKey && this.from);
+    },
+  },
+
+  // Real payments via Stripe Checkout. Off unless both are set. Use test keys first.
+  stripe: {
+    secretKey: process.env.STRIPE_SECRET_KEY?.trim() || "",
+    webhookSecret: process.env.STRIPE_WEBHOOK_SECRET?.trim() || "",
+    get enabled() {
+      return !!(this.secretKey && this.webhookSecret);
+    },
+  },
+  creditPacks: [
+    { id: "starter", label: "Starter", priceCents: 1000, credits: 1000 },
+    { id: "growth", label: "Growth", priceCents: 2500, credits: 2750, popular: true },
+    { id: "scale", label: "Scale", priceCents: 5000, credits: 6000 },
+  ] as { id: string; label: string; priceCents: number; credits: number; popular?: boolean }[],
+
+  // "Try without signing up"
+  guest: {
+    enabled: bool("GUEST_TRIAL_ENABLED", true),
+    creditsCents: int("GUEST_CREDITS_CENTS", 5000),
+    maxTasks: int("GUEST_MAX_TASKS", 1, 1), // total task runs a guest account may start
+    perIpPerDay: int("GUEST_TRIALS_PER_IP_PER_DAY", 2, 1),
+    globalPerDay: int("GUEST_TRIALS_PER_DAY", 30, 0),
+    retentionDays: int("GUEST_RETENTION_DAYS", 7, 1), // unclaimed guest accounts are deleted after this
+  },
+
+  // Cloudflare Turnstile bot check for guest trial + sign-up. Off unless both are set.
+  turnstile: {
+    siteKey: process.env.TURNSTILE_SITE_KEY?.trim() || "",
+    secretKey: process.env.TURNSTILE_SECRET_KEY?.trim() || "",
+    get enabled() {
+      return !!(this.siteKey && this.secretKey);
+    },
+  },
+
+  followupCostCents: int("FOLLOWUP_COST_CENTS", 200),
+  clarifyEnabled: bool("CLARIFY_ENABLED", true),
+  attachments: {
+    maxPerTask: int("MAX_ATTACHMENTS", 3, 0),
+    maxChars: int("MAX_ATTACHMENT_CHARS", 40000, 1000),
+  },
+  devTestRunsPerDay: int("DEV_TEST_RUNS_PER_DAY", 3),
+  // Salt for hashing IPs (guest-trial limits). Never store raw IPs.
+  ipHashSalt: process.env.IP_HASH_SALT?.trim() || process.env.JWT_SECRET?.trim() || "dev-ip-salt",
 };
+
+export function isAdminEmail(email: string | null | undefined): boolean {
+  return !!email && config.adminEmails.includes(email.trim().toLowerCase());
+}
+
+/** Human-readable web research provider, shown in the UI and owner dashboard. */
+export function searchProviderLabel(): string {
+  if (config.search.provider === "tavily") return "Tavily web search";
+  if (config.search.provider === "wikipedia") return "Wikipedia";
+  return "Off";
+}
 
 const INSECURE_SECRETS = new Set(["", "change-me-to-a-long-random-string", "dev-secret-change-me", "changeme", "secret"]);
 

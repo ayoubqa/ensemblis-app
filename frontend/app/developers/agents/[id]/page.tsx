@@ -15,6 +15,7 @@ import { newTaskUrl } from "../../../agents/_components/AgentCard";
 import { CapsInput } from "../../_components/CapsInput";
 import { DevOnly } from "../../_components/DevOnly";
 import { OUTPUT_TYPES, TIME_WINDOWS, findSecret, parsePriceCents } from "../../_components/agentForm";
+import { TestRunPanel } from "./_components/TestRunPanel";
 
 export default function ManageAgentPage() {
   return (
@@ -64,6 +65,7 @@ function Manage() {
   const [reload, setReload] = useState(0);
   const [market, setMarket] = useState<Agent[]>([]);
   const [form, setForm] = useState<Form | null>(null);
+  const [testRuns, setTestRuns] = useState<{ used: number; perDay: number } | null>(null);
 
   useEffect(() => {
     let live = true;
@@ -75,6 +77,7 @@ function Manage() {
         setAgent(a);
         setMissing(!a);
         if (a) setForm(toForm(a));
+        setTestRuns({ used: Number(s.testRunsToday) || 0, perDay: Number(s.testRunsPerDay) || 0 });
       },
       (e: Error) => live && setError(e.message)
     );
@@ -179,7 +182,11 @@ function Manage() {
     const t: { text: string; action?: { label: string; href: string } }[] = [];
     const sameCat = market.filter((a) => a.category === agent.category).map((a) => a.pricePerTaskCents).sort((a, b) => a - b);
     const median = sameCat.length ? sameCat[Math.floor(sameCat.length / 2)] : null;
-    if (agent.tasksRun === 0) t.push({ text: "No completed tasks yet. Run a test task to see your agent work end to end.", action: { label: "Run a test task", href: newTaskUrl({ agent: agent.slug }) } });
+    if (agent.tasksRun === 0)
+      t.push({
+        text: "No completed tasks yet. Run a test task to see your agent work end to end.",
+        action: testRuns && testRuns.perDay > 0 ? { label: "Run a free test", href: "#test-run" } : { label: "Run a test task", href: newTaskUrl({ agent: agent.slug }) },
+      });
     if (agent.achievedRate !== null && agent.achievedRate < 85)
       t.push({ text: `${pct(agent.achievedRate)} of rated tasks were marked Achieved. Tighten the output format in your instructions to lift it.` });
     if (agent.capabilities.length < 3) t.push({ text: "Agents with 3+ capabilities get matched to more work." });
@@ -187,7 +194,7 @@ function Manage() {
     if (median && agent.pricePerTaskCents > median * 2) t.push({ text: `You're priced above 2× the ${agent.category} median (${eur(median)}). Recommended ranking weighs price fit.` });
     if (!agent.verified) t.push({ text: "The Verified badge comes with a measured track record. Keep results consistent across tasks." });
     return t.slice(0, 3);
-  }, [agent, market]);
+  }, [agent, market, testRuns]);
 
   if (error && !agent)
     return (
@@ -334,6 +341,10 @@ function Manage() {
           </div>
         </div>
       </div>
+
+      {testRuns && testRuns.perDay > 0 && (
+        <TestRunPanel agent={a} used={testRuns.used} perDay={testRuns.perDay} onUsed={(n) => setTestRuns((r) => (r ? { ...r, used: Math.min(r.perDay, n) } : r))} />
+      )}
 
       <h2 id="edit" className="serif" style={{ fontSize: 28, fontWeight: 500, margin: "36px 0 6px", scrollMarginTop: 90 }}>
         Edit listing

@@ -24,6 +24,20 @@ export const FALLBACK_CONFIG: PublicConfig = {
   maxDescriptionLength: 8000,
   aiProviderLabel: "a third-party AI model provider",
   sampleCatalogStats: false,
+  // v3 — conservative fallbacks: optional features stay hidden until the server says they're on
+  searchEnabled: false,
+  searchProviderLabel: "Off",
+  emailEnabled: false,
+  paymentsEnabled: false,
+  creditPacks: [],
+  guestTrialEnabled: false,
+  guestCreditsCents: 0,
+  turnstileSiteKey: null,
+  followupCostCents: 200,
+  clarifyEnabled: false,
+  maxAttachments: 3,
+  maxAttachmentChars: 40000,
+  devTestRunsPerDay: 0,
 };
 
 interface ConfigContextValue {

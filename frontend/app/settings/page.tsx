@@ -4,11 +4,13 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Avatar, Icon, Modal, RequireAuth, Tag, ThemeSwitch, useToast } from "@/components";
-import { api, type User } from "@/lib/api";
+import { api, setToken, type User } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
+import { useConfig } from "@/lib/config";
+import { toastApiError } from "@/lib/errors";
 import { eur, longDate } from "@/lib/format";
-import { useLocalStorage } from "@/lib/hooks";
 import { ROUTES } from "@/lib/routes";
+import S from "./settings.module.css";
 
 export default function SettingsPage() {
   return (
@@ -43,11 +45,12 @@ function Settings() {
   }, []);
 
   if (!user) return null;
+  if (user.isGuest) return <GuestSettings user={user} />;
   return (
     <div className="wrap" style={{ paddingBottom: 40 }}>
       <div className="pagehead">
         <h1>Settings</h1>
-        <p>Manage your profile, password, appearance and notifications.</p>
+        <p>Manage your profile, password, appearance, email and team.</p>
       </div>
       <nav aria-label="Settings sections" className="row wrapflex" style={{ gap: 6, marginBottom: 18 }}>
         {SECTIONS.map(([id, label]) => (
@@ -63,7 +66,7 @@ function Settings() {
         </div>
         <div className="stack">
           <AppearanceCard />
-          <NotificationsCard userId={user.id} />
+          <NotificationsCard user={user} />
           <AccountCard user={user} />
           <DangerCard />
         </div>
@@ -212,11 +215,13 @@ function PasswordCard() {
     setErr(null);
     setBusy(true);
     try {
-      await api.changePassword({ currentPassword: cur, newPassword: next });
+      const res = await api.changePassword({ currentPassword: cur, newPassword: next });
+      // Other devices are now signed out; keep this one signed in with the fresh token.
+      if (res.token) setToken(res.token);
       setCur("");
       setNext("");
       setConfirm("");
-      toast("Password updated", { icon: "lock" });
+      toast("Password updated — you've been signed out on other devices", { icon: "lock" });
     } catch (e2) {
       const ex = e2 as Error & { status?: number };
       setErr({ field: ex.status === 400 && /current/i.test(ex.message) ? "cur" : "form", msg: ex.message });
@@ -291,58 +296,65 @@ function AppearanceCard() {
 }
 
 // ------------------------------------------------------------- notifications
-const NOTIF_OPTS = [
-  ["taskDone", "Task completed", "When a deliverable is ready to open."],
-  ["taskFailed", "Task failed or needs attention", "Includes automatic refunds."],
-  ["wfRun", "Workflow ran", "Each time a scheduled workflow starts a task."],
-  ["digest", "Weekly summary email", "A Monday recap of spend and results."],
-] as const;
-type NotifKey = (typeof NOTIF_OPTS)[number][0];
-
-function NotificationsCard({ userId }: { userId: string }) {
+function NotificationsCard({ user }: { user: User }) {
+  const { setUser } = useAuth();
+  const { config, loaded } = useConfig();
   const toast = useToast();
-  const [prefs, setPrefs] = useLocalStorage<Record<NotifKey, boolean>>(`ens.notifprefs.${userId}`, {
-    taskDone: true,
-    taskFailed: true,
-    wfRun: true,
-    digest: false,
-  });
+  const [saving, setSaving] = useState(false);
+  const on = !!user.emailOnTaskDone;
+
+  const toggle = async () => {
+    if (saving) return;
+    const next = !on;
+    setSaving(true);
+    setUser((u) => (u ? { ...u, emailOnTaskDone: next } : u)); // optimistic
+    try {
+      const { user: u } = await api.updateMe({ emailOnTaskDone: next });
+      setUser(u);
+      toast(next ? "You'll get an email when a task finishes" : "Task emails turned off", { icon: next ? "mail" : "bell", duration: 2200 });
+    } catch (e) {
+      setUser((u) => (u ? { ...u, emailOnTaskDone: on } : u));
+      toastApiError(toast, e, "Couldn't save your email preference");
+    } finally {
+      setSaving(false);
+    }
+  };
+
   return (
     <section className="card" id="notifications" style={anchor} aria-labelledby="h-notif">
-      <div className="row between">
-        <h3 id="h-notif" style={{ margin: 0 }}>
-          Notifications
-        </h3>
-        <Tag variant="gray" icon="monitor">
-          This device
-        </Tag>
+      <h3 id="h-notif" style={{ margin: 0 }}>
+        Email notifications
+      </h3>
+      <div className={S.toggleRow} style={{ marginTop: 4 }}>
+        <span>
+          <span className="small" id="nt-done-label" style={{ fontWeight: 600, display: "block" }}>
+            Email me when a task finishes
+          </span>
+          <span className="tiny muted" id="nt-done-hint" style={{ display: "block", marginTop: 2 }}>
+            A short note with a link to the report, sent to <b style={{ color: "var(--ink)", wordBreak: "break-all" }}>{user.email}</b>.
+          </span>
+        </span>
+        <button
+          type="button"
+          role="switch"
+          aria-checked={on}
+          aria-labelledby="nt-done-label"
+          aria-describedby="nt-done-hint"
+          className={S.switch}
+          onClick={toggle}
+          disabled={saving}
+        />
       </div>
-      <div className="stack" style={{ marginTop: 12, gap: 12 }}>
-        {NOTIF_OPTS.map(([k, label, sub]) => (
-          <label key={k} className="row between" style={{ cursor: "pointer", alignItems: "flex-start" }}>
-            <span>
-              <span className="small" style={{ fontWeight: 600 }}>
-                {label}
-              </span>
-              <span className="tiny muted" style={{ display: "block" }}>
-                {sub}
-              </span>
-            </span>
-            <input
-              type="checkbox"
-              checked={!!prefs[k]}
-              onChange={(e) => {
-                const on = e.target.checked;
-                setPrefs((p) => ({ ...p, [k]: on }));
-                toast(`${label}: ${on ? "on" : "off"}`, { icon: "bell", duration: 1600 });
-              }}
-              style={{ marginTop: 3 }}
-            />
-          </label>
-        ))}
-      </div>
+      {loaded && !config.emailEnabled && (
+        <div className="notice" style={{ marginTop: 4, background: "var(--surface2)", color: "var(--muted)" }}>
+          <Icon name="info" />
+          <span>
+            <b style={{ color: "var(--ink)" }}>Email isn&apos;t enabled on this server yet.</b> Your choice is saved and applies as soon as it is.
+          </span>
+        </div>
+      )}
       <p className="tiny muted" style={{ marginTop: 12 }}>
-        Preferences are stored on this device. In-app alerts appear under the bell in the header.
+        In-app alerts for finished, failed and refunded tasks always appear under the bell in the header.
       </p>
     </section>
   );
@@ -351,6 +363,8 @@ function NotificationsCard({ userId }: { userId: string }) {
 // ------------------------------------------------------------- account
 function AccountCard({ user }: { user: User }) {
   const isDev = user.accountType === "DEVELOPER";
+  const { config } = useConfig();
+  const teamWallet = user.walletOwner === "team";
   return (
     <section className="card" id="account" style={anchor} aria-labelledby="h-acct">
       <h3 id="h-acct">Account</h3>
@@ -365,8 +379,26 @@ function AccountCard({ user }: { user: User }) {
           <span className="muted">Member since</span>
           <b>{longDate(user.createdAt)}</b>
         </div>
+        <div className="kv" id="team" style={anchor}>
+          <span className="muted">Team</span>
+          {user.team ? (
+            <Link href={ROUTES.team} className="row" style={{ gap: 8, color: "var(--ink)", minWidth: 0 }}>
+              <b style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 180 }}>{user.team.name}</b>
+              <Tag variant={user.team.role === "OWNER" ? "accent" : "gray"}>{user.team.role === "OWNER" ? "Owner" : "Member"}</Tag>
+              <Icon name="chev" size={14} />
+              <span className="sr-only">Manage team</span>
+            </Link>
+          ) : (
+            <Link href={ROUTES.team} className="small" style={{ color: "var(--accent)", fontWeight: 600 }}>
+              Create or join a team
+            </Link>
+          )}
+        </div>
         <div className="kv">
-          <span className="muted">Demo credits</span>
+          <span className="muted">
+            {config.paymentsEnabled ? "Credits" : "Demo credits"}
+            {teamWallet && <span className="tiny"> · team wallet</span>}
+          </span>
           <b>{eur(user.credits)}</b>
         </div>
         <div className="kv" style={{ borderBottom: 0 }}>
@@ -395,8 +427,116 @@ function AccountCard({ user }: { user: User }) {
           <Icon name="wallet" />
           Payments
         </Link>
+        <Link className="btn sm" href={ROUTES.team}>
+          <Icon name="user" />
+          {user.team ? "Team" : "Start a team"}
+        </Link>
       </div>
     </section>
+  );
+}
+
+// ------------------------------------------------------------- guests
+/** Guest-trial accounts have no profile or password yet: offer to save the trial instead. */
+function GuestSettings({ user }: { user: User }) {
+  const { signOut } = useAuth();
+  const router = useRouter();
+  const toast = useToast();
+  const [confirmEnd, setConfirmEnd] = useState(false);
+  const claimHref = `${ROUTES.signup}?claim=1&next=${encodeURIComponent(ROUTES.settings)}`;
+
+  const endSession = () => {
+    setConfirmEnd(false);
+    signOut();
+    toast("Guest session ended");
+    router.push(ROUTES.home);
+  };
+
+  return (
+    <div className="wrap" style={{ paddingBottom: 40 }}>
+      <div className="pagehead">
+        <h1>Settings</h1>
+        <p>You&apos;re on a free trial. Create a free account to get a profile, a password and email updates.</p>
+      </div>
+      <div className="grid g2" style={{ alignItems: "start" }}>
+        <div className="stack">
+          <section className={`card ${S.guestCta}`} id="profile" style={anchor} aria-labelledby="h-guest">
+            <span className={S.guestIco} aria-hidden="true">
+              <Icon name="spark" size={20} />
+            </span>
+            <h3 id="h-guest" className="serif" style={{ fontSize: 24, fontWeight: 600, letterSpacing: "-.02em", lineHeight: 1.15 }}>
+              Create a free account
+            </h3>
+            <p className="small muted" style={{ marginTop: 6 }}>
+              It takes a minute, and nothing from your trial is lost.
+            </p>
+            <ul className={S.perks}>
+              {[
+                "Keep your trial task and report — no 7-day limit",
+                "Sign in from any device with your email and password",
+                "Get an email when a task finishes",
+                "Run more tasks, follow-ups and recurring workflows",
+              ].map((p) => (
+                <li key={p}>
+                  <Icon name="check" size={15} />
+                  {p}
+                </li>
+              ))}
+            </ul>
+            <Link className="btn p" href={claimHref}>
+              Create a free account
+              <Icon name="arrow" />
+            </Link>
+          </section>
+        </div>
+        <div className="stack">
+          <AppearanceCard />
+          <section className="card" id="account" style={anchor} aria-labelledby="h-trial">
+            <h3 id="h-trial">Free trial</h3>
+            <div style={{ marginTop: 8 }}>
+              <div className="kv">
+                <span className="muted">Trial credits left</span>
+                <b>{eur(user.credits)}</b>
+              </div>
+              <div className="kv">
+                <span className="muted">Started</span>
+                <b>{longDate(user.createdAt)}</b>
+              </div>
+              <div className="kv" style={{ borderBottom: 0 }}>
+                <span className="muted">Results kept</span>
+                <b>7 days unless you save them</b>
+              </div>
+            </div>
+          </section>
+          <section className="card" id="danger" style={anchor} aria-labelledby="h-end">
+            <h3 id="h-end">End trial session</h3>
+            <div className="lane" style={{ borderBottom: 0 }}>
+              <div className="sp">
+                <div className="tiny muted">Signs this browser out of the trial. You won&apos;t be able to get back to your trial results afterwards.</div>
+              </div>
+              <button type="button" className="btn sm" onClick={() => setConfirmEnd(true)}>
+                <Icon name="out" />
+                End session
+              </button>
+            </div>
+          </section>
+        </div>
+      </div>
+
+      <Modal open={confirmEnd} onClose={() => setConfirmEnd(false)} title="End your free trial?">
+        <p className="muted small" style={{ margin: "6px 0 16px" }}>
+          Guest sessions don&apos;t have a password, so once you end this one your trial task and report can&apos;t be opened again. Save them with a free account first if you want to keep them.
+        </p>
+        <div className="row wrapflex">
+          <Link className="btn p" href={claimHref} data-autofocus>
+            Save my results
+          </Link>
+          <button type="button" className="btn bad" onClick={endSession}>
+            End session
+          </button>
+        </div>
+      </Modal>
+    </div>
   );
 }
 

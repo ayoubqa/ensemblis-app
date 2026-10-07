@@ -12,6 +12,7 @@ import { eur, minutesRange, num } from "@/lib/format";
 import { useDebounced, useReducedMotion } from "@/lib/hooks";
 import { ROUTES } from "@/lib/routes";
 import { DemoPanel } from "./Orch";
+import S from "./home.module.css";
 
 const PLACEHOLDERS = [HERO.placeholder, ...Object.values(EX_FULL)];
 
@@ -192,8 +193,16 @@ function Ticker({ stats }: { stats: PlatformStats | null }) {
 }
 
 // ------------------------------------------------------------- hero
-export const Hero = forwardRef<HTMLTextAreaElement, { stats: PlatformStats | null; draft: string; setDraft: (s: string) => void }>(
-  function Hero({ stats, draft, setDraft }, taRef) {
+export interface HeroProps {
+  stats: PlatformStats | null;
+  draft: string;
+  setDraft: (s: string) => void;
+  /** Opens the guest-trial modal; only passed when the trial is on and the visitor is signed out. */
+  onTry?: () => void;
+}
+
+export const Hero = forwardRef<HTMLTextAreaElement, HeroProps>(
+  function Hero({ stats, draft, setDraft, onTry }, taRef) {
     const router = useRouter();
     const { user, loading } = useAuth();
     const hint = useRouteHint(draft);
@@ -299,7 +308,7 @@ export const Hero = forwardRef<HTMLTextAreaElement, { stats: PlatformStats | nul
               submit();
             }}
           >
-            <label htmlFor="draft">{user ? `What do you need done, ${user.name.split(" ")[0]}?` : "What do you need done?"}</label>
+            <label htmlFor="draft">{user && !user.isGuest ? `What do you need done, ${user.name.split(" ")[0]}?` : "What do you need done?"}</label>
             <textarea
               id="draft"
               ref={taRef}
@@ -322,11 +331,25 @@ export const Hero = forwardRef<HTMLTextAreaElement, { stats: PlatformStats | nul
               <div className="route" id="route" aria-live="polite">
                 <RouteHint state={hint} />
               </div>
-              <button type="button" className="btn lg ghost" onClick={preview} title="Watch how Ensemblis would orchestrate this">
+              <button type="button" className={`btn lg ghost ${onTry ? S.previewBtn : ""}`.trim()} onClick={preview} title="Watch how Ensemblis would orchestrate this">
                 <Icon name="play" size={14} />
                 Preview
               </button>
-              <button type="submit" className="btn p lg">
+              {onTry && (
+                <button
+                  type="button"
+                  className={`btn lg ${S.trialBtn}`}
+                  onClick={onTry}
+                  aria-haspopup="dialog"
+                  title="Run one focused task free — no account needed"
+                >
+                  <Icon name="spark" size={15} />
+                  <span>
+                    Try it free<small className="hideS"> — no sign-up</small>
+                  </span>
+                </button>
+              )}
+              <button type="submit" className={`btn p lg ${onTry ? S.goBtn : ""}`.trim()}>
                 Get it done <Icon name="arrow" />
               </button>
             </div>

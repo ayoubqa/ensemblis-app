@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useRef, useState, type FormEvent } from "react";
 import { Icon, RolePicker, useToast, type SignupRole } from "@/components";
+import { Turnstile, type TurnstileHandle } from "@/components/Turnstile";
 import { api, ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { errorText } from "@/lib/errors";
@@ -32,22 +33,38 @@ const PERSONA = {
   },
 };
 
-type Errors = Partial<Record<"name" | "email" | "password" | "invite" | "terms", string>>;
+type Errors = Partial<Record<"name" | "email" | "password" | "invite" | "terms" | "bot", string>>;
 
 function SignupForm() {
   const params = useSearchParams();
   const router = useRouter();
   const toast = useToast();
-  const { user, loading, signIn, setUser } = useAuth();
+  const { user, loading, signIn, signOut, setUser, refresh } = useAuth();
   const next = params.get("next");
   const typeParam = params.get("type");
   const inviteParam = params.get("invite");
-  /** Keep ?invite= when moving between signup steps. */
-  const keepInvite = (href: string) => (inviteParam ? `${href}${href.includes("?") ? "&" : "?"}invite=${encodeURIComponent(inviteParam)}` : href);
-  const role: SignupRole | null = typeParam === "company" || typeParam === "developer" ? typeParam : null;
+  const claimParam = params.get("claim") === "1";
+  /** Set once a claim succeeds, so the page keeps its "save" wording while it redirects. */
+  const [claimed, setClaimed] = useState(false);
+  /** Signed in as a guest-trial account → this form saves the trial (api.claimAccount) instead of signing up. */
+  const claim = !!user?.isGuest || claimed;
+  /** Keep ?invite= and ?claim= when moving between signup steps. */
+  const keepParams = (href: string) => {
+    const extra = new URLSearchParams();
+    if (inviteParam) extra.set("invite", inviteParam);
+    if (claimParam) extra.set("claim", "1");
+    const s = extra.toString();
+    return s ? `${href}${href.includes("?") ? "&" : "?"}${s}` : href;
+  };
+  /** Set when the guest session turned out to be expired mid-claim — keep the form on screen. */
+  const [lostTrial, setLostTrial] = useState(false);
+  // A trial being saved is a company account unless the visitor switches.
+  const role: SignupRole | null =
+    typeParam === "company" || typeParam === "developer" ? typeParam : claim || claimParam || lostTrial ? "company" : null;
   const dev = role === "developer";
   const { config } = useConfig();
-  const inviteRequired = config.inviteRequired;
+  const inviteRequired = config.inviteRequired && !claim;
+  const botCheck = !!config.turnstileSiteKey && !claim;
 
   const [name, setName] = useState("");
   const [company, setCompany] = useState("");
@@ -59,22 +76,25 @@ function SignupForm() {
   const [invite, setInvite] = useState(params.get("invite") || "");
   const [inviteError, setInviteError] = useState<string | null>(null);
   const [agreed, setAgreed] = useState(false);
+  const [tsToken, setTsToken] = useState<string | null>(null);
+  const ts = useRef<TurnstileHandle>(null);
   const [touched, setTouched] = useState<Record<string, boolean>>({});
   const [submitted, setSubmitted] = useState(false);
   const [busy, setBusy] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
-  const [emailTaken, setEmailTaken] = useState(false);
+  const [emailTaken, setEmailTaken] = useState<string | null>(null);
   const done = useRef(false);
   const nameRef = useRef<HTMLInputElement>(null);
 
+  // Real accounts don't need this page; guests stay to save their trial.
   useEffect(() => {
-    if (!loading && user && !done.current) router.replace(safeNext(next, user.accountType === "DEVELOPER" ? ROUTES.devDashboard : ROUTES.dashboard));
+    if (!loading && user && !user.isGuest && !done.current) router.replace(safeNext(next, user.accountType === "DEVELOPER" ? ROUTES.devDashboard : ROUTES.dashboard));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loading, user]);
 
   useEffect(() => {
-    if (role) nameRef.current?.focus();
-  }, [role]);
+    if (role && !loading) nameRef.current?.focus();
+  }, [role, loading]);
 
   const errors: Errors = {
     name: !name.trim() ? "Tell us your name" : undefined,
@@ -82,9 +102,29 @@ function SignupForm() {
     password: password.length < 8 ? (password ? "Use at least 8 characters" : "Choose a password") : undefined,
     invite: inviteRequired && !invite.trim() ? "Enter your invite code" : undefined,
     terms: !agreed ? "Please agree to the Terms and Privacy Policy to continue" : undefined,
+    bot: botCheck && !tsToken ? "Complete the quick security check above" : undefined,
   };
   const show = (k: keyof Errors) => (submitted || touched[k]) && errors[k];
-  const blur = (k: string) => () => setTouched((t) => ({ ...t, [k]: true }));
+  // Flag a field on blur only once it has content (empty ones are flagged on submit): an error appearing on
+  // mousedown would shift the links below and swallow the click.
+  const blur = (k: string) => (e: { currentTarget: { value: string } }) => {
+    if (e.currentTarget.value.trim()) setTouched((t) => ({ ...t, [k]: true }));
+  };
+
+  // Until we know whether this visitor is a guest, don't flash the wrong form.
+  if (loading) {
+    return (
+      <AuthShell>
+        <div aria-busy="true" aria-label="Loading">
+          <div className="sk" style={{ height: 30, width: "70%" }} />
+          <div className="sk" style={{ height: 14, width: "90%", marginTop: 12 }} />
+          <div className="sk" style={{ height: 44, marginTop: 24 }} />
+          <div className="sk" style={{ height: 44, marginTop: 14 }} />
+          <div className="sk" style={{ height: 44, marginTop: 14 }} />
+        </div>
+      </AuthShell>
+    );
+  }
 
   if (!role) {
     return (
@@ -95,7 +135,7 @@ function SignupForm() {
         <p className="muted" style={{ margin: "4px 0 22px" }}>
           How will you use it today?
         </p>
-        <RolePicker onPick={(r) => router.replace(keepInvite(signupUrl(r, next)))} />
+        <RolePicker onPick={(r) => router.replace(keepParams(signupUrl(r, next)))} />
         <p className="small muted" style={{ textAlign: "center", marginTop: 20 }}>
           Already have an account?{" "}
           <Link href={loginUrl(next)} style={{ color: "var(--accent)", fontWeight: 600 }}>
@@ -110,31 +150,41 @@ function SignupForm() {
   }
 
   const P = PERSONA[role];
+  const ORDER = ["name", "email", "password", "invite", "terms"] as const;
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     setSubmitted(true);
     setFormError(null);
-    setEmailTaken(false);
+    setEmailTaken(null);
     setInviteError(null);
-    if (errors.name || errors.email || errors.password || errors.invite || errors.terms) {
-      const first = (["name", "email", "password", "invite", "terms"] as const).find((k) => errors[k]);
-      if (first) document.getElementById(`su-${first}`)?.focus();
+    const first = ORDER.find((k) => errors[k]);
+    if (first) {
+      document.getElementById(`su-${first}`)?.focus();
       return;
     }
+    if (errors.bot) return;
     setBusy(true);
+    const wasClaim = claim;
+    const profile = {
+      email: email.trim(),
+      password,
+      name: name.trim(),
+      company: company.trim() || undefined,
+      accountType: dev ? ("DEVELOPER" as const) : ("COMPANY" as const),
+      builds: dev ? builds.trim() || undefined : undefined,
+      acceptedTerms: true as const,
+    };
     try {
-      const { token, user: u } = await api.signup({
-        email: email.trim(),
-        password,
-        name: name.trim(),
-        company: company.trim() || undefined,
-        accountType: dev ? "DEVELOPER" : "COMPANY",
-        builds: dev ? builds.trim() || undefined : undefined,
-        acceptedTerms: true,
-        ...(inviteRequired || invite.trim() ? { inviteCode: invite.trim() } : {}),
-      });
+      const { token, user: u } = wasClaim
+        ? await api.claimAccount(profile)
+        : await api.signup({
+            ...profile,
+            ...(inviteRequired || invite.trim() ? { inviteCode: invite.trim() } : {}),
+            ...(tsToken ? { turnstileToken: tsToken } : {}),
+          });
       done.current = true;
+      if (wasClaim) setClaimed(true);
       signIn(token, u);
       if (!dev && jobRole.trim()) {
         try {
@@ -143,6 +193,11 @@ function SignupForm() {
         } catch {
           /* non-blocking: role can be set later in Settings */
         }
+      }
+      if (wasClaim) {
+        toast(`Your trial results are saved — welcome, ${firstName(u.name)}`, { icon: "check" });
+        router.push(safeNext(next, ROUTES.dashboard));
+        return;
       }
       toast(`Welcome to Ensemblis, ${firstName(u.name)}`);
       setTimeout(
@@ -153,12 +208,28 @@ function SignupForm() {
       router.push(safeNext(next, fallback));
     } catch (err) {
       setBusy(false);
-      if (err instanceof ApiError && err.status === 409) {
-        setEmailTaken(true);
+      if (!wasClaim) ts.current?.reset(); // Turnstile tokens are single-use
+      const status = err instanceof ApiError ? err.status : -1;
+      if (wasClaim && status === 401) {
+        // The guest account is gone (trial expired) — nothing left to save.
+        setLostTrial(true);
+        signOut();
+        setFormError("Your free trial has expired, so there's nothing left to save. You can still create a fresh account below.");
+        return;
+      }
+      if (wasClaim && status === 409 && /already registered/i.test(errorText(err))) {
+        // Saved already (e.g. in another tab): pick up the real account.
+        await refresh();
+        toast("This trial is already saved to an account");
+        router.push(safeNext(next, ROUTES.dashboard));
+        return;
+      }
+      if (status === 409) {
+        setEmailTaken(errorText(err, "An account with that email already exists."));
         document.getElementById("su-email")?.focus();
         return;
       }
-      if (err instanceof ApiError && err.status === 403) {
+      if (!wasClaim && status === 403) {
         // Invite missing/invalid, or signups closed on this demo — show the server's reason inline.
         const msg = errorText(err, "Signups need a valid invite code right now.");
         if (inviteRequired || invite.trim()) {
@@ -172,16 +243,34 @@ function SignupForm() {
   };
 
   const other: SignupRole = dev ? "company" : "developer";
+  const title = claim ? "Save your trial results" : P.title;
+  const sub = claim
+    ? "Create your free account — your trial task and report come with you, nothing to redo."
+    : P.sub;
 
   return (
     <AuthShell>
-      <div key={role} className="reveal">
-        <h1 className="serif" style={{ fontSize: 28, fontWeight: 600, letterSpacing: "-.03em", lineHeight: 1.1 }}>
-          {P.title}
+      <div key={`${role}-${claim ? "claim" : "new"}`} className="reveal">
+        {claim && (
+          <span className="tag ok">
+            <Icon name="check" />
+            Free trial in progress
+          </span>
+        )}
+        <h1 className="serif" style={{ fontSize: 28, fontWeight: 600, letterSpacing: "-.03em", lineHeight: 1.1, marginTop: claim ? 10 : 0 }}>
+          {title}
         </h1>
         <p className="muted" style={{ margin: "4px 0 4px" }}>
-          {P.sub}
+          {sub}
         </p>
+        {claimParam && !claim && !lostTrial && (
+          <div className="notice" style={{ marginTop: 12, background: "var(--surface2)", color: "var(--muted)" }}>
+            <Icon name="info" />
+            <span>
+              We couldn&apos;t find a free-trial session in this browser, so this creates a new account. Trial results stay in the browser where the trial was started.
+            </span>
+          </div>
+        )}
         <form onSubmit={submit} noValidate>
           <Field id="su-name" label="Your name" error={show("name")}>
             <input
@@ -217,9 +306,11 @@ function SignupForm() {
               <Field id="su-role" label="Your role" optional>
                 <input id="su-role" className="f" autoComplete="organization-title" value={jobRole} onChange={(e) => setJobRole(e.target.value)} placeholder="Founder" maxLength={120} />
               </Field>
-              <Field id="su-task" label="What do you need done first?" optional hint="We'll take you straight to planning it.">
-                <input id="su-task" className="f" value={firstTask} onChange={(e) => setFirstTask(e.target.value)} placeholder="e.g. Analyze our top 20 competitors…" maxLength={8000} />
-              </Field>
+              {!claim && (
+                <Field id="su-task" label="What do you need done first?" optional hint="We'll take you straight to planning it.">
+                  <input id="su-task" className="f" value={firstTask} onChange={(e) => setFirstTask(e.target.value)} placeholder="e.g. Analyze our top 20 competitors…" maxLength={8000} />
+                </Field>
+              )}
             </>
           )}
           <Field
@@ -228,10 +319,12 @@ function SignupForm() {
             error={
               emailTaken ? (
                 <>
-                  An account with that email already exists.{" "}
-                  <Link href={loginUrl(next)} style={{ fontWeight: 600, textDecoration: "underline" }}>
-                    Log in instead
-                  </Link>
+                  {emailTaken}{" "}
+                  {!claim && (
+                    <Link href={loginUrl(next)} style={{ fontWeight: 600, textDecoration: "underline" }}>
+                      Log in instead
+                    </Link>
+                  )}
                 </>
               ) : (
                 show("email")
@@ -247,10 +340,10 @@ function SignupForm() {
               value={email}
               onChange={(e) => {
                 setEmail(e.target.value);
-                setEmailTaken(false);
+                setEmailTaken(null);
               }}
               onBlur={blur("email")}
-              aria-invalid={emailTaken || !!show("email")}
+              aria-invalid={!!emailTaken || !!show("email")}
               aria-describedby={emailTaken || show("email") ? "su-email-err" : undefined}
               placeholder="you@company.com"
             />
@@ -293,11 +386,11 @@ function SignupForm() {
           <div className="dcard" style={{ marginTop: 18 }}>
             <div className="row" style={{ gap: 10 }}>
               <div style={{ color: "var(--accent)" }}>
-                <Icon name={P.perkIcon} />
+                <Icon name={claim ? "check" : P.perkIcon} />
               </div>
               <div className="sp">
-                <b className="small">{P.perk.replace("{credits}", eur(config.startingCreditsCents))}</b>
-                <div className="tiny muted">Demo environment · no real charges</div>
+                <b className="small">{claim ? "Your trial task and report move to your new account" : P.perk.replace("{credits}", eur(config.startingCreditsCents))}</b>
+                <div className="tiny muted">{claim ? "Saved for good — no more 7-day limit" : "Demo environment · no real charges"}</div>
               </div>
             </div>
           </div>
@@ -325,14 +418,25 @@ function SignupForm() {
               </span>
             </label>
             <div className="tiny muted" id="su-terms-note" style={{ marginTop: 4, paddingLeft: 28 }}>
-              {agreed ? "Thanks — you can create your account now." : "Required to create an account."}
+              {agreed ? (claim ? "Thanks — you can save your account now." : "Thanks — you can create your account now.") : "Required to create an account."}
             </div>
           </div>
+
+          {botCheck && (
+            <>
+              <Turnstile ref={ts} onToken={setTsToken} action="signup" />
+              {submitted && errors.bot && (
+                <div className="err" role="alert">
+                  {errors.bot}
+                </div>
+              )}
+            </>
+          )}
 
           {formError && <FormError>{formError}</FormError>}
 
           <button type="submit" className="btn p lg" style={{ width: "100%", marginTop: 16 }} disabled={busy || !agreed} aria-busy={busy}>
-            {busy ? "Creating your account…" : "Create account"}
+            {busy ? (claim ? "Saving your trial…" : "Creating your account…") : claim ? "Save my results" : "Create account"}
             {!busy && <Icon name="arrow" />}
           </button>
         </form>
@@ -340,8 +444,9 @@ function SignupForm() {
         <div className="row between wrapflex small" style={{ gap: 8 }}>
           <Link href={loginUrl(next)} className="muted">
             Already have an account? <b style={{ color: "var(--accent)" }}>Log in</b>
+            {claim && <span className="tiny" style={{ display: "block" }}>Logging in ends this trial session.</span>}
           </Link>
-          <Link href={keepInvite(signupUrl(other, next))} replace className="muted">
+          <Link href={keepParams(signupUrl(other, next))} replace className="muted">
             {dev ? "Hiring agents instead?" : "Building agents instead?"} <b style={{ color: "var(--ink)" }}>Switch</b>
           </Link>
         </div>

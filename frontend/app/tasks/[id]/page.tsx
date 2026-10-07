@@ -11,7 +11,7 @@ import { ROUTES } from "@/lib/routes";
 import { RunView } from "./_components/RunView";
 import { ResultView } from "./_components/ResultView";
 import { FailedView } from "./_components/FailedView";
-import { isLive } from "./_components/shared";
+import { hasPendingRevision, isLive } from "./_components/shared";
 
 export default function TaskPage() {
   return (
@@ -51,14 +51,15 @@ function TaskLive() {
     [toast, refresh]
   );
 
-  const live = !task || isLive(task);
+  // Keep polling while the team works, and while a follow-up revision is being written.
+  const live = !task || isLive(task) || hasPendingRevision(task);
   usePolling(
     async () => {
       try {
         const { task: t } = await api.getTask(id);
         setError(null);
         accept(t);
-        return isLive(t);
+        return isLive(t) || hasPendingRevision(t);
       } catch (e) {
         const ae = e instanceof ApiError ? e : new ApiError("Something went wrong", 500);
         setError(ae);
@@ -73,7 +74,13 @@ function TaskLive() {
   useEffect(() => {
     if (!task) return;
     const done = task.steps.filter((s) => s.status === "COMPLETED").length;
-    const prefix = isLive(task) ? `(${done}/${task.steps.length}) ` : task.status === "COMPLETED" ? "✓ " : "";
+    const prefix = isLive(task)
+      ? `(${done}/${task.steps.length}) `
+      : hasPendingRevision(task)
+        ? "Refining · "
+        : task.status === "COMPLETED"
+          ? "✓ "
+          : "";
     const before = document.title;
     document.title = `${prefix}${task.title} · Ensemblis`;
     return () => {

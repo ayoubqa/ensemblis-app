@@ -23,7 +23,7 @@ export function FailedView({ task, onTask }: { task: Task; onTask: (t: Task) => 
   const done = steps.filter((x) => x.status === "COMPLETED");
   const failedStep = steps.find((x) => x.status === "FAILED");
   const refunded = task.costCents > 0;
-  const canRetry = task.status === "FAILED";
+  const canRetry = task.status === "FAILED" && !task.isTest; // test runs can't be retried (server 409)
   const balance = user?.credits ?? 0;
   const insufficient = balance < task.costCents;
   const replanHref = `${ROUTES.newTask}?q=${encodeURIComponent(task.description)}&depth=${task.depth}`;

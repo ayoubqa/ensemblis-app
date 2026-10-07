@@ -43,6 +43,18 @@ enum TransactionType {
   TASK_CHARGE
   REFUND
   TOP_UP
+  PURCHASE // real money via Stripe Checkout (v3)
+}
+
+enum TeamRole {
+  OWNER
+  MEMBER
+}
+
+enum RevisionStatus {
+  RUNNING
+  COMPLETED
+  FAILED
 }
 
 model User {
@@ -58,12 +70,26 @@ model User {
   termsAcceptedAt DateTime? // when the user ticked "I agree to the Terms and Privacy Policy" (null for pre-existing accounts)
   createdAt    DateTime    @default(now())
 
+  // v3
+  isGuest         Boolean  @default(false) // "try without signing up" account; can be claimed later
+  signupIpHash    String? // salted hash of the sign-up IP (guest trial limits); never the raw IP
+  emailOnTaskDone Boolean  @default(true)
+
   tasks        Task[]
   agents       Agent[] // agents this user has published (developer persona)
   workflows    Workflow[]
   seats        TeamSeat[]
-  transactions Transaction[]
+  transactions Transaction[] @relation("TransactionWallet") // ledger of this user's wallet
+  actedTransactions Transaction[] @relation("TransactionActor") // charges this user triggered (may hit a team wallet)
   workforce    WorkforceMember[]
+  ownedTeam      Team?          @relation("TeamOwner")
+  teamMembership TeamMember?
+  attachments    TaskAttachment[]
+  passwordResets PasswordReset[]
+  stripePayments StripePayment[]
+
+  @@index([isGuest, createdAt])
+  @@index([signupIpHash, createdAt])
 }
 
 model TeamSeat {
@@ -133,11 +159,28 @@ model Task {
   startedAt    DateTime?
   completedAt  DateTime?
 
+  // v3
+  team         Team?      @relation(fields: [teamId], references: [id], onDelete: SetNull)
+  teamId       String? // set when created by a team member: visible to the whole team
+  walletUserId String? // whose credits paid for this run (team owner for team tasks); refunds go back here
+  isTest       Boolean    @default(false) // developer test run: free, excluded from revenue/stats
+  // Not @unique on purpose: adding a unique constraint to an existing table makes `prisma db push`
+  // demand --accept-data-loss and would stop the Render boot. Tokens are 24 random bytes (collision-free in practice).
+  shareToken   String? // public read-only link /r/<token>; null = not shared
+  sharedAt     DateTime?
+
   steps        TaskStep[]
   transactions Transaction[]
+  sources      TaskSource[]
+  attachments  TaskAttachment[]
+  revisions    TaskRevision[]
+  usageEvents  UsageEvent[]
+  galleryItems GalleryItem[]
 
   @@index([userId, createdAt])
   @@index([agentId, status])
+  @@index([teamId, createdAt])
+  @@index([shareToken])
 }
 
 // One agent's contribution to a task run, executed sequentially.
@@ -182,8 +225,10 @@ model Workflow {
 // refunds and top-ups.
 model Transaction {
   id          String          @id @default(cuid())
-  user        User            @relation(fields: [userId], references: [id])
-  userId      String
+  user        User            @relation("TransactionWallet", fields: [userId], references: [id])
+  userId      String // the WALLET whose balance changed (a team task charges the team owner's wallet)
+  actor       User?           @relation("TransactionActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+  actorUserId String? // who triggered it (null on pre-v3 rows = same as userId)
   type        TransactionType
   amountCents Int
   description String
@@ -192,6 +237,8 @@ model Transaction {
   createdAt   DateTime        @default(now())
 
   @@index([userId, createdAt])
+  @@index([actorUserId, createdAt])
+  @@index([type, createdAt])
 }
 
 // A user's saved agents ("my workforce").
@@ -204,4 +251,163 @@ model WorkforceMember {
   createdAt DateTime @default(now())
 
   @@unique([userId, agentId])
+}
+
+// ============================================================ v3 models
+
+// A team shares ONE wallet: the owner's User.credits. Members' own balances
+// are untouched (and unused) while they're in the team.
+model Team {
+  id        String   @id @default(cuid())
+  name      String
+  owner     User     @relation("TeamOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  ownerId   String   @unique // a user owns at most one team
+  createdAt DateTime @default(now())
+
+  members TeamMember[]
+  invites TeamInvite[]
+  tasks   Task[]
+}
+
+model TeamMember {
+  id       String   @id @default(cuid())
+  team     Team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  teamId   String
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId   String   @unique // a user belongs to at most one team (the owner has a row too, role OWNER)
+  role     TeamRole @default(MEMBER)
+  joinedAt DateTime @default(now())
+
+  @@index([teamId])
+}
+
+model TeamInvite {
+  id          String    @id @default(cuid())
+  team        Team      @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  teamId      String
+  token       String    @unique // random, URL-safe; the invite link is /join/<token>
+  createdById String
+  maxUses     Int       @default(10)
+  uses        Int       @default(0)
+  expiresAt   DateTime
+  revokedAt   DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@index([teamId])
+}
+
+// Numbered sources a task's agents may cite as [n]. Created before the team
+// runs (web search / Wikipedia / client links / uploaded files).
+model TaskSource {
+  id          String   @id @default(cuid())
+  task        Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  taskId      String
+  n           Int // citation number, 1-based, unique per task
+  kind        String // web | wikipedia | link | upload
+  title       String
+  url         String?
+  domain      String?
+  snippet     String   @db.Text
+  publishedAt String?
+  createdAt   DateTime @default(now())
+
+  @@unique([taskId, n])
+}
+
+// Client-provided material. Files are converted to text in the browser; only
+// the extracted text is stored (never the raw file). Links are fetched server-side.
+model TaskAttachment {
+  id        String   @id @default(cuid())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId    String
+  task      Task?    @relation(fields: [taskId], references: [id], onDelete: SetNull)
+  taskId    String? // null until attached to a task on creation
+  kind      String // pdf | csv | xlsx | docx | txt | md | url
+  name      String
+  url       String?
+  charCount Int
+  text      String   @db.Text
+  createdAt DateTime @default(now())
+
+  @@index([userId, createdAt])
+  @@index([taskId])
+}
+
+// Follow-up refinements of a completed report. Version 1 is the original
+// result (snapshotted when the first follow-up is requested).
+model TaskRevision {
+  id            String         @id @default(cuid())
+  task          Task           @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  taskId        String
+  version       Int
+  instruction   String         @db.Text
+  status        RevisionStatus @default(RUNNING)
+  result        String?        @db.Text
+  costCents     Int            @default(0)
+  errorMessage  String?
+  requestedById String?
+  createdAt     DateTime       @default(now())
+  completedAt   DateTime?
+
+  @@unique([taskId, version])
+}
+
+model PasswordReset {
+  id        String    @id @default(cuid())
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId    String
+  tokenHash String    @unique // sha256 of the emailed token; the token itself is never stored
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+}
+
+// One Stripe Checkout session; the webhook credits the wallet exactly once.
+model StripePayment {
+  id          String    @id @default(cuid())
+  sessionId   String    @unique
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId      String // wallet credited
+  packId      String
+  amountCents Int // money charged (EUR cents)
+  credits     Int // credits granted (cents)
+  status      String    @default("pending") // pending | completed | expired
+  createdAt   DateTime  @default(now())
+  completedAt DateTime?
+}
+
+// Metering for the owner dashboard and budget guards.
+model UsageEvent {
+  id        String   @id @default(cuid())
+  kind      String // llm | search | email | fetch
+  provider  String
+  model     String?
+  tokensIn  Int      @default(0)
+  tokensOut Int      @default(0)
+  ok        Boolean  @default(true)
+  task      Task?    @relation(fields: [taskId], references: [id], onDelete: SetNull)
+  taskId    String?
+  createdAt DateTime @default(now())
+
+  @@index([kind, createdAt])
+}
+
+// Public example/featured reports shown in the gallery.
+model GalleryItem {
+  id          String   @id @default(cuid())
+  slug        String   @unique
+  title       String
+  category    String
+  summary     String   @db.Text
+  content     String   @db.Text // markdown (snapshot; independent of the source task)
+  sources     Json     @default("[]") // TaskSource-shaped array
+  agentName   String
+  depth       String   @default("standard")
+  isExample   Boolean  @default(true) // true = curated example written for the demo, false = featured real report
+  task        Task?    @relation(fields: [taskId], references: [id], onDelete: SetNull)
+  taskId      String?
+  position    Int      @default(0)
+  isPublished Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 }

@@ -1,15 +1,18 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { api, type Task } from "@/lib/api";
+import { useAuth } from "@/lib/auth-context";
+import { errorText } from "@/lib/errors";
 import {
   Avatar,
   EmptyState,
   Icon,
   OutcomeTag,
   PageHead,
+  PageSkeleton,
   RequireAuth,
   Skeleton,
   Stat,
@@ -20,6 +23,9 @@ import { useIsMobile, useKeyboardShortcut, usePolling } from "@/lib/hooks";
 import { ROUTES } from "@/lib/routes";
 
 type Filter = "All" | "Active" | "Completed" | "Failed";
+type Scope = "all" | "mine" | "team";
+const SCOPE_LABEL: Record<Scope, string> = { all: "All", mine: "Started by me", team: "Team" };
+const parseScope = (v: string | null): Scope => (v === "mine" || v === "team" ? v : "all");
 const FILTERS: Filter[] = ["All", "Active", "Completed", "Failed"];
 
 const isActive = (t: Task) => t.status === "RUNNING" || t.status === "PLANNING";
@@ -30,8 +36,37 @@ const match = (t: Task, f: Filter) =>
 export default function TasksPage() {
   return (
     <RequireAuth>
-      <MyWork />
+      <Suspense fallback={<PageSkeleton />}>
+        <MyWork />
+      </Suspense>
     </RequireAuth>
+  );
+}
+
+/** Small inline markers next to a task title: who started it (team), test run, shared link. */
+function TaskMarks({ t, meId }: { t: Task; meId?: string }) {
+  const by = t.createdBy && meId && t.createdBy.id !== meId ? t.createdBy.name : null;
+  if (!by && !t.isTest && !t.shareToken) return null;
+  return (
+    <span className="row wrapflex" style={{ gap: 6, marginTop: 4, display: "flex" }}>
+      {by && (
+        <span className="tiny muted" style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+          <Icon name="user" size={12} />
+          by {by}
+        </span>
+      )}
+      {t.isTest && (
+        <span className="tag warn" style={{ padding: "1px 7px", fontSize: 11 }} title="A free developer test run of an agent">
+          Test run
+        </span>
+      )}
+      {t.shareToken && (
+        <span className="tag gray" style={{ padding: "1px 7px", fontSize: 11 }} title="Anyone with the public link can read this report">
+          <Icon name="link" />
+          Shared
+        </span>
+      )}
+    </span>
   );
 }
 
@@ -48,29 +83,60 @@ function execTime(t: Task) {
 
 function MyWork() {
   const router = useRouter();
+  const pathname = usePathname() || "/tasks";
+  const params = useSearchParams();
+  const { user } = useAuth();
   const isMobile = useIsMobile();
+  const inTeam = !!user?.team;
+  const [scope, setScopeState] = useState<Scope>(() => parseScope(params.get("scope")));
+  const effectiveScope: Scope = scope === "team" && !inTeam ? "all" : scope;
   const [tasks, setTasks] = useState<Task[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<Filter>("All");
   const [q, setQ] = useState("");
   const searchRef = useRef<HTMLInputElement>(null);
+  const scopeRef = useRef<Scope>(effectiveScope);
+  scopeRef.current = effectiveScope;
+
+  const setScope = (s: Scope) => {
+    if (s === scope) return;
+    setScopeState(s);
+    setTasks(null);
+    setError(null);
+    const next = new URLSearchParams(params.toString());
+    if (s === "all") next.delete("scope");
+    else next.set("scope", s);
+    const qs = next.toString();
+    router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
+  };
+
+  const fetchTasks = async () => {
+    const asked = scopeRef.current;
+    try {
+      const r = await api.listTasks(asked === "all" ? undefined : asked);
+      if (asked !== scopeRef.current) return true; // the scope changed mid-request; the next tick refetches
+      setTasks(r.tasks);
+      setError(null);
+      return r.tasks.some(isActive);
+    } catch (e) {
+      if (asked !== scopeRef.current) return true;
+      setError(errorText(e, "Couldn't load your tasks."));
+      return true;
+    }
+  };
 
   const anyActive = !!tasks?.some(isActive);
-  usePolling(
-    async () => {
-      try {
-        const r = await api.listTasks();
-        setTasks(r.tasks);
-        setError(null);
-        return r.tasks.some(isActive);
-      } catch (e) {
-        setError((e as Error).message);
-        return true;
-      }
-    },
-    anyActive ? 4000 : 15000,
-    { enabled: tasks === null || anyActive || !!error }
-  );
+  usePolling(fetchTasks, anyActive ? 4000 : 15000, { enabled: tasks === null || anyActive || !!error });
+  // Switching scope: fetch right away instead of waiting for the next tick.
+  const firstScope = useRef(true);
+  useEffect(() => {
+    if (firstScope.current) {
+      firstScope.current = false;
+      return;
+    }
+    void fetchTasks();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [effectiveScope]);
 
   useKeyboardShortcut("f", () => searchRef.current?.focus());
 
@@ -86,12 +152,12 @@ function MyWork() {
       (t) =>
         match(t, filter) &&
         (!needle ||
-          [t.title, t.description, t.category ?? "", t.agent?.name ?? ""].some((x) => x.toLowerCase().includes(needle)))
+          [t.title, t.description, t.category ?? "", t.agent?.name ?? "", t.createdBy?.name ?? ""].some((x) => x.toLowerCase().includes(needle)))
     );
   }, [tasks, filter, q]);
 
   const spent = useMemo(
-    () => (tasks ?? []).filter((t) => t.status === "COMPLETED" || isActive(t)).reduce((n, t) => n + t.costCents, 0),
+    () => (tasks ?? []).filter((t) => !t.isTest && (t.status === "COMPLETED" || isActive(t))).reduce((n, t) => n + t.costCents, 0),
     [tasks]
   );
   const rated = (tasks ?? []).filter((t) => t.outcome);
@@ -101,7 +167,11 @@ function MyWork() {
     <div className="wrap">
       <PageHead
         title="Task history"
-        sub="Everything you've asked for, with results, cost and outcomes."
+        sub={
+          inTeam
+            ? `Everything you and ${user?.team?.name ?? "your team"} have asked for, with results, cost and outcomes.`
+            : "Everything you've asked for, with results, cost and outcomes."
+        }
         actions={
           <Link className="btn p" href={ROUTES.newTask}>
             <Icon name="plus" />
@@ -109,6 +179,25 @@ function MyWork() {
           </Link>
         }
       />
+
+      <div className="row wrapflex" style={{ gap: 8, marginBottom: 16 }} role="group" aria-label="Whose tasks to show">
+        {(["all", "mine", ...(inTeam ? (["team"] as const) : [])] as Scope[]).map((s) => {
+          const on = effectiveScope === s;
+          return (
+            <button
+              key={s}
+              type="button"
+              aria-pressed={on}
+              className={on ? "chip on" : "chip"}
+              onClick={() => setScope(s)}
+              style={{ fontWeight: 600 }}
+            >
+              {s === "team" && <Icon name="share" size={14} />}
+              {s === "team" ? `${SCOPE_LABEL.team}${user?.team ? ` · ${user.team.name}` : ""}` : SCOPE_LABEL[s]}
+            </button>
+          );
+        })}
+      </div>
 
       {error && (
         <div className="notice" role="alert" style={{ marginBottom: 16 }}>
@@ -142,10 +231,24 @@ function MyWork() {
         )
       ) : tasks.length === 0 ? (
         <div style={{ marginBottom: 40 }}>
-          <EmptyState icon="spark" title="No tasks yet" action={{ label: "Describe your first task", href: ROUTES.newTask, icon: "plus" }}>
-            Describe an outcome in plain language. Ensemblis plans it, runs a team of agents and delivers a verified report, usually in
-            minutes.
-          </EmptyState>
+          {effectiveScope === "team" ? (
+            <EmptyState icon="share" title="No team tasks yet" action={{ label: "Start a task for the team", href: ROUTES.newTask, icon: "plus" }}>
+              Tasks anyone on {user?.team?.name ?? "your team"} runs show up here, with who started each one.
+            </EmptyState>
+          ) : effectiveScope === "mine" ? (
+            <EmptyState icon="spark" title="You haven't started a task yet" action={{ label: "Describe a task", href: ROUTES.newTask, icon: "plus" }}>
+              Describe an outcome in plain language. Ensemblis plans it, runs a team of agents and delivers a verified report.
+            </EmptyState>
+          ) : (
+            <EmptyState icon="spark" title="No tasks yet" action={{ label: "Describe your first task", href: ROUTES.newTask, icon: "plus" }}>
+              Describe an outcome in plain language. Ensemblis plans it, runs a team of agents and delivers a verified report, usually in
+              minutes. Not sure what to ask?{" "}
+              <Link href={ROUTES.examples} style={{ color: "var(--accent)", fontWeight: 600 }}>
+                See example reports
+              </Link>
+              .
+            </EmptyState>
+          )}
         </div>
       ) : (
         <>
@@ -219,8 +322,9 @@ function MyWork() {
                       {t.title}
                     </b>
                     <div className="tiny muted">
-                      {t.agent?.name ?? "Agent team"} · {dayLabel(t.createdAt)} · {eur(t.costCents)}
+                      {t.agent?.name ?? "Agent team"} · {dayLabel(t.createdAt)} · {t.isTest ? "free test" : eur(t.costCents)}
                     </div>
+                    <TaskMarks t={t} meId={user?.id} />
                     {isActive(t) && (
                       <div className="progress" style={{ marginTop: 8, height: 5 }}>
                         <i style={{ width: `${Math.max(6, progressOf(t))}%` }} />
@@ -256,6 +360,7 @@ function MyWork() {
                           <b>{t.title}</b>
                         </Link>
                         <div className="tiny muted">{t.agent?.name ?? "Agent team"}</div>
+                        <TaskMarks t={t} meId={user?.id} />
                         {isActive(t) && (
                           <div className="progress" style={{ marginTop: 6, height: 4, maxWidth: 220 }}>
                             <i style={{ width: `${Math.max(6, progressOf(t))}%` }} />
@@ -268,8 +373,8 @@ function MyWork() {
                       </td>
                       <td>{dayLabel(t.createdAt)}</td>
                       <td>
-                        {eur(t.costCents)}
-                        {(t.status === "FAILED" || t.status === "REFUNDED") && t.costCents > 0 && <div className="tiny muted">refunded</div>}
+                        {t.isTest ? <span className="muted">Free</span> : eur(t.costCents)}
+                        {!t.isTest && (t.status === "FAILED" || t.status === "REFUNDED") && t.costCents > 0 && <div className="tiny muted">refunded</div>}
                       </td>
                       <td>{execTime(t)}</td>
                       <td>

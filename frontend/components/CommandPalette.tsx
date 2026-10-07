@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { api, type Agent } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
+import { useConfig } from "@/lib/config";
 import { ROUTES } from "@/lib/routes";
 import { useTheme } from "@/lib/theme";
 import { fuzzyScore } from "@/lib/utils";
@@ -52,6 +53,9 @@ export function CommandPalette({ open, onClose, onShortcuts, onGetStarted }: Com
   const router = useRouter();
   const { user, signOut } = useAuth();
   const { toggle, resolved } = useTheme();
+  const { config } = useConfig();
+  const trialOn = config.guestTrialEnabled;
+  const emailOn = config.emailEnabled;
   const [q, setQ] = useState("");
   const [sel, setSel] = useState(0);
   const [agents, setAgents] = useState<Agent[]>(agentCache || []);
@@ -77,6 +81,8 @@ export function CommandPalette({ open, onClose, onShortcuts, onGetStarted }: Com
           P("billing", "Billing", ROUTES.billing, "eur", "payments credits top up wallet"),
           P("settings", "Settings", ROUTES.settings, "settings", "profile account password"),
           P("agents", "Agents", ROUTES.agents, "compass", "explore marketplace browse"),
+          P("examples", "Examples", ROUTES.examples, "file", "example reports gallery sample deliverables finished"),
+          P("team", "Team", ROUTES.team, "user", "members invite colleagues shared wallet organisation organization"),
           ...(user.accountType === "DEVELOPER"
             ? [P("devdash", "Developer dashboard", ROUTES.devDashboard, "chart", "revenue my agents analytics"), P("publish", "Publish an agent", ROUTES.publish, "plus", "new agent create")]
             : []),
@@ -90,6 +96,7 @@ export function CommandPalette({ open, onClose, onShortcuts, onGetStarted }: Com
       : [
           P("home", "Home", ROUTES.home, "home"),
           P("agents", "Agents", ROUTES.agents, "compass", "explore marketplace browse"),
+          P("examples", "Examples", ROUTES.examples, "file", "example reports gallery sample deliverables finished"),
           P("dev", "Developers", ROUTES.developers, "code", "build publish"),
           P("how", "How it works", ROUTES.howItWorks, "layers"),
           P("network", "Resources", ROUTES.network, "globe", "network economy"),
@@ -100,16 +107,26 @@ export function CommandPalette({ open, onClose, onShortcuts, onGetStarted }: Com
         ];
     const A = (id: string, title: string, icon: IconName, run: () => void, keywords = ""): PaletteItem => ({ id: "a:" + id, title, sub: "Action", group: "Actions", icon, run, keywords });
     const actions: PaletteItem[] = [
+      ...(!user && trialOn
+        ? [{ ...A("trial", "Try a free task", "zap", () => router.push(`${ROUTES.home}?trial=1`), "free trial guest no sign up signup demo test try"), href: `${ROUTES.home}?trial=1` }]
+        : []),
       { ...A("new", "Start a new task", "plus", () => router.push(ROUTES.newTask), "create describe work"), href: ROUTES.newTask },
+      { ...A("examples", "Browse example reports", "file", () => router.push(ROUTES.examples), "gallery sample report deliverable see finished"), href: ROUTES.examples },
       A("theme", resolved === "dark" ? "Switch to light mode" : "Switch to dark mode", resolved === "dark" ? "sun" : "moon", toggle, "theme dark light appearance"),
       A("keys", "Keyboard shortcuts", "keyboard", onShortcuts, "help keys"),
-      user
-        ? A("out", "Sign out", "out", () => {
-            signOut();
-            router.push(ROUTES.home);
-          }, "log out logout")
-        : A("in", "Log in", "user", () => router.push(ROUTES.login), "sign in"),
+      // A guest has no password: signing out would lose the trial, so offer to save it instead.
+      user?.isGuest
+        ? { ...A("save", "Save your trial results", "check", () => router.push(`${ROUTES.signup}?claim=1`), "create account sign up register keep claim guest"), href: `${ROUTES.signup}?claim=1` }
+        : user
+          ? A("out", "Sign out", "out", () => {
+              signOut();
+              router.push(ROUTES.home);
+            }, "log out logout")
+          : A("in", "Log in", "user", () => router.push(ROUTES.login), "sign in"),
       ...(!user ? [A("join", "Get started", "spark", onGetStarted, "sign up register create account")] : []),
+      ...(emailOn && !user?.isGuest
+        ? [{ ...A("forgot", "Forgot password", "lock", () => router.push(ROUTES.forgotPassword), "reset password recover account lost login"), href: ROUTES.forgotPassword }]
+        : []),
     ];
     const ags: PaletteItem[] = agents.map((a) => ({
       id: "g:" + a.id,
@@ -121,7 +138,7 @@ export function CommandPalette({ open, onClose, onShortcuts, onGetStarted }: Com
       keywords: `${a.creator} ${a.capabilities.join(" ")} ${a.taskType}`,
     }));
     return [...pages, ...actions, ...ags];
-  }, [user, agents, resolved, toggle, router, signOut, onShortcuts, onGetStarted]);
+  }, [user, agents, resolved, toggle, router, signOut, onShortcuts, onGetStarted, trialOn, emailOn]);
 
   const results = useMemo(() => {
     if (!q.trim()) {

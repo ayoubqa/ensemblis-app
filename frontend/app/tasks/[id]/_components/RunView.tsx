@@ -8,7 +8,9 @@ import { STAGES } from "@/lib/data";
 import { duration, eur } from "@/lib/format";
 import { ROUTES } from "@/lib/routes";
 import { cx } from "@/lib/utils";
-import { Md } from "./Md";
+import { CitedMarkdown } from "@/components/report";
+import { Gathering, Materials, SourcesMini } from "./Gathering";
+import { LiveStream } from "./LiveStream";
 import { clock, costByStep, snippet, sortedSteps, stepSeconds, useNow } from "./shared";
 
 /** What each role is instructed to do — rotated as the live "working on" line. */
@@ -41,6 +43,19 @@ function buildFeed(task: Task, steps: TaskStep[]): FeedItem[] {
       id: "team",
       at: new Date(task.startedAt).getTime() + 1,
       text: <>Team assembled: {steps.map((s) => s.agentName).join(" → ")}</>,
+    });
+  }
+  const nSources = (task.sources ?? []).length;
+  if (nSources > 0) {
+    const firstStart = steps.find((s) => s.startedAt)?.startedAt;
+    out.push({
+      id: "sources",
+      at: firstStart ? new Date(firstStart).getTime() - 1 : (task.startedAt ? new Date(task.startedAt).getTime() : t0) + 2,
+      text: (
+        <>
+          Research desk gathered <b>{nSources}</b> {nSources === 1 ? "source" : "sources"} for the team
+        </>
+      ),
     });
   }
   steps.forEach((s, i) => {
@@ -121,12 +136,16 @@ export function RunView({ task, stale }: { task: Task; stale: boolean }) {
   const lastRunning = !!running && running.id === last?.id;
   const verifyDone = lastRunning ? Math.min(VERIFY_ITEMS.length - 1, Math.floor(runSec / 7)) : 0;
   const hueOf = (s: TaskStep) => (s.agentId && s.agentId === task.agentId && task.agent ? task.agent.hue : undefined);
+  const gathering = task.status === "RUNNING" && steps.length > 0 && steps.every((s) => !s.startedAt);
+  const runningSteps = steps.filter((s) => s.status === "RUNNING");
+  const sources = task.sources ?? [];
+  const attachments = task.attachments ?? [];
 
   return (
     <div className="wrap">
       <Flow step={stage >= 4 ? 3 : 2} />
       <div className="grid" id="rg" style={{ gridTemplateColumns: "1.6fr 1fr", gap: 20, marginTop: 10, alignItems: "start" }}>
-        <div className="stack">
+        <div className="stack" style={{ minWidth: 0 }}>
           <div className="card">
             <div className="row between wrapflex">
               <span className="tag ok">
@@ -139,8 +158,8 @@ export function RunView({ task, stale }: { task: Task; stale: boolean }) {
                     Reconnecting…
                   </span>
                 )}
-                <span className="tag gray" style={{ textTransform: "capitalize" }}>
-                  {task.depth} depth
+                <span className="tag gray">
+                  {task.depth.charAt(0).toUpperCase() + task.depth.slice(1)} depth
                 </span>
               </span>
             </div>
@@ -154,6 +173,10 @@ export function RunView({ task, stale }: { task: Task; stale: boolean }) {
                 </>
               ) : task.status === "PLANNING" ? (
                 "Assembling your team…"
+              ) : gathering ? (
+                <>
+                  Gathering sources for the team…<span className="caret" aria-hidden="true" />
+                </>
               ) : (
                 "Handing off to the next agent…"
               )}
@@ -249,11 +272,17 @@ export function RunView({ task, stale }: { task: Task; stale: boolean }) {
             )}
           </div>
 
+          {gathering && <Gathering task={task} />}
+
+          {runningSteps.map((s) => (
+            <LiveStream key={s.id} task={task} step={s} now={now} phrase={phrase} hue={hueOf(s)} />
+          ))}
+
           {/* Step log with peekable outputs */}
           <div className="card">
             <div className="row between">
               <b className="small">Work log</b>
-              <span className="tiny muted">Open a finished step to read its output</span>
+              <span className="tiny muted">{runningSteps.length ? "Live output above · peek at finished steps" : "Open a finished step to read its output"}</span>
             </div>
             <ul className="chk" style={{ marginTop: 6 }}>
               {steps.map((s) => {
@@ -309,7 +338,9 @@ export function RunView({ task, stale }: { task: Task; stale: boolean }) {
                           color: "var(--ink)",
                         }}
                       >
-                        <Md small>{s.output}</Md>
+                        <CitedMarkdown small sources={sources}>
+                          {s.output}
+                        </CitedMarkdown>
                       </div>
                     )}
                   </li>
@@ -362,7 +393,7 @@ export function RunView({ task, stale }: { task: Task; stale: boolean }) {
           </details>
         </div>
 
-        <div className="stack">
+        <div className="stack" style={{ minWidth: 0 }}>
           <div className="card">
             <b className="small">Your team</b>
             <div style={{ marginTop: 6 }}>
@@ -385,6 +416,16 @@ export function RunView({ task, stale }: { task: Task; stale: boolean }) {
               ))}
             </div>
           </div>
+          {attachments.length > 0 && (
+            <div className="card">
+              <b className="small">Your materials</b>
+              <p className="tiny muted" style={{ margin: "2px 0 10px" }}>
+                Shared with every agent on this task.
+              </p>
+              <Materials attachments={attachments} />
+            </div>
+          )}
+          {!gathering && <SourcesMini sources={sources} />}
           <div className="card">
             <div className="row between">
               <b className="small">Live activity</b>

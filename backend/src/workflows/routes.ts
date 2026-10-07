@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { z } from "zod";
 import { prisma } from "../db";
-import { requireAuth, AuthedRequest } from "../auth/middleware";
+import { requireAuth, requireRegistered, AuthedRequest } from "../auth/middleware";
 import { ah, HttpError, parse } from "../lib/http";
 import { toPublicWorkflow } from "../lib/serializers";
 import { config } from "../config";
@@ -10,6 +10,9 @@ import { nextRunFrom, runWorkflow } from "./schedule";
 
 const router = Router();
 router.use(requireAuth);
+
+// Guests (trial accounts) can't set up recurring work.
+const registeredOnly = requireRegistered("set up recurring workflows");
 
 const frequency = z.enum(["Weekly", "Monthly", "Quarterly"]);
 const depth = z.enum(["focused", "standard", "deep"]);
@@ -45,6 +48,7 @@ const createSchema = z.object({
 
 router.post(
   "/",
+  registeredOnly,
   ah<AuthedRequest>(async (req, res) => {
     const body = parse(createSchema, req.body);
     if (body.agentId) {
@@ -70,6 +74,7 @@ const updateSchema = z
 
 router.patch(
   "/:id",
+  registeredOnly,
   ah<AuthedRequest>(async (req, res) => {
     const body = parse(updateSchema, req.body ?? {});
     const existing = await ownWorkflow(req.userId!, req.params.id);
@@ -100,6 +105,7 @@ router.delete(
 // Run a workflow's task now (also used by the scheduler, see schedule.ts).
 router.post(
   "/:id/run",
+  registeredOnly,
   taskRunLimiter,
   ah<AuthedRequest>(async (req, res) => {
     const workflow = await ownWorkflow(req.userId!, req.params.id);

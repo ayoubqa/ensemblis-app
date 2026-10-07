@@ -1,18 +1,20 @@
 "use client";
 
 import Link from "next/link";
-import { Fragment, useState } from "react";
+import { Fragment, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { api, ApiError, type Agent, type Depth, type TaskEstimate } from "@/lib/api";
 import { isLimitError, toastApiError } from "@/lib/errors";
 import { Avatar, Flow, Icon, Modal, Rating, Skeleton, SkeletonText, VerifiedTag, useToast } from "@/components";
 import { useAuth } from "@/lib/auth-context";
-import { StartingCredits } from "@/lib/config";
+import { StartingCredits, useConfig } from "@/lib/config";
 import { duration, eur, minutesRange, num, pct } from "@/lib/format";
 import { useKeyboardShortcut } from "@/lib/hooks";
 import { ROUTES, loginUrl, signupUrl } from "@/lib/routes";
 import { DepthPicker } from "./DepthPicker";
-import { clearDraft } from "./draft";
+import { clearDraft, materialsSummary, type SavedAttachment } from "./draft";
+import { FileBadge } from "./attachments/FileBadge";
+import ms from "./attachments/attachments.module.css";
 
 const RESUME = "/new?resume=1";
 
@@ -66,6 +68,12 @@ export function Plan({
   recommendedId,
   onEdit,
   onRetry,
+  attachments,
+  canAttach,
+  onDropAttachments,
+  onStarted,
+  depthAllowed,
+  depthNote,
 }: {
   description: string;
   estimate: TaskEstimate | null;
@@ -77,8 +85,19 @@ export function Plan({
   recommendedId: string | null;
   onEdit: () => void;
   onRetry: () => void;
+  /** Uploaded materials that go with this task. */
+  attachments: SavedAttachment[];
+  /** This user may attach materials (signed in, not a guest, feature on). */
+  canAttach: boolean;
+  /** Forget the attachments (e.g. the server says they expired). */
+  onDropAttachments: () => void;
+  /** Called right before navigating to the new task (stops the draft from being re-saved). */
+  onStarted: () => void;
+  depthAllowed?: Depth[];
+  depthNote?: ReactNode;
 }) {
   const { user, setUser } = useAuth();
+  const { config, loaded: configLoaded } = useConfig();
   const router = useRouter();
   const toast = useToast();
   const [modal, setModal] = useState<null | "confirm" | "auth" | "insufficient">(null);
@@ -102,7 +121,9 @@ export function Plan({
         title: estimate.title,
         depth: estimate.depth,
         agentId: estimate.leadAgent.id,
+        ...(attachments.length ? { attachmentIds: attachments.map((x) => x.id) } : {}),
       });
+      onStarted();
       setUser(u);
       clearDraft();
       toast("Task started. Your team is on it.");
@@ -112,6 +133,19 @@ export function Plan({
       if (err.status === 402) {
         setShortfall(err.message);
         setModal("insufficient");
+      } else if (attachments.length && (err.status === 400 || err.status === 404) && /attach/i.test(err.message || "")) {
+        // e.g. an attachment expired or was removed in another tab: offer to go on without them.
+        setModal(null);
+        toast.error(err.message, {
+          duration: 10000,
+          action: {
+            label: "Continue without them",
+            onClick: () => {
+              onDropAttachments();
+              toast.info("Materials removed. Press Start task again when you're ready.");
+            },
+          },
+        });
       } else {
         // Close the confirm sheet so the server's explanation (e.g. a daily limit) is readable.
         if (isLimitError(err)) setModal(null);
@@ -169,6 +203,9 @@ export function Plan({
   const known = new Map<string, Agent>([a, ...estimate.alternatives].map((x) => [x.id, x]));
   const balanceAfter = user ? user.credits - estimate.costCents : null;
   const swapped = recommendedId && a.id !== recommendedId;
+  const materials = materialsSummary(attachments);
+  const showResearch = configLoaded;
+  const showMaterials = attachments.length > 0 || canAttach;
 
   return (
     <div className="wrap">
@@ -323,6 +360,76 @@ export function Plan({
             </div>
           </div>
 
+          {/* What the team works from: web research + the client's materials */}
+          {(showResearch || showMaterials) && (
+            <div className="card">
+              <b>What your team works from</b>
+              <div style={{ display: "grid", gap: 14, marginTop: 14 }}>
+                {showResearch && (
+                  <div className="row" style={{ alignItems: "flex-start", gap: 12 }}>
+                    <span
+                      aria-hidden="true"
+                      style={{ flex: "none", width: 34, height: 34, borderRadius: 9, display: "grid", placeItems: "center", background: "var(--accent-soft)", color: "var(--accent)" }}
+                    >
+                      <Icon name="globe" size={17} />
+                    </span>
+                    <div style={{ minWidth: 0 }}>
+                      <b className="small">{config.searchEnabled ? "Live web research" : "The agents' own knowledge"}</b>
+                      <div className="small muted">
+                        {config.searchEnabled
+                          ? `Agents will research the web via ${config.searchProviderLabel} and cite their sources.`
+                          : attachments.length
+                            ? "Web research is off on this server — agents work from their own knowledge plus your materials."
+                            : "Web research is off on this server — agents work from their own knowledge plus your brief."}
+                      </div>
+                    </div>
+                  </div>
+                )}
+                {showMaterials && (
+                  <div className="row" style={{ alignItems: "flex-start", gap: 12 }}>
+                    <span
+                      aria-hidden="true"
+                      style={{ flex: "none", width: 34, height: 34, borderRadius: 9, display: "grid", placeItems: "center", background: "var(--surface2)", color: "var(--muted)", boxShadow: "inset 0 0 0 1px var(--line)" }}
+                    >
+                      <Icon name="file" size={17} />
+                    </span>
+                    <div style={{ minWidth: 0, flex: 1 }}>
+                      {attachments.length ? (
+                        <>
+                          <b className="small">Your materials: {materials}</b>
+                          <span className="small muted"> — agents will read and cite them.</span>
+                          <ul className={ms.chips} style={{ listStyle: "none", padding: 0 }} aria-label="Your materials">
+                            {attachments.map((x) => (
+                              <li key={x.id} className={ms.mchip} title={x.url ?? x.name}>
+                                <FileBadge kind={x.kind} small />
+                                <span>{x.name}</span>
+                                <em>{num(x.charCount)} chars</em>
+                              </li>
+                            ))}
+                          </ul>
+                        </>
+                      ) : (
+                        <>
+                          <b className="small">No materials attached</b>
+                          <div className="small muted">
+                            Have a report, spreadsheet or web page the team should use?{" "}
+                            <button
+                              type="button"
+                              onClick={onEdit}
+                              style={{ color: "var(--accent)", fontWeight: 600, textDecoration: "underline", textUnderlineOffset: 2 }}
+                            >
+                              Add files or links
+                            </button>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
           {/* Alternatives */}
           {estimate.alternatives.length > 0 && (
             <div>
@@ -389,7 +496,7 @@ export function Plan({
             <div className="l" id="plan-depth-label" style={{ marginBottom: 8 }}>
               Depth
             </div>
-            <DepthPicker id="plan-depth" value={depth} onChange={onDepth} disabled={busy} />
+            <DepthPicker id="plan-depth" value={depth} onChange={onDepth} disabled={busy} allowed={depthAllowed} note={depthNote} />
           </div>
           <div className="kv">
             <span>Estimated time</span>
@@ -403,6 +510,12 @@ export function Plan({
             <span>Deliverable</span>
             <b>{a.outputType}</b>
           </div>
+          {attachments.length > 0 && (
+            <div className="kv">
+              <span>Materials</span>
+              <b>{materials}</b>
+            </div>
+          )}
           <div className="kv">
             <span>Platform fee</span>
             <span>Included</span>
@@ -455,6 +568,12 @@ export function Plan({
           <span>Estimated completion</span>
           <b>{minutesRange(estimate.estMinutesLow, estimate.estMinutesHigh)}</b>
         </div>
+        {attachments.length > 0 && (
+          <div className="kv">
+            <span>Materials</span>
+            <b>{materials}</b>
+          </div>
+        )}
         {user && (
           <div className="kv">
             <span>Remaining balance</span>
@@ -489,7 +608,11 @@ export function Plan({
         </p>
         <div className="notice" style={{ marginBottom: 16, background: "var(--warn-soft)", color: "var(--warn)" }}>
           <Icon name="shield" />
-          <span>This is a demo limit only. Add demo credits to keep going — nothing is ever really charged. Your plan is saved.</span>
+          <span>
+            {user?.isGuest
+              ? "Guest trials come with a small demo balance. Create a free account to get more — nothing is ever really charged. Your plan is saved."
+              : "This is a demo limit only. Add demo credits to keep going — nothing is ever really charged. Your plan is saved."}
+          </span>
         </div>
         <div className="row wrapflex">
           <button type="button" className="btn" onClick={() => setModal(null)}>
@@ -507,9 +630,15 @@ export function Plan({
               Try Focused depth
             </button>
           )}
-          <Link className="btn p lg sp" href={ROUTES.billing} data-autofocus>
-            Add demo credits
-          </Link>
+          {user?.isGuest ? (
+            <Link className="btn p lg sp" href={signupUrl("company", RESUME)} data-autofocus>
+              Create a free account
+            </Link>
+          ) : (
+            <Link className="btn p lg sp" href={ROUTES.billing} data-autofocus>
+              Add demo credits
+            </Link>
+          )}
         </div>
       </Modal>
 

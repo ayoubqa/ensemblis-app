@@ -9,6 +9,10 @@
   display: none;
 }
 
+.reportGrid {
+  margin-top: 22px;
+}
+
 @media print {
   /* Readable on paper regardless of the on-screen theme. */
   .page {

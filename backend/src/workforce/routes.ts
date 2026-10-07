@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { prisma } from "../db";
-import { requireAuth, AuthedRequest } from "../auth/middleware";
+import { requireAuth, requireRegistered, AuthedRequest } from "../auth/middleware";
 import { ah, HttpError } from "../lib/http";
 import { toPublicAgent } from "../lib/serializers";
 
@@ -22,6 +22,7 @@ router.get(
 
 router.post(
   "/:agentId",
+  requireRegistered("save agents to your workforce"),
   ah<AuthedRequest>(async (req, res) => {
     const agent = await prisma.agent.findFirst({
       where: { OR: [{ id: req.params.agentId }, { slug: req.params.agentId }] },

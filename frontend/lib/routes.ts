@@ -29,6 +29,15 @@ export const ROUTES = {
   styleguide: "/styleguide",
   privacy: "/privacy",
   terms: "/terms",
+  // v3
+  examples: "/examples", // gallery of example reports
+  example: (slug: string) => `/examples/${encodeURIComponent(slug)}`,
+  sharedReport: (token: string) => `/r/${encodeURIComponent(token)}`,
+  forgotPassword: "/forgot-password",
+  resetPassword: "/reset-password", // ?token=…
+  team: "/team",
+  joinTeam: (token: string) => `/join/${encodeURIComponent(token)}`,
+  admin: "/admin", // real owner dashboard for ADMIN_EMAILS; demo console otherwise
 } as const;
 
 /** "/login?next=/tasks/abc" */
@@ -48,5 +57,8 @@ export function signupUrl(type?: "company" | "developer", next?: string | null):
 /** Only allow same-site relative redirects from ?next= */
 export function safeNext(next: string | null | undefined, fallback = ROUTES.dashboard as string): string {
   if (!next || !next.startsWith("/") || next.startsWith("//")) return fallback;
+  // Browsers treat "\" like "/" and drop tabs/newlines, so "/\evil.com" or
+  // "/<tab>/evil.com" would still leave the site.
+  if (/[\\\u0000-\u001f\u007f]/.test(next)) return fallback;
   return next;
 }

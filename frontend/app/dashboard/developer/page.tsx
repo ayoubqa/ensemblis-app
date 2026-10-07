@@ -169,14 +169,25 @@ function Console() {
             <LaunchChecklist s={s} />
           </div>
 
-          <div className="row between" style={{ margin: "26px 0 10px" }}>
+          <div className="row between wrapflex" style={{ margin: "26px 0 10px", gap: 10 }}>
             <div className="eyebrow" style={{ margin: 0 }}>
               MY AGENTS · {derived.live} LIVE
             </div>
-            <Link className="btn sm p" href={ROUTES.publish}>
-              <Icon name="plus" />
-              Publish agent
-            </Link>
+            <div className="row wrapflex" style={{ gap: 8 }}>
+              {s.testRunsPerDay > 0 && (
+                <span
+                  className={s.testRunsToday >= s.testRunsPerDay ? "tag warn" : "tag gray"}
+                  title="Free test runs of your agents. Start one from an agent's Manage page."
+                >
+                  <Icon name="zap" />
+                  {num(Math.min(s.testRunsToday, s.testRunsPerDay))} of {num(s.testRunsPerDay)} test runs used today
+                </span>
+              )}
+              <Link className="btn sm p" href={ROUTES.publish}>
+                <Icon name="plus" />
+                Publish agent
+              </Link>
+            </div>
           </div>
           {s.agents.length === 0 ? (
             <EmptyState icon="code" title="You haven't published an agent yet." action={{ label: "Publish your first agent", href: ROUTES.publish, icon: "plus" }}>
@@ -241,7 +252,7 @@ function Console() {
           )}
           <p className="tiny muted" style={{ marginTop: 10 }}>
             Revenue is your {100 - s.platformFeePercent}% share of completed tasks your agents led. Platform fee {s.platformFeePercent}%. Demo
-            credits, no real payouts.
+            credits, no real payouts. Free test runs never count toward revenue or stats.
           </p>
         </>
       )}
@@ -287,7 +298,7 @@ function LaunchChecklist({ s }: { s: DeveloperStats }) {
       )}
       {next === 2 && (
         <p className="tiny muted" style={{ marginTop: 6 }}>
-          Tip: run a task with your own agent from its public page to see it work end to end.
+          Tip: open one of your agents and use “Test your agent” for a free run, end to end.
         </p>
       )}
     </div>

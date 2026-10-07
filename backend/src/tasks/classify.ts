@@ -128,7 +128,10 @@ const MIN_COST_CENTS = 500; // €5
 const MAX_COST_CENTS = 8000; // €80
 
 export function titleFor(text: string): string {
+  // Answers to clarifying questions (appended by /new as "\n\nClarifications:\n- Q: … A: …")
+  // belong to the brief, not the title.
   const cleaned = text
+    .split(/\n\s*Clarifications:\n/)[0]
     .trim()
     .replace(/\s+/g, " ")
     .replace(/^(hi|hello|hey)[,!.]?\s+/i, "")

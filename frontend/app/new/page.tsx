@@ -1,16 +1,38 @@
 "use client";
 
+import Link from "next/link";
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { api, type AgentDetail, type Depth, type TaskEstimate } from "@/lib/api";
+import { api, type AgentDetail, type ClarifyQuestion, type Depth, type TaskEstimate } from "@/lib/api";
 import { errorText } from "@/lib/errors";
 import { PageSkeleton, useToast } from "@/components";
+import { useAuth } from "@/lib/auth-context";
+import { useConfig } from "@/lib/config";
+import { num } from "@/lib/format";
+import { signupUrl } from "@/lib/routes";
 import { Describe } from "./_components/Describe";
 import { Analyze } from "./_components/Analyze";
 import { Plan } from "./_components/Plan";
 import { loadDraft, saveDraft } from "./_components/draft";
+import { clarificationBlock, cleanQuestions, hasClarifications, type ClarifyAnswer } from "./_components/Clarify";
+import { useAttachments } from "./_components/attachments/useAttachments";
+import { AttachGate, AttachmentPanel } from "./_components/attachments/AttachmentPanel";
 
 type Step = "describe" | "analyze" | "plan";
+
+/** Clarifying questions never hold the flow up for longer than this. */
+const CLARIFY_TIMEOUT_MS = 6000;
+/** Guest trial accounts may only run Focused tasks. */
+const GUEST_DEPTHS: Depth[] = ["focused"];
+
+interface ClarifyState {
+  /** The exact (trimmed) brief the questions are about. */
+  for: string;
+  status: "pending" | "done";
+  questions: ClarifyQuestion[];
+  /** Skipped or applied — don't show them again. */
+  dismissed: boolean;
+}
 
 function stepFromHash(): Step {
   if (typeof window === "undefined") return "describe";
@@ -28,12 +50,18 @@ export default function NewTaskPage() {
 
 /**
  * Describe → Analyze → Plan, as one page. The step lives in the URL hash so
- * browser back/forward moves between steps; the draft lives in sessionStorage
- * so a logged-out visitor can sign in at confirm time and come straight back.
+ * browser back/forward moves between steps; the draft (incl. uploaded
+ * attachment ids) lives in sessionStorage so a visitor can sign in at confirm
+ * time and come straight back.
  */
 function NewTaskFlow() {
   const params = useSearchParams();
   const toast = useToast();
+  const { user, loading: authLoading } = useAuth();
+  const { config, loaded: configLoaded } = useConfig();
+  const isGuest = !!user?.isGuest;
+  const attachOn = configLoaded && config.maxAttachments > 0;
+  const canAttach = attachOn && !!user && !user.isGuest;
 
   const [ready, setReady] = useState(false);
   const [step, setStep] = useState<Step>("describe");
@@ -51,6 +79,13 @@ function NewTaskFlow() {
   const [analyzedFor, setAnalyzedFor] = useState<string | null>(null);
   const [analyzeRun, setAnalyzeRun] = useState(0);
   const reqRef = useRef(0);
+
+  const [clarify, setClarify] = useState<ClarifyState | null>(null);
+  const clarifyReq = useRef(0);
+
+  const att = useAttachments({ max: config.maxAttachments, maxChars: config.maxAttachmentChars, userId: user?.id ?? null });
+  /** Set once the task is created, so the cleared draft isn't written back. */
+  const startedRef = useRef(false);
 
   const runEstimate = useCallback(
     async (opts: { description: string; depth: Depth; agentId: string | null }) => {
@@ -101,6 +136,8 @@ function NewTaskFlow() {
     setDescription(desc);
     setDepth(d);
     setAgentId(ag);
+    // A fresh ?q= brief starts clean; otherwise bring back the files already uploaded for this draft.
+    if (!q && draft?.attachments.length) att.restore(draft.attachments);
 
     if (agentParam) {
       setDirectLoading(true);
@@ -155,21 +192,86 @@ function NewTaskFlow() {
     }
   }, [ready, step, estimate, estimating, estError, description, depth, agentId, runEstimate, go]);
 
-  // ---- Persist the draft
+  // ---- Guests run Focused tasks only (the server enforces it; keep the plan honest)
   useEffect(() => {
-    if (ready) saveDraft({ description, depth, agentId });
-  }, [ready, description, depth, agentId]);
+    if (!ready || !isGuest || depth === "focused") return;
+    setDepth("focused");
+    if (step !== "describe") runEstimate({ description, depth: "focused", agentId });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready, isGuest, depth]);
+
+  // ---- Persist the draft (attachments: ids + display meta only)
+  useEffect(() => {
+    if (ready && !startedRef.current) saveDraft({ description, depth, agentId, attachments: att.saved });
+  }, [ready, description, depth, agentId, att.saved]);
+
+  // ---- Off the Describe step there's no drop zone: don't let a stray file drop navigate away.
+  useEffect(() => {
+    if (step === "describe") return;
+    const stop = (e: DragEvent) => {
+      if (Array.from(e.dataTransfer?.types ?? []).includes("Files")) e.preventDefault();
+    };
+    window.addEventListener("dragover", stop);
+    window.addEventListener("drop", stop);
+    return () => {
+      window.removeEventListener("dragover", stop);
+      window.removeEventListener("drop", stop);
+    };
+  }, [step]);
+
+  /** Ask for 0–3 clarifying questions in parallel with the estimate; never blocks for more than CLARIFY_TIMEOUT_MS. */
+  const startClarify = (desc: string) => {
+    const id = ++clarifyReq.current;
+    if (!configLoaded || !config.clarifyEnabled || hasClarifications(desc)) {
+      setClarify(null);
+      return;
+    }
+    if (clarify && clarify.for === desc && clarify.status === "done") return; // already asked about this exact brief
+    setClarify({ for: desc, status: "pending", questions: [], dismissed: false });
+    let settled = false;
+    const finish = (questions: ClarifyQuestion[]) => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(timer);
+      if (id !== clarifyReq.current) return;
+      setClarify((c) => (c && c.for === desc ? { ...c, status: "done", questions } : c));
+    };
+    const timer = window.setTimeout(() => finish([]), CLARIFY_TIMEOUT_MS);
+    api
+      .clarify(desc)
+      .then((r) => finish(cleanQuestions(r?.questions)))
+      .catch(() => finish([]));
+  };
 
   const submit = () => {
     const desc = description.trim();
     setEstimate(null);
     setAnalyzedFor(null);
     setAnalyzeRun((n) => n + 1);
+    startClarify(desc);
     go("analyze");
     runEstimate({ description: desc, depth, agentId });
   };
 
+  const skipQuestions = () => {
+    setClarify((c) => (c ? { ...c, dismissed: true } : c));
+    go("plan");
+  };
+
+  const applyAnswers = (answers: ClarifyAnswer[]): string | null => {
+    const next = description.trim() + clarificationBlock(answers);
+    if (next.length > config.maxDescriptionLength)
+      return `With these answers your brief would pass ${num(config.maxDescriptionLength)} characters. Shorten an answer, or skip.`;
+    setDescription(next);
+    setClarify((c) => (c ? { ...c, dismissed: true } : c));
+    setAnalyzedFor(next);
+    go("plan");
+    runEstimate({ description: next, depth, agentId });
+    return null;
+  };
+
   const changeDepth = (d: Depth) => {
+    if (isGuest && d !== "focused") return;
     setDepth(d);
     if (step === "plan") runEstimate({ description, depth: d, agentId });
   };
@@ -189,18 +291,34 @@ function NewTaskFlow() {
 
   if (!ready) return <PageSkeleton cards={1} />;
 
+  const depthAllowed = isGuest ? GUEST_DEPTHS : undefined;
+  const depthNote = isGuest ? (
+    <>
+      Guest trials run <b>Focused</b> tasks.{" "}
+      <Link href={signupUrl("company", "/new")} style={{ color: "var(--accent)", fontWeight: 600 }}>
+        Create a free account
+      </Link>{" "}
+      for Standard and Deep.
+    </>
+  ) : undefined;
+
   if (step === "analyze") {
+    const brief = description.trim();
+    const c = clarify && clarify.for === brief ? clarify : null;
     return (
       <Analyze
         key={analyzeRun}
-        description={description.trim()}
+        description={brief}
         estimate={estimate}
         error={estError}
-        instant={analyzedFor === description.trim()}
+        instant={analyzedFor === brief}
         onRetry={() => runEstimate({ description, depth, agentId })}
         onBack={() => go("describe")}
         onContinue={() => go("plan")}
-        onAnimated={() => setAnalyzedFor(description.trim())}
+        onAnimated={() => setAnalyzedFor(brief)}
+        clarify={c ? { pending: c.status === "pending", questions: c.dismissed ? [] : c.questions } : null}
+        onSkipQuestions={skipQuestions}
+        onApplyAnswers={applyAnswers}
       />
     );
   }
@@ -218,6 +336,14 @@ function NewTaskFlow() {
         recommendedId={recommendedId}
         onEdit={() => go("describe")}
         onRetry={() => runEstimate({ description, depth, agentId })}
+        attachments={user && !user.isGuest ? att.ready : []}
+        canAttach={canAttach}
+        onDropAttachments={att.clearAll}
+        onStarted={() => {
+          startedRef.current = true;
+        }}
+        depthAllowed={depthAllowed}
+        depthNote={depthNote}
       />
     );
   }
@@ -230,12 +356,23 @@ function NewTaskFlow() {
         if (estimate) setEstimate(null);
       }}
       depth={depth}
-      onDepth={setDepth}
+      onDepth={changeDepth}
       agentId={agentId}
       direct={direct}
       directLoading={directLoading}
       onClearDirect={clearDirect}
       onSubmit={submit}
+      materials={
+        !attachOn || authLoading ? undefined : canAttach ? (
+          <AttachmentPanel att={att} max={config.maxAttachments} />
+        ) : (
+          <AttachGate guest={isGuest} />
+        )
+      }
+      canAttach={canAttach}
+      attachBusy={canAttach ? att.busyCount : 0}
+      depthAllowed={depthAllowed}
+      depthNote={depthNote}
     />
   );
 }

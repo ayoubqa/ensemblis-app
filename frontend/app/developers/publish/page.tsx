@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Icon, RequireAuth, confetti, useToast } from "@/components";
 import { api, type Agent } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
+import { useConfig } from "@/lib/config";
 import { CATS, PLATFORM_FEE_PERCENT } from "@/lib/data";
 import { eur, minutesRange, plural } from "@/lib/format";
 import { useIsMobile, useKeyboardShortcut, useLocalStorage, useMediaQuery } from "@/lib/hooks";
@@ -785,6 +786,8 @@ function PricingStep({
 }
 
 function Success({ agent, onAnother }: { agent: Agent; onAnother: () => void }) {
+  const { config } = useConfig();
+  const freeTests = config.devTestRunsPerDay > 0;
   return (
     <div className="narrow" style={{ paddingTop: 40, paddingBottom: 40 }}>
       <div className="reveal" style={{ textAlign: "center", padding: "24px 0" }}>
@@ -811,10 +814,18 @@ function Success({ agent, onAnother }: { agent: Agent; onAnother: () => void }) 
           View public page
           <Icon name="ext" />
         </Link>
-        <Link className="btn" href={newTaskUrl({ agent: agent.slug })}>
-          <Icon name="play" />
-          Run a test task
-        </Link>
+        {/* v3: free test runs (when on) live on the agent's manage page; otherwise a normal (paid) task. */}
+        {freeTests ? (
+          <Link className="btn" href={`/developers/agents/${encodeURIComponent(agent.id)}#test-run`}>
+            <Icon name="play" />
+            Run a free test
+          </Link>
+        ) : (
+          <Link className="btn" href={newTaskUrl({ agent: agent.slug })}>
+            <Icon name="play" />
+            Run a test task
+          </Link>
+        )}
         <Link className="btn" href={ROUTES.devDashboard}>
           Developer console
         </Link>

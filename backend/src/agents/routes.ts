@@ -93,9 +93,10 @@ router.get(
 
     const since = new Date(Date.now() - 30 * 24 * 3600 * 1000);
     const [tasksLast30d, rated, achieved, recent, member] = await Promise.all([
-      prisma.task.count({ where: { agentId: agent.id, createdAt: { gte: since } } }),
-      prisma.task.count({ where: { agentId: agent.id, outcome: { not: null } } }),
-      prisma.task.count({ where: { agentId: agent.id, outcome: "Achieved" } }),
+      // Public stats ignore free developer test runs (v3).
+      prisma.task.count({ where: { agentId: agent.id, isTest: false, createdAt: { gte: since } } }),
+      prisma.task.count({ where: { agentId: agent.id, isTest: false, outcome: { not: null } } }),
+      prisma.task.count({ where: { agentId: agent.id, isTest: false, outcome: "Achieved" } }),
       req.userId
         ? prisma.task.findMany({
             where: { agentId: agent.id, userId: req.userId },
@@ -168,6 +169,13 @@ async function uniqueSlug(name: string, excludeId?: string): Promise<string> {
   return `${base}-${Date.now().toString(36)}`;
 }
 
+/**
+ * Agents one developer may publish. Every estimate / task / marketplace page
+ * loads all live agents (system prompts included), so an unbounded number of
+ * agents from a free account would slow the whole site down (and spam the marketplace).
+ */
+export const MAX_AGENTS_PER_DEVELOPER = 20;
+
 // A developer publishing a new agent — the real version of the prototype's
 // "Publish an agent" wizard. Goes live immediately (no moderation step yet).
 router.post(
@@ -176,6 +184,9 @@ router.post(
   requireDeveloper,
   ah<AuthedRequest>(async (req, res) => {
     const body = parse(publishSchema, req.body);
+    if ((await prisma.agent.count({ where: { ownerId: req.userId } })) >= MAX_AGENTS_PER_DEVELOPER) {
+      throw new HttpError(409, `You can publish up to ${MAX_AGENTS_PER_DEVELOPER} agents. Edit one of your existing agents instead.`);
+    }
     if (await prisma.agent.findUnique({ where: { name: body.name } })) {
       throw new HttpError(409, "An agent with that name already exists");
     }

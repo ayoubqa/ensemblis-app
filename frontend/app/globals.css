@@ -673,6 +673,34 @@ nav.main {
   align-items: center;
   gap: 10px;
   flex: none;
+  margin-left: auto;
+}
+/* Keep the account pill compact so nav links never run under the right-hand cluster. */
+.pf span.nm {
+  max-width: 96px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.hdr-r.crowded .pf span.nm {
+  display: none;
+}
+@media (max-width: 1200px) {
+  .hdr-r.crowded .hdr-new .lbl {
+    display: none;
+  }
+  .hdr-r.crowded .hdr-new {
+    padding: 6px 9px;
+  }
+}
+@media (max-width: 1040px) {
+  .hdr-r .hdr-guest-tag {
+    display: none;
+  }
+}
+@media (max-width: 400px) {
+  .hdr-r.guest [data-hdr-search] {
+    display: none;
+  }
 }
 @media (max-width: 1200px) {
   .pf span.nm {

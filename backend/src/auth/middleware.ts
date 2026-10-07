@@ -1,3 +1,4 @@
+import { createHash } from "crypto";
 import { NextFunction, Request, Response } from "express";
 import jwt from "jsonwebtoken";
 import { prisma } from "../db";
@@ -8,8 +9,26 @@ export interface AuthedRequest extends Request {
 
 const JWT_SECRET = process.env.JWT_SECRET || "dev-secret-change-me";
 
-export function signToken(userId: string): string {
-  return jwt.sign({ sub: userId }, JWT_SECRET, { expiresIn: "30d" });
+/**
+ * Short fingerprint of the account's password hash, embedded in every token
+ * (claim `pv`). Changing or resetting the password changes the hash, so every
+ * token issued before the change stops matching and is rejected — a stolen
+ * session can't outlive a password reset. The fingerprint reveals nothing
+ * usable about the password (it's a truncated SHA-256 of a bcrypt hash).
+ */
+export function passwordFingerprint(passwordHash: string): string {
+  return createHash("sha256").update(passwordHash).digest("base64url").slice(0, 16);
+}
+
+/** Signs a session token. Always pass the user's current passwordHash. */
+export function signToken(userId: string, passwordHash: string): string {
+  return jwt.sign({ sub: userId, pv: passwordFingerprint(passwordHash) }, JWT_SECRET, { expiresIn: "30d" });
+}
+
+/** Loads the user's current password hash and signs a token for them. */
+export async function issueToken(userId: string): Promise<string> {
+  const user = await prisma.user.findUniqueOrThrow({ where: { id: userId }, select: { passwordHash: true } });
+  return signToken(userId, user.passwordHash);
 }
 
 function readToken(req: Request): string | null {
@@ -18,13 +37,25 @@ function readToken(req: Request): string | null {
   return header.slice("Bearer ".length).trim() || null;
 }
 
-function verify(token: string): string | null {
+type Verified = { ok: true; userId: string } | { ok: false; error: string };
+
+/** Verifies signature/expiry, then that the account exists and the password hasn't changed since. */
+async function verify(token: string): Promise<Verified> {
+  let payload: { sub?: unknown; pv?: unknown };
   try {
-    const payload = jwt.verify(token, JWT_SECRET) as { sub?: string };
-    return typeof payload.sub === "string" ? payload.sub : null;
+    payload = jwt.verify(token, JWT_SECRET) as { sub?: unknown; pv?: unknown };
   } catch {
-    return null;
+    return { ok: false, error: "Invalid or expired token" };
   }
+  if (typeof payload.sub !== "string" || typeof payload.pv !== "string") {
+    return { ok: false, error: "Your session has expired. Please sign in again." };
+  }
+  const user = await prisma.user.findUnique({ where: { id: payload.sub }, select: { passwordHash: true } });
+  if (!user) return { ok: false, error: "This account no longer exists. Please sign in again." };
+  if (passwordFingerprint(user.passwordHash) !== payload.pv) {
+    return { ok: false, error: "Your password was changed, so this session has ended. Please sign in again." };
+  }
+  return { ok: true, userId: payload.sub };
 }
 
 // Reads the "Authorization: Bearer <token>" header, verifies it, and attaches
@@ -34,10 +65,13 @@ export function requireAuth(req: AuthedRequest, res: Response, next: NextFunctio
   if (!token) {
     return res.status(401).json({ error: "Missing or malformed Authorization header" });
   }
-  const userId = verify(token);
-  if (!userId) return res.status(401).json({ error: "Invalid or expired token" });
-  req.userId = userId;
-  next();
+  verify(token)
+    .then((v) => {
+      if (!v.ok) return res.status(401).json({ error: v.error });
+      req.userId = v.userId;
+      next();
+    })
+    .catch(next);
 }
 
 // For public routes whose response is richer when signed in (e.g. agent
@@ -45,11 +79,28 @@ export function requireAuth(req: AuthedRequest, res: Response, next: NextFunctio
 // "anonymous".
 export function optionalAuth(req: AuthedRequest, _res: Response, next: NextFunction) {
   const token = readToken(req);
-  if (token) {
-    const userId = verify(token);
-    if (userId) req.userId = userId;
-  }
-  next();
+  if (!token) return next();
+  verify(token)
+    .then((v) => {
+      if (v.ok) req.userId = v.userId;
+      next();
+    })
+    .catch(next);
+}
+
+// Must run after requireAuth. Blocks guest-trial accounts with a friendly
+// "Create a free account to <action>." 403 (v3).
+export function requireRegistered(action: string) {
+  return (req: AuthedRequest, res: Response, next: NextFunction) => {
+    prisma.user
+      .findUnique({ where: { id: req.userId }, select: { isGuest: true } })
+      .then((user) => {
+        if (!user) return res.status(401).json({ error: "This account no longer exists. Please sign in again." });
+        if (user.isGuest) return res.status(403).json({ error: `Create a free account to ${action}.` });
+        next();
+      })
+      .catch(next);
+  };
 }
 
 // Must run after requireAuth. Restricts a route to DEVELOPER accounts.
