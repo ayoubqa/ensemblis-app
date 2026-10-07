@@ -16,10 +16,9 @@ import type {
   User,
   Workflow,
 } from "@prisma/client";
-import { slugify } from "../catalog/agents";
+import { slugify } from "./slug";
 import { isAdminEmail } from "../config";
 import { prisma } from "../db";
-import { getLiveOutput } from "../tasks/live";
 import { HttpError } from "./http";
 import { spendableBalance } from "./wallet";
 
@@ -66,7 +65,10 @@ export async function loadPublicUser(userId: string, db: Db = prisma) {
     ...toPublicUser(u),
     credits: wallet.credits,
     isGuest: u.isGuest,
-    isAdmin: !u.isGuest && isAdminEmail(u.email),
+    // Admin needs BOTH an ADMIN_EMAILS match and a verified address: without
+    // verification anyone could sign up with an admin's (unregistered) email.
+    isAdmin: !u.isGuest && !!u.emailVerifiedAt && isAdminEmail(u.email),
+    emailVerified: !!u.emailVerifiedAt,
     emailOnTaskDone: u.emailOnTaskDone,
     team: m ? { id: m.team.id, name: m.team.name, role: m.role } : null,
     walletOwner: wallet.walletOwner,
@@ -116,7 +118,7 @@ export function toPublicStep(s: TaskStep) {
     output: s.output,
     startedAt: iso(s.startedAt),
     completedAt: iso(s.completedAt),
-    liveOutput: s.status === "RUNNING" ? getLiveOutput(s.id) : null,
+    liveOutput: null as string | null, // legacy field; live output now lives on execution steps
   };
 }
 
@@ -266,6 +268,11 @@ export function toPublicWorkflow(w: Workflow) {
     lastRun: iso(w.lastRun),
     runCount: w.runCount,
     createdAt: w.createdAt.toISOString(),
+    // v4: recurring objective settings
+    successCriteria: w.successCriteria,
+    budgetCents: w.budgetCents,
+    autonomy: w.autonomy,
+    lastObjectiveId: w.lastObjectiveId,
   };
 }
 
@@ -279,6 +286,7 @@ export function toPublicTransaction(t: Transaction & { actor?: { id: string; nam
     amountCents: t.amountCents,
     description: t.description,
     taskId: t.taskId,
+    executionId: t.executionId,
     createdAt: t.createdAt.toISOString(),
     actor: t.actor ? { id: t.actor.id, name: t.actor.name } : null,
   };

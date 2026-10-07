@@ -12,7 +12,8 @@ import { loadPublicUser } from "../lib/serializers";
 import { config } from "../config";
 import { forgotPasswordLimiter, loginLimiter, resetPasswordLimiter, signupLimiter } from "../lib/rateLimits";
 import { sendEmail } from "../email/send";
-import { passwordResetEmail } from "../email/templates";
+import { passwordResetEmail, verifyEmailEmail } from "../email/templates";
+import { limiter } from "../lib/rateLimits";
 
 const router = Router();
 
@@ -89,6 +90,7 @@ router.post(
       throw err;
     }
 
+    void requestEmailVerification(userId);
     res.status(201).json({ token: await issueToken(userId), user: await loadPublicUser(userId) });
   })
 );
@@ -223,6 +225,7 @@ router.post(
       }
       throw err;
     }
+    void requestEmailVerification(guest.id);
     res.json({ token: await issueToken(guest.id), user: await loadPublicUser(guest.id) });
   })
 );
@@ -303,7 +306,8 @@ export async function consumePasswordReset(token: string, newPassword: string): 
       data: { usedAt: now },
     });
     if (used.count === 0) throw invalid();
-    await tx.user.update({ where: { id: reset.userId }, data: { passwordHash } });
+    // Completing a reset proves the person controls the address.
+    await tx.user.update({ where: { id: reset.userId }, data: { passwordHash, emailVerifiedAt: now } });
     // Any other outstanding links for this account stop working too.
     await tx.passwordReset.updateMany({ where: { userId: reset.userId, usedAt: null }, data: { usedAt: now } });
   });
@@ -317,6 +321,69 @@ router.post(
     const { token, password } = parse(resetSchema, req.body);
     const userId = await consumePasswordReset(token, password);
     res.json({ token: await issueToken(userId), user: await loadPublicUser(userId) });
+  })
+);
+
+// ---------------------------------------------------------------- v4: email verification
+
+const VERIFY_TTL_HOURS = 48;
+const VERIFY_PER_ACCOUNT_PER_HOUR = 3;
+export const hashVerifyToken = (token: string) => createHash("sha256").update(`verify:${token}`).digest("hex");
+
+/** Emails a single-use verification link. Never throws; a no-op when email is off or already verified. */
+export async function requestEmailVerification(userId: string): Promise<boolean> {
+  try {
+    if (!config.email.enabled) return false;
+    const user = await prisma.user.findUnique({ where: { id: userId }, select: { id: true, email: true, name: true, isGuest: true, emailVerifiedAt: true } });
+    if (!user || user.isGuest || user.emailVerifiedAt) return false;
+    const recent = await prisma.emailVerification.count({ where: { userId, createdAt: { gte: new Date(Date.now() - 60 * 60_000) } } });
+    if (recent >= VERIFY_PER_ACCOUNT_PER_HOUR) return false;
+    const token = randomBytes(32).toString("base64url");
+    await prisma.emailVerification.create({
+      data: { userId, tokenHash: hashVerifyToken(token), expiresAt: new Date(Date.now() + VERIFY_TTL_HOURS * 3600_000) },
+    });
+    const verifyUrl = `${config.appUrl}/verify-email?token=${encodeURIComponent(token)}`;
+    return await sendEmail({ to: user.email, ...verifyEmailEmail({ name: user.name, verifyUrl, expiresHours: VERIFY_TTL_HOURS }) });
+  } catch (err) {
+    console.warn("[auth] verification email failed:", err instanceof Error ? err.message : err);
+    return false;
+  }
+}
+
+/** Consumes a verification token (single use). Returns the user id; throws 400 when invalid. */
+export async function consumeEmailVerification(token: string): Promise<string> {
+  const invalid = () => new HttpError(400, "This verification link is invalid or has expired. Request a new one from Settings.");
+  const row = await prisma.emailVerification.findUnique({ where: { tokenHash: hashVerifyToken(token) } });
+  const now = new Date();
+  if (!row || row.usedAt || row.expiresAt <= now) throw invalid();
+  await prisma.$transaction(async (tx) => {
+    const used = await tx.emailVerification.updateMany({ where: { id: row.id, usedAt: null, expiresAt: { gt: now } }, data: { usedAt: now } });
+    if (used.count === 0) throw invalid();
+    await tx.user.update({ where: { id: row.userId }, data: { emailVerifiedAt: now } });
+  });
+  return row.userId;
+}
+
+const verifyRequestLimiter = limiter(60 * 60_000, 10, "Too many verification requests. Please try again later.");
+
+router.post(
+  "/verify-email/request",
+  requireAuth,
+  verifyRequestLimiter,
+  ah<AuthedRequest>(async (req, res) => {
+    if (!config.email.enabled) throw new HttpError(503, "Email isn't configured on this server, so addresses can't be verified yet.");
+    const sent = await requestEmailVerification(req.userId!);
+    res.json({ ok: true, sent });
+  })
+);
+
+router.post(
+  "/verify-email",
+  resetPasswordLimiter,
+  ah(async (req, res) => {
+    const { token } = parse(z.object({ token: z.string().trim().min(10).max(200) }), req.body);
+    const userId = await consumeEmailVerification(token);
+    res.json({ ok: true, user: await loadPublicUser(userId) });
   })
 );
 

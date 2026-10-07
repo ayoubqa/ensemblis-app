@@ -44,9 +44,9 @@ export async function spendableBalance(userId: string, db: Db = prisma): Promise
  */
 export async function debitWallet(
   tx: Prisma.TransactionClient,
-  args: { wallet: WalletRef; actorUserId: string; amountCents: number; description: string; taskId?: string | null }
+  args: { wallet: WalletRef; actorUserId: string; amountCents: number; description: string; taskId?: string | null; executionId?: string | null }
 ): Promise<void> {
-  const { wallet, actorUserId, amountCents, description, taskId } = args;
+  const { wallet, actorUserId, amountCents, description, taskId, executionId } = args;
   if (amountCents < 0) throw new Error("debitWallet: amount must be >= 0");
   if (amountCents > 0) {
     const res = await tx.user.updateMany({
@@ -72,6 +72,7 @@ export async function debitWallet(
       amountCents: -amountCents,
       description,
       taskId: taskId ?? null,
+      executionId: executionId ?? null,
     },
   });
 }
@@ -86,12 +87,13 @@ export async function creditWallet(
     amountCents: number;
     description: string;
     taskId?: string | null;
+    executionId?: string | null;
   }
 ): Promise<void> {
-  const { walletUserId, actorUserId, type, amountCents, description, taskId } = args;
+  const { walletUserId, actorUserId, type, amountCents, description, taskId, executionId } = args;
   if (amountCents <= 0) return;
   await tx.user.update({ where: { id: walletUserId }, data: { credits: { increment: amountCents } } });
   await tx.transaction.create({
-    data: { userId: walletUserId, actorUserId, type, amountCents, description, taskId: taskId ?? null },
+    data: { userId: walletUserId, actorUserId, type, amountCents, description, taskId: taskId ?? null, executionId: executionId ?? null },
   });
 }

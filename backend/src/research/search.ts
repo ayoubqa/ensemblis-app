@@ -96,7 +96,7 @@ export function parseTavilyResponse(data: unknown): SearchResult[] {
 }
 
 /** Returns results, or null when the call failed (caller falls back to Wikipedia). */
-async function tavilySearch(query: string, taskId: string | null): Promise<SearchResult[] | null> {
+async function tavilySearch(query: string, executionId: string | null): Promise<SearchResult[] | null> {
   let ok = false;
   try {
     const res = await fetch(searchEndpoints.tavily, {
@@ -122,7 +122,7 @@ async function tavilySearch(query: string, taskId: string | null): Promise<Searc
     console.warn(`[search] Tavily failed (${err instanceof Error ? err.message : err}) — falling back to Wikipedia`);
     return null;
   } finally {
-    await recordUsage({ kind: "search", provider: "tavily", ok, taskId });
+    await recordUsage({ kind: "search", provider: "tavily", ok, executionId });
   }
 }
 
@@ -175,7 +175,7 @@ async function wikiGet(params: Record<string, string>): Promise<unknown> {
   return res.json();
 }
 
-async function wikipediaSearch(query: string, taskId: string | null): Promise<SearchResult[]> {
+async function wikipediaSearch(query: string, executionId: string | null): Promise<SearchResult[]> {
   let ok = false;
   try {
     const ids = parseWikipediaSearch(await wikiGet({ action: "query", list: "search", srsearch: query, srlimit: "3" }));
@@ -198,7 +198,7 @@ async function wikipediaSearch(query: string, taskId: string | null): Promise<Se
     console.warn(`[search] Wikipedia failed: ${err instanceof Error ? err.message : err}`);
     return [];
   } finally {
-    await recordUsage({ kind: "search", provider: "wikipedia", ok, taskId });
+    await recordUsage({ kind: "search", provider: "wikipedia", ok, executionId });
   }
 }
 
@@ -219,8 +219,8 @@ export async function activeSearchBackend(): Promise<Provider> {
  * Searches with the configured provider, respecting today's Tavily budget
  * (falls back to Wikipedia). Never throws.
  */
-export async function webSearch(query: string, opts: { taskId?: string | null } = {}): Promise<SearchResult[]> {
-  const taskId = opts.taskId ?? null;
+export async function webSearch(query: string, opts: { executionId?: string | null } = {}): Promise<SearchResult[]> {
+  const executionId = opts.executionId ?? null;
   try {
     const q = collapse(query).slice(0, 300);
     if (!q) return [];
@@ -229,12 +229,12 @@ export async function webSearch(query: string, opts: { taskId?: string | null } 
     if (provider === "tavily") {
       const used = await searchesToday("tavily");
       if (used < config.search.dailyBudget) {
-        const results = await tavilySearch(q, taskId);
+        const results = await tavilySearch(q, executionId);
         if (results) return results;
       }
     }
     if ((await searchesToday("wikipedia")) >= WIKIPEDIA_DAILY_CAP()) return [];
-    return await wikipediaSearch(q, taskId);
+    return await wikipediaSearch(q, executionId);
   } catch (err) {
     console.warn(`[search] search failed: ${err instanceof Error ? err.message : err}`);
     return [];

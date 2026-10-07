@@ -179,6 +179,9 @@ export function productionConfigProblems(): string[] {
   if (!process.env.DATABASE_URL?.trim()) {
     problems.push("DATABASE_URL is missing. Set it to your Postgres connection string (Neon: include ?sslmode=require).");
   }
+  if ((process.env.AI_PROVIDER || "").trim().toLowerCase() === "mock") {
+    problems.push('AI_PROVIDER="mock" is a scripted provider for development and tests only. Use "openai", "anthropic" or "ollama".');
+  }
   return problems;
 }
 
@@ -195,6 +198,9 @@ export function productionConfigWarnings(): string[] {
   }
   if (provider === "ollama") {
     warnings.push("AI_PROVIDER=ollama in production: a hosted server usually can't reach an Ollama instance. Use AI_PROVIDER=openai.");
+  }
+  if (config.adminEmails.length && !config.email.enabled) {
+    warnings.push("ADMIN_EMAILS is set but email isn't configured: admins must verify their address, so the owner dashboard stays locked until RESEND_API_KEY and EMAIL_FROM are set (or the address is verified with `npm run ops:verify-email`).");
   }
   if (!process.env.CORS_ORIGIN) {
     warnings.push("CORS_ORIGIN is not set — only http://localhost:3000 may call this API, so your deployed frontend will be blocked.");

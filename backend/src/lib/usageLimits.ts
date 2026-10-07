@@ -54,7 +54,7 @@ export async function globalRunsToday(since = startOfTodayUTC()): Promise<number
 function globalLimitError(): DailyLimitError {
   return new DailyLimitError(
     "global",
-    `This demo has reached its daily limit of AI tasks across all users. Please come back tomorrow. Limits reset at midnight UTC (in ${resetsIn()}).`
+    `This server has reached its daily limit of AI executions across all users. Please come back tomorrow. Limits reset at midnight UTC (in ${resetsIn()}).`
   );
 }
 
@@ -114,4 +114,27 @@ export function withRunQuota<T>(userId: string, fn: () => Promise<T>): Promise<T
     await assertDailyTaskQuota(userId);
     return fn();
   });
+}
+
+/**
+ * Database-level version of the daily caps for code that runs in several
+ * processes (API + worker): takes a transaction-scoped advisory lock so two
+ * concurrent starts can't both pass the count, then checks the caps.
+ * Call inside the transaction that records the charge.
+ */
+export async function assertDailyQuotaInTx(tx: Prisma.TransactionClient, userId: string): Promise<void> {
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${RUN_QUOTA_LOCK}))`;
+  const since = startOfTodayUTC();
+  const [charges, testRuns, userCount] = await Promise.all([
+    tx.transaction.count({ where: { type: "TASK_CHARGE", createdAt: { gte: since } } }),
+    tx.task.count({ where: { isTest: true, createdAt: { gte: since } } }),
+    tx.transaction.count({ where: userChargesWhere(userId, since) }),
+  ]);
+  if (charges + testRuns >= config.maxTasksPerDayGlobal) throw globalLimitError();
+  if (userCount >= config.maxTasksPerUserPerDay) {
+    throw new DailyLimitError(
+      "user",
+      `You've reached today's limit of ${config.maxTasksPerUserPerDay} execution${config.maxTasksPerUserPerDay === 1 ? "" : "s"} per account. Limits reset at midnight UTC (in ${resetsIn()}).`
+    );
+  }
 }

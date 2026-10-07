@@ -13,6 +13,8 @@ export async function recordUsage(e: {
   tokensOut?: number;
   ok?: boolean;
   taskId?: string | null;
+  executionId?: string | null;
+  latencyMs?: number | null;
 }): Promise<void> {
   try {
     await prisma.usageEvent.create({
@@ -24,6 +26,8 @@ export async function recordUsage(e: {
         tokensOut: Math.max(0, Math.round(e.tokensOut ?? 0)),
         ok: e.ok ?? true,
         taskId: e.taskId ?? null,
+        executionId: e.executionId ?? null,
+        latencyMs: e.latencyMs == null ? null : Math.max(0, Math.round(e.latencyMs)),
       },
     });
   } catch (err) {

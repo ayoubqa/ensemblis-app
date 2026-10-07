@@ -1,9 +1,16 @@
 // Ensemblis data model.
-// This replaces the prototype's in-memory `S` object with real, persisted tables.
 //
-// v2 notes: every column added on top of the original `init` schema is either
-// nullable or has a default, so `npx prisma migrate dev --name v2` applies
-// cleanly to a database that already has rows in it.
+// Schema changes ship as Prisma migrations (prisma/migrations). Production runs
+// `npm run migrate:deploy` (src/ops/migrate.ts) before the API starts — never
+// `prisma db push`. Every change after the 0_init baseline is ADDITIVE: new
+// tables, and new columns that are nullable or have a default, so existing
+// rows (users, balances, transactions, tasks, shares, reports) are untouched.
+//
+// v4 (Outcome Execution System) adds the tenant container (Organization) and
+// the outcome loop: Objective -> Execution -> ExecutionStep -> Evidence ->
+// Verification -> OutcomeMeasurement, with Approvals, Exceptions, Memory, a
+// persistent event log and a Postgres-backed job queue. The v1-v3 "Task"
+// tables stay as the read-only archive of earlier reports.
 
 generator client {
   provider      = "prisma-client-js"
@@ -58,35 +65,42 @@ enum RevisionStatus {
 }
 
 model User {
-  id           String      @id @default(cuid())
-  email        String      @unique
-  passwordHash String
-  name         String
-  company      String      @default("")
-  role         String      @default("")
-  accountType  AccountType @default(COMPANY)
-  builds       String      @default("") // developer persona: what they build, optional
-  credits      Int         @default(10000) // stored in cents to avoid float issues; signup sets STARTING_CREDITS_CENTS
+  id              String      @id @default(cuid())
+  email           String      @unique
+  passwordHash    String
+  name            String
+  company         String      @default("")
+  role            String      @default("")
+  accountType     AccountType @default(COMPANY)
+  builds          String      @default("") // developer persona: what they build, optional
+  credits         Int         @default(10000) // stored in cents to avoid float issues; signup sets STARTING_CREDITS_CENTS
   termsAcceptedAt DateTime? // when the user ticked "I agree to the Terms and Privacy Policy" (null for pre-existing accounts)
-  createdAt    DateTime    @default(now())
+  createdAt       DateTime    @default(now())
 
   // v3
-  isGuest         Boolean  @default(false) // "try without signing up" account; can be claimed later
+  isGuest         Boolean @default(false) // "try without signing up" account; can be claimed later
   signupIpHash    String? // salted hash of the sign-up IP (guest trial limits); never the raw IP
-  emailOnTaskDone Boolean  @default(true)
+  emailOnTaskDone Boolean @default(true)
 
-  tasks        Task[]
-  agents       Agent[] // agents this user has published (developer persona)
-  workflows    Workflow[]
-  seats        TeamSeat[]
-  transactions Transaction[] @relation("TransactionWallet") // ledger of this user's wallet
-  actedTransactions Transaction[] @relation("TransactionActor") // charges this user triggered (may hit a team wallet)
-  workforce    WorkforceMember[]
-  ownedTeam      Team?          @relation("TeamOwner")
-  teamMembership TeamMember?
-  attachments    TaskAttachment[]
-  passwordResets PasswordReset[]
-  stripePayments StripePayment[]
+  // v4
+  emailVerifiedAt DateTime? // set when the user proves they own the address (verification link or password reset)
+
+  tasks              Task[]
+  agents             Agent[] // agents this user has published (developer persona)
+  workflows          Workflow[]
+  seats              TeamSeat[]
+  transactions       Transaction[]       @relation("TransactionWallet") // ledger of this user's wallet
+  actedTransactions  Transaction[]       @relation("TransactionActor") // charges this user triggered (may hit a team wallet)
+  workforce          WorkforceMember[]
+  ownedTeam          Team?               @relation("TeamOwner")
+  teamMembership     TeamMember?
+  attachments        TaskAttachment[]
+  passwordResets     PasswordReset[]
+  stripePayments     StripePayment[]
+  // v4
+  ownedOrganization  Organization?       @relation("OrgOwner")
+  objectivesCreated  Objective[]         @relation("ObjectiveCreator")
+  emailVerifications EmailVerification[]
 
   @@index([isGuest, createdAt])
   @@index([signupIpHash, createdAt])
@@ -160,10 +174,10 @@ model Task {
   completedAt  DateTime?
 
   // v3
-  team         Team?      @relation(fields: [teamId], references: [id], onDelete: SetNull)
+  team         Team?     @relation(fields: [teamId], references: [id], onDelete: SetNull)
   teamId       String? // set when created by a team member: visible to the whole team
   walletUserId String? // whose credits paid for this run (team owner for team tasks); refunds go back here
-  isTest       Boolean    @default(false) // developer test run: free, excluded from revenue/stats
+  isTest       Boolean   @default(false) // developer test run: free, excluded from revenue/stats
   // Not @unique on purpose: adding a unique constraint to an existing table makes `prisma db push`
   // demand --accept-data-loss and would stop the Render boot. Tokens are 24 random bytes (collision-free in practice).
   shareToken   String? // public read-only link /r/<token>; null = not shared
@@ -218,6 +232,14 @@ model Workflow {
   lastRun     DateTime?
   createdAt   DateTime  @default(now())
 
+  // v4: a workflow is a recurring objective. Each run creates an Objective
+  // (planned, executed and verified by the outcome engine), not a legacy task.
+  budgetCents     Int? // execution limit per run (null = the organization's approval threshold)
+  successCriteria String[]    @default([])
+  autonomy        Autonomy?
+  lastObjectiveId String?
+  objectives      Objective[]
+
   @@index([isActive, nextRun])
 }
 
@@ -234,11 +256,14 @@ model Transaction {
   description String
   task        Task?           @relation(fields: [taskId], references: [id], onDelete: SetNull)
   taskId      String?
+  execution   Execution?      @relation(fields: [executionId], references: [id], onDelete: SetNull)
+  executionId String? // v4: charge / refund for an objective execution
   createdAt   DateTime        @default(now())
 
   @@index([userId, createdAt])
   @@index([actorUserId, createdAt])
   @@index([type, createdAt])
+  @@index([executionId])
 }
 
 // A user's saved agents ("my workforce").
@@ -264,9 +289,10 @@ model Team {
   ownerId   String   @unique // a user owns at most one team
   createdAt DateTime @default(now())
 
-  members TeamMember[]
-  invites TeamInvite[]
-  tasks   Task[]
+  members      TeamMember[]
+  invites      TeamInvite[]
+  tasks        Task[]
+  organization Organization? // v4: the team's members share the owner's organization
 }
 
 model TeamMember {
@@ -378,18 +404,22 @@ model StripePayment {
 
 // Metering for the owner dashboard and budget guards.
 model UsageEvent {
-  id        String   @id @default(cuid())
-  kind      String // llm | search | email | fetch
-  provider  String
-  model     String?
-  tokensIn  Int      @default(0)
-  tokensOut Int      @default(0)
-  ok        Boolean  @default(true)
-  task      Task?    @relation(fields: [taskId], references: [id], onDelete: SetNull)
-  taskId    String?
-  createdAt DateTime @default(now())
+  id          String     @id @default(cuid())
+  kind        String // llm | search | email | fetch
+  provider    String
+  model       String?
+  tokensIn    Int        @default(0)
+  tokensOut   Int        @default(0)
+  ok          Boolean    @default(true)
+  task        Task?      @relation(fields: [taskId], references: [id], onDelete: SetNull)
+  taskId      String?
+  execution   Execution? @relation(fields: [executionId], references: [id], onDelete: SetNull)
+  executionId String? // v4
+  latencyMs   Int? // v4
+  createdAt   DateTime   @default(now())
 
   @@index([kind, createdAt])
+  @@index([executionId])
 }
 
 // Public example/featured reports shown in the gallery.
@@ -410,4 +440,567 @@ model GalleryItem {
   isPublished Boolean  @default(true)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+}
+
+// ============================================================ v4: Outcome Execution System
+
+enum Autonomy {
+  REVIEW_PLAN // the Chief of Staff plans; a person approves before anything runs or is charged
+  AUTO_WITHIN_BUDGET // runs on its own when the estimate fits the budget and the approval threshold
+}
+
+enum ObjectiveStatus {
+  DRAFT
+  PLANNING
+  PLANNED
+  WAITING_FOR_APPROVAL
+  RUNNING
+  BLOCKED
+  VERIFYING
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+enum ExecutionStatus {
+  PLANNING
+  PLANNED
+  WAITING_FOR_APPROVAL
+  RUNNING
+  BLOCKED
+  VERIFYING
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+enum ExecutionStepStatus {
+  PENDING
+  RUNNING
+  COMPLETED
+  FAILED
+  SKIPPED
+}
+
+enum OutcomeStatus {
+  ACHIEVED
+  PARTIALLY_ACHIEVED
+  NOT_ACHIEVED
+  UNKNOWN
+}
+
+enum CriterionResult {
+  MET
+  PARTIALLY_MET
+  NOT_MET
+  UNKNOWN
+}
+
+enum VerificationStatus {
+  PASS
+  PASS_WITH_WARNINGS
+  FAIL
+}
+
+enum ClaimStatus {
+  SUPPORTED // the cited evidence contains the claim's figures and key terms
+  PARTIALLY_SUPPORTED
+  UNSUPPORTED // cited, but the cited evidence doesn't contain it
+  UNCITED // a specific (numeric) claim with no citation
+  ESTIMATE // explicitly labelled as an estimate
+}
+
+enum ApprovalKind {
+  PLAN
+  BUDGET
+  ACTION
+}
+
+enum ApprovalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CANCELLED
+}
+
+enum RiskLevel {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+enum ExceptionKind {
+  MISSING_INFORMATION
+  STEP_FAILED
+  VERIFICATION_FAILED
+  INSUFFICIENT_FUNDS
+  POLICY_BLOCKED
+}
+
+enum ExceptionStatus {
+  OPEN
+  RESOLVED
+  DISMISSED
+}
+
+enum EvidenceKind {
+  WEB
+  WIKIPEDIA
+  DOCUMENT
+  COMPANY_CONTEXT
+  WEBSITE
+  CALCULATION
+  TOOL_OUTPUT
+  ARTIFACT
+}
+
+enum MemoryKind {
+  PREFERENCE
+  DECISION
+  LESSON
+  CONSTRAINT
+  FACT
+}
+
+enum MemoryStatus {
+  ACTIVE
+  PENDING_CONFIRMATION
+  ARCHIVED
+}
+
+enum JobStatus {
+  QUEUED
+  RUNNING
+  SUCCEEDED
+  DEAD
+}
+
+// The tenant. Every objective, execution, approval, exception, piece of
+// evidence, memory and company context belongs to exactly one organization.
+// Membership comes from the existing Team model: a solo user works in their
+// own organization; team members work in the team owner's organization
+// (the same rule as the shared wallet: org spend debits the owner's balance).
+model Organization {
+  id                     String   @id @default(cuid())
+  name                   String
+  owner                  User     @relation("OrgOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  ownerId                String   @unique // also the wallet that pays for executions
+  team                   Team?    @relation(fields: [teamId], references: [id], onDelete: SetNull)
+  teamId                 String?  @unique // set while the owner runs a team
+  defaultAutonomy        Autonomy @default(REVIEW_PLAN)
+  approvalThresholdCents Int      @default(2000) // executions above this always need a person's approval
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+
+  context    CompanyContext?
+  documents  ContextDocument[]
+  objectives Objective[]
+  executions Execution[]
+  events     ExecutionEvent[]
+  approvals  Approval[]
+  exceptions Exception[]
+  evidence   Evidence[]
+  memories   MemoryItem[]
+  values     ValueRecord[]
+}
+
+// Stable knowledge about the company, reused by every objective.
+model CompanyContext {
+  id               String       @id @default(cuid())
+  organization     Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  orgId            String       @unique
+  companyName      String       @default("")
+  description      String       @default("") @db.Text
+  products         String       @default("") @db.Text
+  businessModel    String       @default("") @db.Text
+  customers        String       @default("") @db.Text // target customers / ICP
+  markets          String       @default("") @db.Text // markets & geographies
+  goals            String       @default("") @db.Text
+  website          String       @default("")
+  websiteSummary   String       @default("") @db.Text // readable text of the website, fetched server-side (SSRF-safe)
+  websiteFetchedAt DateTime?
+  updatedById      String?
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+}
+
+// Company documents (text extracted in the browser, or a fetched link). Untrusted data.
+model ContextDocument {
+  id           String       @id @default(cuid())
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  orgId        String
+  kind         String // pdf | csv | xlsx | docx | txt | md | url
+  name         String
+  url          String?
+  charCount    Int
+  text         String       @db.Text
+  createdById  String?
+  createdAt    DateTime     @default(now())
+
+  @@index([orgId, createdAt])
+}
+
+// A desired business outcome.
+model Objective {
+  id            String          @id @default(cuid())
+  organization  Organization    @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  orgId         String
+  createdBy     User?           @relation("ObjectiveCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  createdById   String?
+  title         String
+  statement     String          @db.Text // the outcome, in the user's words
+  contextNotes  String          @default("") @db.Text // objective-specific context + answers to the Chief of Staff
+  deadline      DateTime?
+  budgetCents   Int // execution limit
+  autonomy      Autonomy        @default(REVIEW_PLAN)
+  status        ObjectiveStatus @default(DRAFT) // mirrors the latest execution
+  outcomeStatus OutcomeStatus?
+  workflow      Workflow?       @relation(fields: [workflowId], references: [id], onDelete: SetNull)
+  workflowId    String? // created by a recurring objective
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+  completedAt   DateTime?
+
+  criteria   SuccessCriterion[]
+  executions Execution[]
+  approvals  Approval[]
+  exceptions Exception[]
+
+  @@index([orgId, createdAt])
+  @@index([orgId, status])
+}
+
+// How success is judged.
+model SuccessCriterion {
+  id           String               @id @default(cuid())
+  objective    Objective            @relation(fields: [objectiveId], references: [id], onDelete: Cascade)
+  objectiveId  String
+  order        Int
+  description  String
+  kind         String               @default("qualitative") // qualitative | quantitative
+  targetValue  Float?
+  unit         String?
+  source       String               @default("user") // user | proposed (by the Chief of Staff)
+  createdAt    DateTime             @default(now())
+  measurements OutcomeMeasurement[]
+
+  @@index([objectiveId, order])
+}
+
+// One attempt to achieve an objective.
+model Execution {
+  id                   String              @id @default(cuid())
+  objective            Objective           @relation(fields: [objectiveId], references: [id], onDelete: Cascade)
+  objectiveId          String
+  organization         Organization        @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  orgId                String
+  attempt              Int                 @default(1)
+  status               ExecutionStatus     @default(PLANNING)
+  triggeredById        String?
+  plan                 Json? // validated Chief of Staff plan (engine/planner.ts)
+  planSource           String? // planner | fallback
+  plannerVersion       String?
+  estimatedCostCents   Int                 @default(0)
+  costCents            Int                 @default(0) // charged to the wallet
+  refundedCents        Int                 @default(0)
+  walletUserId         String?
+  chargedAt            DateTime?
+  result               String?             @db.Text // the final report (markdown)
+  summary              String?             @db.Text
+  verificationStatus   VerificationStatus?
+  verificationScore    Int?
+  revisionCount        Int                 @default(0)
+  outcomeStatus        OutcomeStatus?
+  outcomeSummary       String?             @db.Text
+  outcomeConfirmedById String?
+  outcomeConfirmedAt   DateTime?
+  estimatedManualHours Float? // planner estimate — always shown as an estimate
+  errorMessage         String?             @db.Text
+  shareToken           String?             @unique // public read-only link /r/<token>
+  sharedAt             DateTime?
+  startedAt            DateTime?
+  completedAt          DateTime?
+  lastProgressAt       DateTime            @default(now())
+  createdAt            DateTime            @default(now())
+  updatedAt            DateTime            @updatedAt
+
+  steps         ExecutionStep[]
+  events        ExecutionEvent[]
+  evidence      Evidence[]
+  verifications Verification[]
+  measurements  OutcomeMeasurement[]
+  approvals     Approval[]
+  exceptions    Exception[]
+  memories      MemoryItem[]
+  transactions  Transaction[]
+  usageEvents   UsageEvent[]
+  values        ValueRecord[]
+
+  @@index([orgId, createdAt])
+  @@index([objectiveId, attempt])
+  @@index([status, lastProgressAt])
+}
+
+model ExecutionStep {
+  id                String              @id @default(cuid())
+  execution         Execution           @relation(fields: [executionId], references: [id], onDelete: Cascade)
+  executionId       String
+  key               String // planner step id, e.g. "s1"
+  order             Int
+  title             String
+  purpose           String              @db.Text
+  executive         String // AI Team registry key, e.g. "marketing"
+  capability        String // registry key, e.g. "market_research"
+  capabilityVersion String
+  agent             String // the specialist that implements the capability
+  dependsOn         String[]            @default([])
+  inputs            Json                @default("[]")
+  outputs           Json                @default("[]") // expected outputs
+  verification      Json                @default("[]") // what to check for this step
+  kind              String              @default("work") // work | revision
+  status            ExecutionStepStatus @default(PENDING)
+  attempts          Int                 @default(0)
+  output            String?             @db.Text
+  partialOutput     String?             @db.Text // streamed text while RUNNING (persisted, throttled)
+  summary           String?
+  error             String?             @db.Text
+  provider          String?
+  model             String?
+  tokensIn          Int                 @default(0)
+  tokensOut         Int                 @default(0)
+  latencyMs         Int?
+  costCents         Int                 @default(0)
+  notBefore         DateTime? // retry backoff
+  startedAt         DateTime?
+  completedAt       DateTime?
+  evidence          Evidence[]
+  events            ExecutionEvent[]
+
+  @@unique([executionId, key])
+  @@index([executionId, order])
+}
+
+// Persistent, append-only history of what Ensemblis did. Powers the live UI (SSE).
+model ExecutionEvent {
+  id           Int            @id @default(autoincrement()) // monotonic cursor (SSE Last-Event-ID)
+  execution    Execution      @relation(fields: [executionId], references: [id], onDelete: Cascade)
+  executionId  String
+  organization Organization   @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  orgId        String
+  step         ExecutionStep? @relation(fields: [stepId], references: [id], onDelete: SetNull)
+  stepId       String?
+  type         String
+  actor        String // chief_of_staff | marketing | ... | system | user
+  message      String
+  data         Json           @default("{}")
+  createdAt    DateTime       @default(now())
+
+  @@index([executionId, id])
+  @@index([orgId, id])
+}
+
+// Postgres-backed durable job queue (claimed with FOR UPDATE SKIP LOCKED).
+model Job {
+  id          String    @id @default(cuid())
+  kind        String
+  payload     Json      @default("{}")
+  dedupeKey   String?   @unique // at most one live (queued/running) job per key; cleared on completion
+  status      JobStatus @default(QUEUED)
+  runAt       DateTime  @default(now())
+  attempts    Int       @default(0)
+  maxAttempts Int       @default(5)
+  lockedBy    String?
+  lockedUntil DateTime?
+  lastError   String?   @db.Text
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  completedAt DateTime?
+
+  @@index([status, runAt])
+  @@index([status, lockedUntil])
+}
+
+// Human authorization.
+model Approval {
+  id                  String         @id @default(cuid())
+  organization        Organization   @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  orgId               String
+  objective           Objective      @relation(fields: [objectiveId], references: [id], onDelete: Cascade)
+  objectiveId         String
+  execution           Execution      @relation(fields: [executionId], references: [id], onDelete: Cascade)
+  executionId         String
+  kind                ApprovalKind
+  status              ApprovalStatus @default(PENDING)
+  title               String
+  proposedAction      String         @db.Text
+  reason              String         @db.Text // why a person must approve
+  costCents           Int            @default(0)
+  risk                RiskLevel      @default(LOW)
+  recommendation      String         @db.Text
+  recommendedDecision String         @default("APPROVE") // APPROVE | REJECT
+  decidedById         String?
+  decidedAt           DateTime?
+  decisionNote        String?
+  createdAt           DateTime       @default(now())
+
+  @@index([orgId, status, createdAt])
+  @@index([executionId])
+}
+
+// A situation that needs a person's attention before work can safely continue.
+model Exception {
+  id             String          @id @default(cuid())
+  organization   Organization    @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  orgId          String
+  objective      Objective       @relation(fields: [objectiveId], references: [id], onDelete: Cascade)
+  objectiveId    String
+  execution      Execution       @relation(fields: [executionId], references: [id], onDelete: Cascade)
+  executionId    String
+  stepId         String?
+  kind           ExceptionKind
+  status         ExceptionStatus @default(OPEN)
+  severity       RiskLevel       @default(MEDIUM)
+  title          String
+  whatHappened   String          @db.Text
+  whyItMatters   String          @db.Text
+  recommendation String          @db.Text
+  neededFromUser String          @db.Text
+  questions      Json            @default("[]") // MISSING_INFORMATION: [{question, whyItMatters}]
+  actions        String[]        @default([]) // allowed resolutions: provide_info | retry | accept | cancel
+  resolution     String?         @db.Text
+  resolvedAction String?
+  resolvedById   String?
+  resolvedAt     DateTime?
+  createdAt      DateTime        @default(now())
+
+  @@index([orgId, status, createdAt])
+  @@index([executionId])
+}
+
+// Information that supports an output or a claim. Cited in reports as [n].
+model Evidence {
+  id           String         @id @default(cuid())
+  organization Organization   @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  orgId        String
+  execution    Execution      @relation(fields: [executionId], references: [id], onDelete: Cascade)
+  executionId  String
+  step         ExecutionStep? @relation(fields: [stepId], references: [id], onDelete: SetNull)
+  stepId       String?
+  n            Int // citation number within the execution, 1-based
+  kind         EvidenceKind
+  title        String
+  url          String?
+  domain       String?
+  excerpt      String         @db.Text // shown to the user
+  content      String         @db.Text // what agents read and the verifier checks claims against (bounded)
+  publishedAt  String?
+  createdAt    DateTime       @default(now())
+
+  @@unique([executionId, n])
+}
+
+// Structured quality / trust check of an execution's result.
+model Verification {
+  id            String             @id @default(cuid())
+  execution     Execution          @relation(fields: [executionId], references: [id], onDelete: Cascade)
+  executionId   String
+  round         Int                @default(1)
+  status        VerificationStatus
+  score         Int
+  checks        Json // [{key, label, status: pass|warn|fail|not_assessed, score, detail}]
+  summary       String             @db.Text
+  warnings      String[]           @default([])
+  humanJudgment String[]           @default([])
+  assessment    Json? // the model assessment (validated) — per-criterion results, alignment, consistency
+  method        String
+  version       String
+  createdAt     DateTime           @default(now())
+  claims        ClaimCheck[]
+
+  @@index([executionId, round])
+}
+
+model ClaimCheck {
+  id             String       @id @default(cuid())
+  verification   Verification @relation(fields: [verificationId], references: [id], onDelete: Cascade)
+  verificationId String
+  order          Int
+  claim          String       @db.Text
+  status         ClaimStatus
+  evidenceNs     Int[]        @default([])
+  supportScore   Float        @default(0)
+  note           String       @default("")
+
+  @@index([verificationId, order])
+}
+
+// Measured result of one success criterion for one execution.
+model OutcomeMeasurement {
+  id            String           @id @default(cuid())
+  execution     Execution        @relation(fields: [executionId], references: [id], onDelete: Cascade)
+  executionId   String
+  criterion     SuccessCriterion @relation(fields: [criterionId], references: [id], onDelete: Cascade)
+  criterionId   String
+  result        CriterionResult
+  measuredValue Float?
+  measurement   String
+  explanation   String           @db.Text
+  method        String // model-assessed | deterministic | user-confirmed
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+
+  @@unique([executionId, criterionId])
+}
+
+// Things Ensemblis learned from operations (distinct from company context).
+model MemoryItem {
+  id                String       @id @default(cuid())
+  organization      Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  orgId             String
+  kind              MemoryKind
+  status            MemoryStatus
+  content           String       @db.Text
+  rationale         String       @default("")
+  sensitive         Boolean      @default(false)
+  source            String // execution | user
+  execution         Execution?   @relation(fields: [sourceExecutionId], references: [id], onDelete: SetNull)
+  sourceExecutionId String?
+  createdById       String?
+  confirmedById     String?
+  confirmedAt       DateTime?
+  lastUsedAt        DateTime?
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+
+  @@index([orgId, status])
+}
+
+// Lightweight value metrics, the foundation for future ROI tracking. Estimates are flagged.
+model ValueRecord {
+  id           String       @id @default(cuid())
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  orgId        String
+  execution    Execution?   @relation(fields: [executionId], references: [id], onDelete: SetNull)
+  executionId  String?
+  objectiveId  String?
+  metric       String // execution_cost | estimated_hours_returned | cycle_time | criteria_met | objective_achieved
+  value        Float
+  unit         String
+  isEstimate   Boolean      @default(false)
+  note         String       @default("")
+  createdAt    DateTime     @default(now())
+
+  @@index([orgId, metric, createdAt])
+}
+
+model EmailVerification {
+  id        String    @id @default(cuid())
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId    String
+  tokenHash String    @unique // sha256 of the emailed token
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId, createdAt])
 }

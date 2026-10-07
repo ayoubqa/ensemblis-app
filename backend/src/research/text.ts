@@ -5,7 +5,7 @@ const CONTROL_CHARS = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/g;
 // Unpaired UTF-16 surrogates can't be stored as valid UTF-8 (Postgres rejects them).
 const LONE_SURROGATES = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g;
 // Zero-width / BOM characters that only add noise.
-const INVISIBLES = /[​-‍⁠﻿]/g;
+const INVISIBLES = /[\u200B-\u200D\u2060\uFEFF]/g;
 
 /** Removes NUL/control characters and broken surrogates; normalises line endings. Keeps \n and \t. */
 export function cleanText(s: string): string {
@@ -19,7 +19,7 @@ export function cleanText(s: string): string {
 /** cleanText + tidy whitespace: trailing spaces, runs of spaces, 3+ blank lines. */
 export function tidyText(s: string): string {
   return cleanText(s)
-    .replace(/[ \t ]+/g, " ")
+    .replace(/[ \t\u00A0]+/g, " ")
     .replace(/ *\n */g, "\n")
     .replace(/\n{3,}/g, "\n\n")
     .trim();

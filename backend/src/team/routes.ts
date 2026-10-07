@@ -64,12 +64,13 @@ export async function loadTeamDetail(teamId: string, viewerId: string) {
   if (!me) throw new HttpError(404, "You're not in this team");
   const isOwner = me.role === "OWNER";
 
-  const counts = await prisma.task.groupBy({
-    by: ["userId"],
-    where: { teamId: team.id, isTest: false, createdAt: { gte: startOfMonthUTC(now) } },
+  // Objectives each member defined this month in the team's organization.
+  const counts = await prisma.objective.groupBy({
+    by: ["createdById"],
+    where: { organization: { teamId: team.id }, createdAt: { gte: startOfMonthUTC(now) } },
     _count: { _all: true },
   });
-  const perUser = new Map(counts.map((c) => [c.userId, c._count._all]));
+  const perUser = new Map(counts.map((c) => [c.createdById ?? "", c._count._all]));
 
   const members = [...team.members]
     .sort((a, b) => (a.role === b.role ? a.joinedAt.getTime() - b.joinedAt.getTime() : a.role === "OWNER" ? -1 : 1))

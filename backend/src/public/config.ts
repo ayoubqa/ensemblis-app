@@ -3,7 +3,8 @@
 // Never include secrets here: only on/off flags, limits and public keys.
 
 import { config, searchProviderLabel } from "../config";
-import { aiProviderLabel } from "../tasks/llmProvider";
+import { aiProviderLabel, currentProvider } from "../ai/llmProvider";
+import { VERIFICATION_COST_CENTS } from "../org/registry";
 
 export function publicConfig() {
   return {
@@ -15,7 +16,15 @@ export function publicConfig() {
     maxTasksPerUserPerDay: config.maxTasksPerUserPerDay,
     maxDescriptionLength: config.maxDescriptionLength,
     aiProviderLabel: aiProviderLabel(),
-    sampleCatalogStats: true, // catalog ratings/success rates/task counts are seeded sample data
+    sampleCatalogStats: false, // v4: no seeded catalog statistics are shown anywhere
+    mockAI: (() => {
+      try {
+        return currentProvider() === "mock";
+      } catch {
+        return false;
+      }
+    })(),
+    verificationCostCents: VERIFICATION_COST_CENTS,
     // v3
     searchEnabled: config.search.provider !== "off",
     searchProviderLabel: searchProviderLabel(),

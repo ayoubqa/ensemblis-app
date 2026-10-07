@@ -5,14 +5,14 @@
 import { config } from "../config";
 
 const C = {
-  bg: "#F4F5F2",
+  bg: "#F4F6FB",
   surface: "#FFFFFF",
-  ink: "#12181B",
-  muted: "#5A6567",
-  line: "#E1E4DF",
-  accent: "#0B5D57",
+  ink: "#0A0F1E",
+  muted: "#55607A",
+  line: "#E1E6F0",
+  accent: "#1F5BFF",
   accentInk: "#FFFFFF",
-  accentSoft: "#E2EFEC",
+  accentSoft: "#E6EDFF",
 };
 const FONT = "-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif";
 
@@ -126,7 +126,7 @@ ${l.footnote ? `<p style="margin:12px 0 0;font-size:12px;line-height:1.5;color:$
 <tr><td style="padding:16px 4px 0;font-size:12px;line-height:1.5;color:${C.muted};font-family:${FONT}">
 ${
   l.footer === "task"
-    ? `You're receiving this because you started a task on Ensemblis. You can turn off task emails in your settings: <a href="${escapeHtml(config.appUrl)}/settings" style="color:${C.accent}">${escapeHtml(config.appUrl.replace(/^https?:\/\//, ""))}/settings</a>`
+    ? `You're receiving this because you work on objectives in Ensemblis. You can turn these emails off in your settings: <a href="${escapeHtml(config.appUrl)}/settings" style="color:${C.accent}">${escapeHtml(config.appUrl.replace(/^https?:\/\//, ""))}/settings</a>`
     : "You're receiving this because a request was made for your Ensemblis account."
 }
 </td></tr>
@@ -227,5 +227,95 @@ export function passwordResetEmail(args: { name: string; resetUrl: string; expir
     "",
     "Didn't ask for this? You can safely ignore this email — your password won't change.",
   ].join("\n");
+  return { subject, html, text };
+}
+
+// ---------------------------------------------------------------- v4: objectives
+
+const objectiveUrl = (objectiveId: string) => `${config.appUrl}/objectives/${encodeURIComponent(objectiveId)}`;
+
+export function outcomeReadyEmail(args: {
+  name: string;
+  objectiveId: string;
+  title: string;
+  result: string | null;
+  outcomeLabel: string;
+  verificationLabel: string;
+}): RenderedEmail {
+  const url = objectiveUrl(args.objectiveId);
+  const summary = summarizeReport(args.result, 3);
+  const title = clip(args.title, 120);
+  const subject = `Outcome ready: ${clip(args.title, 70)}`;
+  const html = layout({
+    preheader: `${args.outcomeLabel} · ${args.verificationLabel}`,
+    heading: "Your outcome is ready",
+    paragraphs: [
+      `Hi ${escapeHtml(args.name || "there")},`,
+      `Ensemblis finished <strong>${escapeHtml(title)}</strong>. Outcome: <strong>${escapeHtml(args.outcomeLabel)}</strong>. Verification: ${escapeHtml(args.verificationLabel)}.`,
+    ],
+    bullets: summary,
+    button: { label: "Open the outcome", url },
+    footnote: "AI-generated work can contain mistakes. Review the evidence and verification before relying on it.",
+    footer: "task",
+  });
+  const text = [
+    `Hi ${args.name || "there"},`,
+    "",
+    `Ensemblis finished "${title}". Outcome: ${args.outcomeLabel}. Verification: ${args.verificationLabel}.`,
+    ...(summary.length ? ["", ...summary.map((x) => `- ${x}`)] : []),
+    "",
+    `Open the outcome: ${url}`,
+    "",
+    `Turn off these emails: ${config.appUrl}/settings`,
+  ].join("\n");
+  return { subject, html, text };
+}
+
+export function attentionEmail(args: { name: string; objectiveId: string; title: string; headline: string; detail: string }): RenderedEmail {
+  const url = objectiveUrl(args.objectiveId);
+  const title = clip(args.title, 120);
+  const subject = `Needs your attention: ${clip(args.title, 60)}`;
+  const html = layout({
+    preheader: args.headline,
+    heading: args.headline,
+    paragraphs: [`Hi ${escapeHtml(args.name || "there")},`, `<strong>${escapeHtml(title)}</strong>: ${escapeHtml(clip(args.detail, 400))}`],
+    button: { label: "Review it", url },
+    footer: "task",
+  });
+  const text = [`Hi ${args.name || "there"},`, "", `${args.headline}`, `"${title}": ${clip(args.detail, 400)}`, "", `Review it: ${url}`].join("\n");
+  return { subject, html, text };
+}
+
+export function executionFailedEmail(args: { name: string; objectiveId: string; title: string; refundedCents: number; reason: string }): RenderedEmail {
+  const url = objectiveUrl(args.objectiveId);
+  const title = clip(args.title, 120);
+  const refund = args.refundedCents > 0 ? `We refunded ${eur(args.refundedCents)} to your organization's balance.` : "You were not charged for it.";
+  const subject = `Execution stopped: ${clip(args.title, 60)}`;
+  const html = layout({
+    preheader: refund,
+    heading: "An execution couldn't be completed",
+    paragraphs: [
+      `Hi ${escapeHtml(args.name || "there")},`,
+      `Ensemblis couldn't complete <strong>${escapeHtml(title)}</strong>: ${escapeHtml(clip(args.reason, 300))} ${escapeHtml(refund)}`,
+      "You can open the objective to see exactly what happened and run it again.",
+    ],
+    button: { label: "Open the objective", url },
+    footer: "task",
+  });
+  const text = [`Hi ${args.name || "there"},`, "", `Ensemblis couldn't complete "${title}": ${clip(args.reason, 300)} ${refund}`, "", `Open the objective: ${url}`].join("\n");
+  return { subject, html, text };
+}
+
+export function verifyEmailEmail(args: { name: string; verifyUrl: string; expiresHours: number }): RenderedEmail {
+  const subject = "Confirm your email for Ensemblis";
+  const html = layout({
+    preheader: `This link expires in ${args.expiresHours} hours.`,
+    heading: "Confirm your email address",
+    paragraphs: [`Hi ${escapeHtml(args.name || "there")},`, `Confirm that this address belongs to you. The link works once and expires in ${args.expiresHours} hours.`],
+    button: { label: "Confirm my email", url: args.verifyUrl },
+    footnote: "Didn't create an Ensemblis account? You can ignore this email.",
+    footer: "account",
+  });
+  const text = [`Hi ${args.name || "there"},`, "", `Confirm your email address: ${args.verifyUrl}`, "", `The link expires in ${args.expiresHours} hours.`].join("\n");
   return { subject, html, text };
 }
