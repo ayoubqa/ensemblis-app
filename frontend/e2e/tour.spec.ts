@@ -1,16 +1,24 @@
 // Optional visual tour (E2E_TOUR=1 npm run e2e -- tour): runs one objective and
 // saves full-page screenshots of every main screen to test-results/tour/ for
 // design review. Skipped in normal runs.
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 import { defineObjective, expectStatus, signUpViaUI, uniqueEmail } from "./helpers";
 
 test.skip(!process.env.E2E_TOUR, "visual tour runs only with E2E_TOUR=1");
 
 for (const scheme of ["dark", "light"] as const) {
-  test(`screens (${scheme})`, async ({ page }) => {
-    await page.emulateMedia({ colorScheme: scheme });
+  test(`screens (${scheme})`, async ({ page, browser }) => {
+    await page.emulateMedia({ colorScheme: scheme, reducedMotion: "reduce" });
     await page.setViewportSize({ width: 1400, height: 900 });
-    const shot = (name: string) => page.screenshot({ path: `test-results/tour/${scheme}-${name}.png`, fullPage: true });
+    // Capture only once the page has loaded: no skeleton placeholders left.
+    const settle = async (p: Page) => {
+      await expect(p.locator(".sk")).toHaveCount(0, { timeout: 20_000 });
+      await p.waitForTimeout(300);
+    };
+    const shot = async (name: string) => {
+      await settle(page);
+      await page.screenshot({ path: `test-results/tour/${scheme}-${name}.png`, fullPage: true });
+    };
     await page.goto("/");
     await shot("01-landing");
     await signUpViaUI(page, { name: "Jordan Lee", company: "Atlas Logistics", email: uniqueEmail(`tour-${scheme}`) });
@@ -37,6 +45,15 @@ for (const scheme of ["dark", "light"] as const) {
     await shot("07-executing");
     await expectStatus(page, "COMPLETED", 120_000);
     await shot("08-completed");
+    await page.getByRole("button", { name: "Share", exact: true }).click();
+    const href = (await page.getByTestId("share-link").getAttribute("href")) ?? "";
+    const anon = await browser.newContext({ colorScheme: scheme, reducedMotion: "reduce", viewport: { width: 1400, height: 900 } });
+    const pub = await anon.newPage();
+    await pub.goto(href);
+    await expect(pub.getByTestId("shared-report")).toBeVisible();
+    await settle(pub);
+    await pub.screenshot({ path: `test-results/tour/${scheme}-15-shared-result.png`, fullPage: true });
+    await anon.close();
     await page.goto("/dashboard");
     await shot("09-briefing");
     await page.goto("/objectives");
@@ -50,5 +67,16 @@ for (const scheme of ["dark", "light"] as const) {
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto("/dashboard");
     await shot("14-mobile-briefing");
+
+    // A second organization with no Company Context: the Chief of Staff stops and asks.
+    const second = await browser.newContext({ colorScheme: scheme, reducedMotion: "reduce", viewport: { width: 1400, height: 900 } });
+    const p2 = await second.newPage();
+    await signUpViaUI(p2, { name: "Sam Rivera", company: "", email: uniqueEmail(`tour2-${scheme}`) });
+    await defineObjective(p2, "Find the best channel partners for our product in France and rank the top five");
+    await expect(p2.getByTestId("execution-status")).toHaveAttribute("data-status", "BLOCKED", { timeout: 60_000 });
+    await expect(p2.getByText("Sent to the Chief of Staff")).toHaveCount(0, { timeout: 10_000 });
+    await settle(p2);
+    await p2.screenshot({ path: `test-results/tour/${scheme}-16-exception.png`, fullPage: true });
+    await second.close();
   });
 }

@@ -6,7 +6,8 @@ import { api, ApiError, type PublicReport } from "@/lib/api";
 import { Avatar, CriterionTag, EmptyState, Icon, Mark, OutcomeTag, Skeleton, SkeletonText, VerificationTag } from "@/components";
 import { ExecBadge } from "@/components/ops";
 import { ExportMenu, ReportView, reportTitle } from "@/components/report";
-import { longDate } from "@/lib/format";
+import { longDate, plural } from "@/lib/format";
+import { useConfig } from "@/lib/config";
 import { ROUTES } from "@/lib/routes";
 import S from "./shared.module.css";
 
@@ -15,6 +16,7 @@ type State = { kind: "loading" } | { kind: "ok"; report: PublicReport } | { kind
 /** Public, read-only report at /r/<token>. No auth. */
 export function SharedReport({ token }: { token: string }) {
   const [state, setState] = useState<State>({ kind: "loading" });
+  const { config } = useConfig();
 
   const load = useCallback(async () => {
     setState({ kind: "loading" });
@@ -125,7 +127,12 @@ export function SharedReport({ token }: { token: string }) {
                 {r.version > 1 && <span className="tag gray">Version {r.version}</span>}
               </>
             )}
-            {r.sources?.length > 0 && <span className="tag gray">{r.sources.length} sources</span>}
+            {r.sources?.length > 0 && <span className="tag gray">{plural(r.sources.length, "source")}</span>}
+            {exec && config.mockAI && (
+              <span className="tag warn" title="This server runs the mock AI provider: the content is placeholder output for development and testing.">
+                Mock AI — test output
+              </span>
+            )}
           </div>
           <h1>{title}</h1>
           <div className={S.byline}>

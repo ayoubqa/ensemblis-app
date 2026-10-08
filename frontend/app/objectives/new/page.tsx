@@ -55,8 +55,10 @@ function DefineOutcome() {
   // Restore an unsent draft once (or apply ?example=n).
   useEffect(() => {
     if (restored) return;
-    const ex = Number(params.get("example"));
-    if (Number.isInteger(ex) && EXAMPLE_OBJECTIVES[ex]) {
+    // Only an explicit ?example=n applies an example (Number(null) would be 0).
+    const raw = params.get("example");
+    const ex = raw !== null && /^\d+$/.test(raw) ? Number(raw) : -1;
+    if (ex >= 0 && EXAMPLE_OBJECTIVES[ex]) {
       setStatement(EXAMPLE_OBJECTIVES[ex].statement);
       setCriteria(EXAMPLE_OBJECTIVES[ex].criteria);
     } else if (draft.statement) {

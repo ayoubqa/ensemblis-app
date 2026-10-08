@@ -38,6 +38,9 @@ export async function expectStatus(page: Page, status: string | RegExp, timeout 
 
 export async function defineObjective(page: Page, statement: string, opts: { suggest?: boolean } = {}) {
   await page.goto("/objectives/new");
+  // A fresh define page starts empty: no example statement or criteria pre-filled.
+  await expect(page.getByTestId("objective-statement")).toHaveValue("");
+  await expect(page.getByTestId("criterion-input")).toHaveCount(0);
   await page.getByTestId("objective-statement").fill(statement);
   if (opts.suggest) {
     await page.getByTestId("suggest-criteria").click();
