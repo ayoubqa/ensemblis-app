@@ -3,75 +3,106 @@
 import Link from "next/link";
 import { useAuth } from "@/lib/auth-context";
 import { ROUTES } from "@/lib/routes";
-import { Mark } from "./Logo";
+import { Icon } from "./Icon";
+import { Lockup } from "./Logo";
 
-/** Site footer. Rendered once by the root layout. */
+type Col = { title: string; links: [string, string][] };
+
+/** Site footer: brand lockup, one "Footer" navigation with three columns, legal line. Rendered once by the root layout. */
 export function Footer() {
   const { user } = useAuth();
-  const cols: { title: string; links: [string, string][] }[] = [
-    {
-      title: "Product",
-      links: user
-        ? [
-            ["Dashboard", ROUTES.dashboard],
+  const isGuest = !!user?.isGuest;
+  const year = new Date().getFullYear();
+
+  const cols: Col[] = user
+    ? [
+        {
+          title: "Workspace",
+          links: [
+            ["Home", ROUTES.dashboard],
             ["Objectives", ROUTES.objectives],
             ["AI Team", ROUTES.aiTeam],
             ["Company Context", ROUTES.context],
-          ]
-        : [
-            ["How it works", ROUTES.howItWorks],
-            ["Get started", ROUTES.signup],
-            ["Log in", ROUTES.login],
+            ["Reports", ROUTES.reports],
           ],
-    },
-    {
-      title: "Control",
-      links: user
-        ? [
+        },
+        {
+          title: "Control",
+          links: [
             ["Approvals", ROUTES.approvals],
             ["Exceptions", ROUTES.exceptions],
             ["Usage", ROUTES.usage],
-            ["Settings", ROUTES.settings],
-          ]
-        : [["Trust & safety", "/#trust"]],
-    },
-    {
-      title: "Legal",
-      links: [
-        ["Privacy Policy", ROUTES.privacy],
-        ["Terms of Use", ROUTES.terms],
-      ],
-    },
-  ];
+            ["Recurring objectives", ROUTES.routines],
+            ...(isGuest ? [] : ([["Settings", ROUTES.settings]] as [string, string][])),
+          ],
+        },
+        {
+          title: "About",
+          links: [
+            ["How it works", ROUTES.howItWorksPage],
+            ["Privacy Policy", ROUTES.privacy],
+            ["Terms of Use", ROUTES.terms],
+          ],
+        },
+      ]
+    : [
+        {
+          title: "Product",
+          links: [
+            ["How it works", ROUTES.howItWorksPage],
+            ["Control & trust", ROUTES.trust],
+          ],
+        },
+        {
+          title: "Account",
+          links: [
+            ["Get started", ROUTES.signup],
+            ["Log in", ROUTES.login],
+          ],
+        },
+        {
+          title: "Legal",
+          links: [
+            ["Privacy Policy", ROUTES.privacy],
+            ["Terms of Use", ROUTES.terms],
+          ],
+        },
+      ];
+
   return (
-    <footer className="ft no-print">
+    <footer className="ft sh-ft no-print">
       <div className="wrap">
-        <div className="cols ft-cols">
-          <div>
-            <Link href={ROUTES.home} className="lockup" style={{ color: "var(--ink)", gap: 10, display: "inline-flex" }} aria-label="Ensemblis home">
-              <Mark size={24} />
-              <span className="wm" style={{ fontSize: 19 }}>
-                Ensemblis
-              </span>
+        <div className="sh-ft-grid">
+          <div className="sh-ft-brand">
+            <Link href={user ? ROUTES.dashboard : ROUTES.home} aria-label="Ensemblis home">
+              <Lockup size={26} />
             </Link>
-            <p className="small" style={{ marginTop: 12, maxWidth: "36ch" }}>
-              The AI operating layer for business. Describe the outcome. We do the work.
+            <p className="sh-ft-tag">
+              <b>The AI operating layer for business.</b>
+              Describe the outcome. We do the work.
             </p>
           </div>
-          {cols.map((c) => (
-            <nav key={c.title} aria-label={c.title}>
-              <h4>{c.title}</h4>
-              {c.links.map(([label, href]) => (
-                <Link key={label} href={href}>
-                  {label}
-                </Link>
-              ))}
-            </nav>
-          ))}
+          <nav aria-label="Footer" className="sh-ft-cols">
+            {cols.map((c) => (
+              <div key={c.title}>
+                <h2 className="sh-ft-h">{c.title}</h2>
+                <ul>
+                  {c.links.map(([label, href]) => (
+                    <li key={label}>
+                      <Link href={href}>{label}</Link>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ))}
+          </nav>
         </div>
-        <div className="row between wrapflex" style={{ marginTop: 28, paddingTop: 18, borderTop: "1px solid var(--line)" }}>
-          <span>© 2026 Ensemblis</span>
-          <span>AI-generated work can contain mistakes — review the evidence and verification before acting.</span>
+        <div className="sh-ft-base">
+          <p>© {year} Ensemblis</p>
+          <p className="sh-ft-note">
+            <Icon name="shield" />
+            AI-generated work can contain mistakes — review the evidence and verification before acting.
+          </p>
         </div>
       </div>
     </footer>

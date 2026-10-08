@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { CSSProperties, ElementType, Fragment, ReactNode, useEffect, useRef, useState, KeyboardEvent } from "react";
+import { CSSProperties, ElementType, ReactNode, useEffect, useRef, useState, KeyboardEvent } from "react";
 import { useInView } from "@/lib/hooks";
 import { prefersReducedMotion } from "@/lib/utils";
 import { Icon, type IconName } from "./Icon";
@@ -23,7 +23,7 @@ export function SkeletonText({ lines = 3, gap = 8 }: { lines?: number; gap?: num
   );
 }
 
-/** Prototype agent-card loading placeholder. */
+/** Card-shaped loading placeholder. */
 export function SkeletonCard() {
   return (
     <div className="card" aria-hidden="true">
@@ -135,12 +135,21 @@ export function ChipGroup({ options, value, onChange, label = "Filter" }: { opti
 }
 
 // ---------------------------------------------------------------- EmptyState
+const cx = (...c: (string | false | null | undefined)[]) => c.filter(Boolean).join(" ");
+
+/**
+ * Calm "nothing here yet" panel: icon tile, title, one line of explanation and
+ * an optional primary action. `titleAs` makes the title a real heading when the
+ * page outline needs one (default: bold text, so it never breaks the outline).
+ */
 export function EmptyState({
-  icon = "spark",
+  icon = "inbox",
   title,
   children,
   action,
   card = true,
+  titleAs = "b",
+  className,
 }: {
   icon?: IconName;
   title: ReactNode;
@@ -148,70 +157,74 @@ export function EmptyState({
   /** A button/link node, or {label, href | onClick} for a primary button. */
   action?: ReactNode | { label: string; href?: string; onClick?: () => void; icon?: IconName };
   card?: boolean;
+  titleAs?: "b" | "h2" | "h3";
+  className?: string;
 }) {
   let act: ReactNode = null;
   if (action && typeof action === "object" && "label" in (action as object)) {
     const a = action as { label: string; href?: string; onClick?: () => void; icon?: IconName };
     act = a.href ? (
-      <Link className="btn p" href={a.href} style={{ marginTop: 12 }}>
+      <Link className="btn p" href={a.href}>
         {a.icon && <Icon name={a.icon} />}
         {a.label}
       </Link>
     ) : (
-      <button type="button" className="btn p" onClick={a.onClick} style={{ marginTop: 12 }}>
+      <button type="button" className="btn p" onClick={a.onClick}>
         {a.icon && <Icon name={a.icon} />}
         {a.label}
       </button>
     );
   } else act = action as ReactNode;
+  const T = titleAs;
   return (
-    <div className={card ? "card empty" : "empty"}>
-      <div className="ico">
+    <div className={cx(card ? "card empty" : "empty", "sh-empty", className)}>
+      <div className="ico" aria-hidden="true">
         <Icon name={icon} />
       </div>
-      <b>{title}</b>
-      {children && <p className="muted small">{children}</p>}
-      {act}
+      <T className="sh-empty-t">{title}</T>
+      {children && <p className="muted small sh-empty-d">{children}</p>}
+      {act && <div className="sh-empty-act">{act}</div>}
     </div>
   );
 }
 
 // ---------------------------------------------------------------- PageHead
-/** `.pagehead` — h1 + muted intro, optional eyebrow/tag above and actions on the right. */
+/**
+ * `.pagehead` — eyebrow, the page's single <h1>, a description and an actions
+ * slot on the right (wraps below on narrow screens). `description` and `sub`
+ * are the same thing (`sub` kept for existing pages); `tag` sits above the h1.
+ */
 export function PageHead({
   title,
   sub,
+  description,
   eyebrow,
   tag,
   actions,
   center,
+  className,
   style,
 }: {
   title: ReactNode;
   sub?: ReactNode;
-  eyebrow?: string;
+  description?: ReactNode;
+  eyebrow?: ReactNode;
   tag?: ReactNode;
   actions?: ReactNode;
   center?: boolean;
+  className?: string;
   style?: CSSProperties;
 }) {
-  const head = (
-    <div style={center ? { textAlign: "center" } : undefined}>
-      {eyebrow && (
-        <div className="eyebrow" style={center ? { display: "flex", justifyContent: "center" } : undefined}>
-          {eyebrow}
-        </div>
-      )}
-      {tag && <div style={{ marginBottom: 12 }}>{tag}</div>}
-      <h1>{title}</h1>
-      {sub && <p style={center ? { marginLeft: "auto", marginRight: "auto" } : undefined}>{sub}</p>}
-    </div>
-  );
-  if (!actions) return <div className="pagehead" style={style}>{head}</div>;
+  const desc = description ?? sub;
   return (
-    <div className="pagehead row between wrapflex" style={{ alignItems: "flex-end", ...style }}>
-      {head}
-      <div className="row wrapflex">{actions}</div>
+    <div className={cx("pagehead sh-ph", center && "center", className)} style={style}>
+      <div className="sh-ph-main">
+        {eyebrow && <div className="eyebrow">{eyebrow}</div>}
+        {tag && <div className="sh-ph-tag">{tag}</div>}
+        <h1>{title}</h1>
+        {desc && <p className="sh-ph-desc">{desc}</p>}
+      </div>
+      {actions && <div className="sh-ph-actions">{actions}</div>}
     </div>
   );
 }
@@ -219,19 +232,24 @@ export function PageHead({
 // ---------------------------------------------------------------- Flow
 export const FLOW_STEPS = ["Objective", "Plan", "Approve", "Execute", "Verify", "Outcome"] as const;
 
-/** Objective → Plan → Approve → Execute → Verify → Outcome indicator; `step` is 0-based. */
-export function Flow({ step }: { step: number }) {
+/** Objective → Plan → Approve → Execute → Verify → Outcome stepper; `step` is 0-based (the current stage). */
+export function Flow({ step, label = "Progress" }: { step: number; label?: string }) {
   return (
-    <nav className="flow" aria-label="Progress">
-      {FLOW_STEPS.map((x, i) => (
-        <Fragment key={x}>
-          <span className={i === step ? "on" : i < step ? "done" : ""} aria-current={i === step ? "step" : undefined}>
-            {i < step && <Icon name="check" />}
-            {x}
-          </span>
-          {i < FLOW_STEPS.length - 1 && <i aria-hidden="true" />}
-        </Fragment>
-      ))}
+    <nav className="flow sh-flow" aria-label={label}>
+      <ol>
+        {FLOW_STEPS.map((x, i) => (
+          <li key={x} className={i === step ? "on" : i < step ? "done" : undefined} aria-current={i === step ? "step" : undefined}>
+            <span className="sh-flow-dot" aria-hidden="true">
+              {i < step ? <Icon name="check" /> : i + 1}
+            </span>
+            <span className="sh-flow-lbl">
+              {x}
+              {i < step && <span className="sr-only"> (done)</span>}
+            </span>
+            {i < FLOW_STEPS.length - 1 && <i className="sh-flow-line" aria-hidden="true" />}
+          </li>
+        ))}
+      </ol>
     </nav>
   );
 }
@@ -343,4 +361,14 @@ export function Reveal({ children, as, delay = 0, className, style }: { children
 // ---------------------------------------------------------------- Kbd
 export function Kbd({ children }: { children: ReactNode }) {
   return <kbd className="kbd">{children}</kbd>;
+}
+
+/** "⌘" on Apple devices, "Ctrl" elsewhere (decided after mount; "Ctrl" on the server). */
+export function useModKey(): "⌘" | "Ctrl" {
+  const [mac, setMac] = useState(false);
+  useEffect(() => {
+    const p = (navigator as Navigator & { userAgentData?: { platform?: string } }).userAgentData?.platform || navigator.platform || navigator.userAgent;
+    setMac(/mac|iphone|ipad|ipod/i.test(p));
+  }, []);
+  return mac ? "⌘" : "Ctrl";
 }

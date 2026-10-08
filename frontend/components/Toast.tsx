@@ -7,7 +7,7 @@ export type ToastKind = "ok" | "bad" | "info";
 export interface ToastOptions {
   kind?: ToastKind;
   icon?: IconName;
-  /** ms before auto-dismiss (default 2600, like the prototype; errors 4200). */
+  /** ms before auto-dismiss (default 2600; errors 4200; with an action 8000). */
   duration?: number;
   action?: { label: string; onClick: () => void };
 }
@@ -25,7 +25,7 @@ const Ctx = createContext<ToastFn | null>(null);
 
 const ICON: Record<ToastKind, IconName> = { ok: "check", bad: "alert", info: "info" };
 
-/** Renders the prototype's `#toasts` stack (bottom-center, above the mobile bottom nav). */
+/** Renders the `#toasts` stack (bottom-center, above the mobile bottom bar). */
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [items, setItems] = useState<ToastItem[]>([]);
   const seq = useRef(0);
@@ -37,34 +37,44 @@ export function ToastProvider({ children }: { children: ReactNode }) {
       const id = ++seq.current;
       const kind = opts.kind ?? "ok";
       setItems((xs) => [...xs.slice(-3), { id, message, ...opts, kind }]);
-      setTimeout(() => dismiss(id), opts.duration ?? (kind === "bad" ? 4200 : 2600));
+      // Toasts with an action stay long enough to reach the button.
+      setTimeout(() => dismiss(id), opts.duration ?? (opts.action ? 8000 : kind === "bad" ? 4200 : 2600));
     }) as ToastFn;
     fn.error = (m, o) => fn(m, { ...o, kind: "bad" });
     fn.info = (m, o) => fn(m, { ...o, kind: "info" });
     return fn;
   }, [dismiss]);
 
+  const render = (t: ToastItem) => (
+    <div key={t.id} className={`toast ${t.kind}`}>
+      <Icon name={t.icon ?? ICON[t.kind ?? "ok"]} />
+      <span>{t.message}</span>
+      {t.action && (
+        <button
+          type="button"
+          onClick={() => {
+            t.action!.onClick();
+            dismiss(t.id);
+          }}
+        >
+          {t.action.label}
+        </button>
+      )}
+    </div>
+  );
+
+  // Two persistent live regions (polite for confirmations, assertive for errors) so each
+  // toast is announced exactly once.
   return (
     <Ctx.Provider value={toast}>
       {children}
-      <div id="toasts" className="no-print" role="status" aria-live="polite" aria-atomic="false">
-        {items.map((t) => (
-          <div key={t.id} className={`toast ${t.kind}`} role={t.kind === "bad" ? "alert" : undefined}>
-            <Icon name={t.icon ?? ICON[t.kind ?? "ok"]} />
-            <span>{t.message}</span>
-            {t.action && (
-              <button
-                type="button"
-                onClick={() => {
-                  t.action!.onClick();
-                  dismiss(t.id);
-                }}
-              >
-                {t.action.label}
-              </button>
-            )}
-          </div>
-        ))}
+      <div id="toasts" className="no-print">
+        <div className="sh-toast-region" role="status" aria-live="polite">
+          {items.filter((t) => t.kind !== "bad").map(render)}
+        </div>
+        <div className="sh-toast-region" role="alert" aria-live="assertive">
+          {items.filter((t) => t.kind === "bad").map(render)}
+        </div>
       </div>
     </Ctx.Provider>
   );
@@ -72,7 +82,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
 
 /**
  * const toast = useToast();
- * toast("Workflow activated");               // ✓ success (default)
+ * toast("Recurring objective scheduled");    // ✓ success (default)
  * toast.error("Couldn't reach the server");  // red alert icon, stays longer
  * toast.info("Copied", { icon: "copy" });
  */

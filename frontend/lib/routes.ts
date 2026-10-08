@@ -2,7 +2,11 @@
 
 export const ROUTES = {
   home: "/",
+  /** The landing-page section (signed-out header). */
   howItWorks: "/#how",
+  /** The full public explanation page (footer, palette). */
+  howItWorksPage: "/how-it-works",
+  trust: "/#trust",
   dashboard: "/dashboard",
   objectives: "/objectives",
   newObjective: "/objectives/new",
@@ -10,6 +14,7 @@ export const ROUTES = {
   aiTeam: "/ai-team",
   context: "/context",
   memory: "/context#memory",
+  reports: "/reports", // completed outcomes + earlier reports
   approvals: "/approvals",
   exceptions: "/exceptions",
   usage: "/usage",

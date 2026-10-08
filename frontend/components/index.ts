@@ -1,7 +1,7 @@
 // Barrel for shared components: import { Avatar, Modal, useToast } from "@/components";
 export { Icon, ICONS, type IconName } from "./Icon";
 export { Logo, Mark, Lockup } from "./Logo";
-export { Avatar, AvatarStack } from "./Avatar";
+export { Avatar, AvatarStack, brandHue } from "./Avatar";
 export { Tag, StatusTag, StepStatusTag, OutcomeTag, VerificationTag, CriterionTag, ClaimTag, RiskTag, statusLabel, outcomeLabel, isLiveStatus, type TagVariant } from "./Tags";
 export { Modal } from "./Modal";
 export { ToastProvider, useToast, type ToastFn, type ToastOptions } from "./Toast";
@@ -24,6 +24,7 @@ export {
   CountUp,
   Reveal,
   Kbd,
+  useModKey,
   type TabItem,
 } from "./UI";
 export { RequireAuth } from "./RequireAuth";
@@ -33,4 +34,5 @@ export { CommandPalette } from "./CommandPalette";
 export { Header, BottomNav, useAttention, refreshAttention } from "./Header";
 export { Footer } from "./Footer";
 export { DemoBanner } from "./DemoBanner";
+export { GuestBanner, claimUrl } from "./GuestBanner";
 export { CharCount } from "./CharCount";

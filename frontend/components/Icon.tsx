@@ -2,6 +2,9 @@ import type { CSSProperties } from "react";
 
 // Every icon from the prototype's IC map (verbatim paths), plus a few extras
 // the app shell needs (marked "extra"). 24×24, stroke-based, currentColor.
+// Names are an API (IconName is used app-wide): add, never remove or rename.
+// `spark` stays for compatibility, but the brand avoids "AI magic" imagery —
+// prefer a concrete glyph (target, report, org, layers…).
 export const ICONS = {
   check: '<path d="M20 6 9 17l-5-5"/>',
   arrow: '<path d="M5 12h14M13 6l6 6-6 6"/>',
@@ -55,6 +58,15 @@ export const ICONS = {
   file: '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M8 13h8M8 17h5"/>',
   zap: '<path d="M13 2 3 14h9l-1 8 10-12h-9z"/>',
   menu: '<path d="M4 6h16M4 12h16M4 18h16"/>',
+  // ---- shell / navigation (brand pass) ----
+  target: '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1.2"/>',
+  inbox: '<path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.5 5.1 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.5-6.9A2 2 0 0 0 16.8 4H7.2a2 2 0 0 0-1.7 1.1z"/>',
+  grid: '<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>',
+  report: '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M8.5 15l2.5 2.5 4.5-4.5"/>',
+  org: '<rect x="9" y="2.5" width="6" height="5" rx="1.2"/><rect x="2.5" y="16.5" width="6" height="5" rx="1.2"/><rect x="15.5" y="16.5" width="6" height="5" rx="1.2"/><path d="M12 7.5v4.5M5.5 16.5V12h13v4.5"/>',
+  building: '<path d="M4 21V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v16M16 9h2a2 2 0 0 1 2 2v10M2 21h20M8 7h4M8 11h4M8 15h4"/>',
+  users: '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0M16 4.6a3.5 3.5 0 0 1 0 6.8M18 14.2a6.5 6.5 0 0 1 3.5 5.8"/>',
+  userPlus: '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0M19 8v6M16 11h6"/>',
 } as const;
 
 export type IconName = keyof typeof ICONS;
