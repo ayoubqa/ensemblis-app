@@ -1278,3 +1278,8 @@ nav.main a{padding:7px 10px;font-size:13.5px;display:inline-flex;align-items:cen
 .linkbtn:hover{text-decoration:underline}
 .spin{width:16px;height:16px;border-radius:50%;border:2px solid var(--line2);border-top-color:var(--accent);animation:spin .8s linear infinite;display:inline-block;flex:none}
 .ml-2{margin-left:8px}
+
+/* Sticky save bar for long forms: a backed surface so it never floats over fields,
+   lifted above the mobile bottom nav. */
+.savebar{position:sticky;bottom:12px;z-index:5;display:flex;flex-wrap:wrap;align-items:center;gap:12px;margin-top:8px;padding:10px 12px;background:color-mix(in srgb,var(--surface) 94%,transparent);-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow)}
+@media (max-width:860px){.savebar{bottom:calc(76px + env(safe-area-inset-bottom,0px))}}

@@ -92,7 +92,7 @@ function CompanyContextView() {
                   <p className="hint">{f.hint}</p>
                 </div>
               ))}
-              <div className="row wrapflex" style={{ position: "sticky", bottom: 12 }}>
+              <div className="savebar">
                 <button type="button" className="btn p" onClick={save} disabled={!dirty || saving} aria-busy={saving} data-testid="save-context">
                   Save Company Context
                 </button>
