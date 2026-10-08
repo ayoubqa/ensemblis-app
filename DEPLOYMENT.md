@@ -92,6 +92,20 @@ reset their database (the scripts refuse names without `smoke`/`test`).
 
 ## 4. Deploy
 
+0. **First, remove `db push` from production (a v3 deploy, no behaviour change).**
+   Fast-forward `main` to `v3-rollback-safe` (v3 + "don't run `prisma db push`
+   at boot") and let Render deploy it:
+
+   ```bash
+   git fetch origin && git checkout main && git merge --ff-only origin/v3-rollback-safe && git push origin main
+   ```
+
+   Why: if the first v4 API deploy fails *after* its migration ran, Render keeps
+   the old v3 instance serving. A v3 instance that still runs `db push` would
+   fail on its next restart or cold start (free instances sleep after 15
+   minutes) — an outage. With this step, every v3 instance boots without
+   touching the schema. (`v3-rollback-safe` is already part of the v4 branch,
+   so step 1 stays a clean fast-forward.)
 1. Merge `ensemblis-outcome-execution-system` into `main` (via a pull request,
    with CI green).
 2. Render (Blueprint auto-sync on `main`):
@@ -170,7 +184,19 @@ To roll forward again, set the branch back to `main` and resume the worker;
 v4 data created before a rollback (objectives, executions, company context)
 stays in its tables, invisible to v3, and reappears after rolling forward.
 
-## 8. Recovery checks you can run anytime
+## 8. If the migration step fails at boot
+
+`dist/ops/migrate.js` handles the known states itself: a database created by
+`db push` (baselined), one with a stray `prisma migrate dev` history,
+a migration recorded as failed by an interrupted deploy (Prisma applies each
+migration in a transaction, so it is marked rolled back and retried once), and
+two instances booting at once. It refuses — with instructions — only when the
+schema can't be identified (v4 tables without any migration history). Its log
+lines start with `[migrate]`. Legacy v3 tasks still running at deploy time are
+left alone for 15 minutes (a v3 instance may still finish them), then failed
+and refunded.
+
+## 9. Recovery checks you can run anytime
 
 ```bash
 cd backend && npm run build
