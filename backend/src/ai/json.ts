@@ -25,10 +25,15 @@ export function extractJsonObject(raw: string): unknown | null {
       else if (ch === "}") {
         depth--;
         if (depth === 0) {
+          const slice = raw.slice(start, i + 1);
           try {
-            return JSON.parse(raw.slice(start, i + 1));
+            return JSON.parse(slice);
           } catch {
-            break; // try the next "{"
+            try {
+              return JSON.parse(withoutTrailingCommas(slice)); // a common real-model slip: {"a": 1,}
+            } catch {
+              break; // try the next "{"
+            }
           }
         }
       }
@@ -36,6 +41,31 @@ export function extractJsonObject(raw: string): unknown | null {
     start = raw.indexOf("{", start + 1);
   }
   return null;
+}
+
+/** Removes commas that directly precede } or ] (outside strings). */
+export function withoutTrailingCommas(json: string): string {
+  let out = "";
+  let inString = false;
+  let escaped = false;
+  for (let i = 0; i < json.length; i++) {
+    const ch = json[i];
+    if (inString) {
+      out += ch;
+      if (escaped) escaped = false;
+      else if (ch === "\\") escaped = true;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') inString = true;
+    if (ch === ",") {
+      let j = i + 1;
+      while (j < json.length && /\s/.test(json[j])) j++;
+      if (json[j] === "}" || json[j] === "]") continue;
+    }
+    out += ch;
+  }
+  return out;
 }
 
 export type Structured<T> = { ok: true; data: T } | { ok: false; error: string };

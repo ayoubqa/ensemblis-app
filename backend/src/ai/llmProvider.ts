@@ -27,6 +27,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { recordUsage } from "../lib/usage";
 import { log } from "../lib/log";
+import { mockAIForbidden } from "../config";
 import { mockLLM } from "./mockProvider";
 
 export type Provider = "ollama" | "openai" | "anthropic" | "mock";
@@ -65,7 +66,7 @@ export function currentProvider(): Provider {
   const p = (process.env.AI_PROVIDER || "ollama").trim().toLowerCase();
   if (p === "ollama" || p === "openai" || p === "anthropic") return p;
   if (p === "mock") {
-    if (process.env.NODE_ENV === "production") throw new Error('AI_PROVIDER="mock" is for development and tests only');
+    if (mockAIForbidden()) throw new Error('AI_PROVIDER="mock" is for development and tests only');
     return p;
   }
   throw new Error(`Unknown AI_PROVIDER "${p}" — use "ollama", "openai" or "anthropic"`);

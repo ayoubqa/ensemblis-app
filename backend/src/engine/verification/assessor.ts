@@ -4,28 +4,28 @@
 // deterministic checks alone and marks these checks "not assessed" (never "pass").
 
 import { z } from "zod";
-import { runLLM } from "../../ai/llmProvider";
-import { parseStructured } from "../../ai/json";
+import { runStructured } from "../../ai/structured";
+import { listOf, looseEnum, num, strList, text } from "../../ai/lenient";
 import { clip } from "../../research/text";
 import { block, TRUST_RULES } from "../prompts";
 import type { ClaimResult, ModelAssessment } from "./checks";
 
+// Tolerant (ai/lenient.ts): a long rationale, "85" for a score or "met" for MET
+// must not throw away the whole assessment.
 const schema = z.object({
-  objectiveAlignment: z.object({ score: z.number().min(0).max(100), rationale: z.string().max(600).default("") }),
-  criteria: z
-    .array(
-      z.object({
-        index: z.number().int().min(1).max(20),
-        status: z.enum(["MET", "PARTIALLY_MET", "NOT_MET", "UNKNOWN"]),
-        measuredValue: z.number().finite().nullable().optional(),
-        measurement: z.string().max(200).default(""),
-        explanation: z.string().max(600).default(""),
-      })
-    )
-    .max(20)
-    .default([]),
-  consistencyIssues: z.array(z.string().max(300)).max(8).default([]),
-  humanJudgment: z.array(z.string().max(300)).max(6).default([]),
+  objectiveAlignment: z.object({ score: num().pipe(z.number().min(0).max(100)), rationale: text(600).default("") }),
+  criteria: listOf(
+    z.object({
+      index: num().pipe(z.number().int().min(1).max(20)),
+      status: looseEnum<"MET" | "PARTIALLY_MET" | "NOT_MET" | "UNKNOWN">(["MET", "PARTIALLY_MET", "NOT_MET", "UNKNOWN"]),
+      measuredValue: num().nullable().optional().catch(null),
+      measurement: text(200).default(""),
+      explanation: text(600).default(""),
+    }),
+    20
+  ).default([]),
+  consistencyIssues: strList(8, 300).default([]),
+  humanJudgment: strList(6, 300).default([]),
 });
 
 export async function assessResult(args: {
@@ -62,10 +62,9 @@ export async function assessResult(args: {
     block("claims", claimsSummary || "(no checkable claims)", "internal"),
   ].join("\n\n");
   try {
-    const { text } = await runLLM(system, user, { model: "main", purpose: "verify", executionId: args.executionId, temperature: 0, maxTokens: 3000 });
-    const parsed = parseStructured(text, schema);
-    if (!parsed.ok) return null;
-    const d = parsed.data;
+    const res = await runStructured(system, user, schema, { model: "main", purpose: "verify", executionId: args.executionId, temperature: 0, maxTokens: 3000 });
+    if (!res.ok) return null;
+    const d = res.data;
     return {
       alignmentScore: d.objectiveAlignment.score,
       alignmentRationale: d.objectiveAlignment.rationale,

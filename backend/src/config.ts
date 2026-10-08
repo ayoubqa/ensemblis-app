@@ -23,6 +23,15 @@ function bool(name: string, fallback: boolean): boolean {
 
 export const isProduction = process.env.NODE_ENV === "production";
 
+/**
+ * The mock model is refused in production AND on any hosting platform, so a
+ * forgotten NODE_ENV can't ship scripted output (Render sets RENDER=true on
+ * every service; Fly, Railway and Heroku-style hosts set their own markers).
+ */
+export function mockAIForbidden(): boolean {
+  return isProduction || !!(process.env.RENDER || process.env.FLY_APP_NAME || process.env.RAILWAY_ENVIRONMENT || process.env.DYNO);
+}
+
 const corsOrigins = (process.env.CORS_ORIGIN || "http://localhost:3000")
   .split(",")
   .map((s) => s.trim().replace(/\/+$/, ""))
@@ -170,17 +179,17 @@ const INSECURE_SECRETS = new Set(["", "change-me-to-a-long-random-string", "dev-
  * work. Returns the list of problems (empty = OK).
  */
 export function productionConfigProblems(): string[] {
-  if (!isProduction) return [];
   const problems: string[] = [];
+  if (mockAIForbidden() && (process.env.AI_PROVIDER || "").trim().toLowerCase() === "mock") {
+    problems.push('AI_PROVIDER="mock" is a scripted provider for development and tests only. Use "openai", "anthropic" or "ollama".');
+  }
+  if (!isProduction) return problems;
   const secret = process.env.JWT_SECRET?.trim() ?? "";
   if (INSECURE_SECRETS.has(secret) || secret.length < 16) {
     problems.push("JWT_SECRET is missing, a placeholder, or shorter than 16 characters. Set it to a long random string.");
   }
   if (!process.env.DATABASE_URL?.trim()) {
     problems.push("DATABASE_URL is missing. Set it to your Postgres connection string (Neon: include ?sslmode=require).");
-  }
-  if ((process.env.AI_PROVIDER || "").trim().toLowerCase() === "mock") {
-    problems.push('AI_PROVIDER="mock" is a scripted provider for development and tests only. Use "openai", "anthropic" or "ollama".');
   }
   return problems;
 }

@@ -13,8 +13,8 @@
 // playbook plan is used instead (fallbackPlan) and labelled as such.
 
 import { z } from "zod";
-import { runLLM } from "../ai/llmProvider";
-import { parseStructured } from "../ai/json";
+import { runStructured } from "../ai/structured";
+import { bool, listOf, looseEnum, num, strList, text } from "../ai/lenient";
 import {
   CAPABILITIES,
   EXECUTIVES,
@@ -22,6 +22,7 @@ import {
   SYNTHESIS_CAPABILITY,
   VERIFICATION_COST_CENTS,
   getCapability,
+  type Capability,
   type ExecutiveKey,
 } from "../org/registry";
 import { terms } from "../context/retrieval";
@@ -35,37 +36,36 @@ const MAX_WORK_STEPS = MAX_STEPS - 2;
 // ---------------------------------------------------------------- contract
 
 const criterionSchema = z.object({
-  description: z.string().min(3).max(300),
-  kind: z.enum(["qualitative", "quantitative"]).catch("qualitative"),
-  targetValue: z.number().finite().nullable().optional(),
-  unit: z.string().max(40).nullable().optional(),
+  description: text(300, 3),
+  kind: looseEnum(["QUALITATIVE", "QUANTITATIVE"]).transform((k) => k.toLowerCase() as "qualitative" | "quantitative").catch("qualitative"),
+  targetValue: num().nullable().optional().catch(null),
+  unit: text(40).nullable().optional().catch(null),
 });
 
 const stepSchema = z.object({
-  id: z.string().min(1).max(20),
-  title: z.string().min(3).max(140),
-  executive: z.string().max(40),
-  capability: z.string().max(60),
-  purpose: z.string().min(5).max(800),
-  inputs: z.array(z.string().max(200)).max(8).catch([]).default([]),
-  outputs: z.array(z.string().max(200)).max(8).catch([]).default([]),
-  verification: z.array(z.string().max(200)).max(6).catch([]).default([]),
-  dependsOn: z.array(z.string().max(20)).max(8).catch([]).default([]),
+  id: text(20, 1),
+  title: text(140, 3),
+  executive: text(60).catch(""),
+  capability: text(80, 1),
+  purpose: text(800, 5),
+  inputs: strList(8, 200).default([]),
+  outputs: strList(8, 200).default([]),
+  verification: strList(6, 200).default([]),
+  dependsOn: strList(8, 20).default([]),
 });
 
+// Tolerant on purpose (see ai/lenient.ts): long text is trimmed, numbers may be
+// strings, a malformed step or criterion is dropped instead of discarding the
+// plan. The registry check in normalizePlan is what keeps the plan honest.
 export const planSchema = z.object({
-  title: z.string().min(3).max(140),
-  objective: z.string().min(5).max(800),
-  successCriteria: z.array(criterionSchema).max(6).catch([]).default([]),
-  assumptions: z.array(z.string().max(300)).max(8).catch([]).default([]),
-  missingInformation: z
-    .array(z.object({ question: z.string().min(5).max(300), whyItMatters: z.string().max(300).default(""), blocking: z.boolean().default(false) }))
-    .max(3)
-    .catch([])
-    .default([]),
-  steps: z.array(stepSchema).min(1).max(12),
-  estimatedManualHours: z.number().min(0).max(2000).nullable().optional(),
-  risks: z.array(z.string().max(300)).max(6).catch([]).default([]),
+  title: text(140, 3),
+  objective: text(800, 5),
+  successCriteria: listOf(criterionSchema, 6).default([]),
+  assumptions: strList(8, 300).default([]),
+  missingInformation: listOf(z.object({ question: text(300, 5), whyItMatters: text(300).default(""), blocking: bool().default(false) }), 3).default([]),
+  steps: listOf(stepSchema, 20).pipe(z.array(stepSchema).min(1)),
+  estimatedManualHours: num().pipe(z.number().min(0).max(2000)).nullable().optional().catch(null),
+  risks: strList(6, 300).default([]),
 });
 export type RawPlan = z.infer<typeof planSchema>;
 
@@ -145,6 +145,30 @@ export function estimateCost(steps: { capability: string }[]): number {
   return steps.reduce((n, s) => n + (getCapability(s.capability)?.costCents ?? 0), 0) + VERIFICATION_COST_CENTS;
 }
 
+const canon = (x: string) => x.toLowerCase().replace(/&/g, " and ").replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+const CAP_BY_CANON = new Map<string, Capability>();
+for (const c of CAPABILITIES) {
+  CAP_BY_CANON.set(canon(c.key), c);
+  CAP_BY_CANON.set(canon(c.name), c);
+}
+
+/**
+ * Maps what a model wrote to a registry capability: the exact key, or an
+ * unambiguous near miss ("Market Research", "market-research",
+ * "marketing/market_research", "`competitor_analysis`"). Anything else is
+ * unknown and its step is dropped — a model can't invent a capability.
+ */
+export function resolveCapability(raw: string): Capability | undefined {
+  const exact = getCapability(raw.trim());
+  if (exact) return exact;
+  const parts = raw.split(/[/.:>]|->/).map((p) => canon(p)).filter(Boolean);
+  for (const candidate of [canon(raw), ...parts.reverse()]) {
+    const hit = CAP_BY_CANON.get(candidate);
+    if (hit) return hit;
+  }
+  return undefined;
+}
+
 /** Validates a raw (model) plan against the registry and the plan invariants. */
 export function normalizePlan(raw: RawPlan, input: Pick<PlannerInput, "title" | "statement" | "criteria">): Plan {
   const notes: string[] = [];
@@ -154,11 +178,12 @@ export function normalizePlan(raw: RawPlan, input: Pick<PlannerInput, "title" | 
   let synthesis: { step: PlannedStep; deps: string[] } | null = null;
 
   for (const s of raw.steps) {
-    const cap = getCapability(s.capability.trim());
+    const cap = resolveCapability(s.capability);
     if (!cap) {
       notes.push(`Dropped step "${s.title}": unknown capability "${s.capability}".`);
       continue;
     }
+    if (cap.key !== s.capability.trim()) notes.push(`"${s.title}": capability "${s.capability}" read as ${cap.key}.`);
     if (s.executive !== cap.executive) {
       if (s.executive) notes.push(`"${s.title}" was assigned to ${cap.executive.replace(/_/g, " ")} (the owner of ${cap.name}).`);
     }
@@ -393,15 +418,19 @@ export async function planObjective(input: PlannerInput): Promise<Plan> {
   let plan: Plan;
   try {
     const { system, user } = plannerPrompt(input);
-    const { text } = await runLLM(system, user, {
+    const res = await runStructured(system, user, planSchema, {
       model: "main",
       purpose: "plan",
       executionId: input.executionId ?? null,
       temperature: 0.2,
-      maxTokens: 4096,
+      maxTokens: 5000,
     });
-    const parsed = parseStructured(text, planSchema);
-    plan = parsed.ok ? normalizePlan(parsed.data, input) : fallbackPlan(input, `the AI planner's output was not a valid plan (${parsed.error}).`);
+    if (res.ok) {
+      plan = normalizePlan(res.data, input);
+      if (res.attempts > 1) plan.notes.unshift(`The planner's first reply was unusable (${res.firstError}); its second reply was used.`);
+    } else {
+      plan = fallbackPlan(input, res.attempts > 1 ? `the AI planner's output was not a valid plan (${res.error}).` : `the AI planner was unavailable (${res.error}).`);
+    }
   } catch (err) {
     plan = fallbackPlan(input, `the AI planner was unavailable (${err instanceof Error ? err.message : "unknown error"}).`);
   }
