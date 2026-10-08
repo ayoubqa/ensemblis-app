@@ -46,7 +46,7 @@ export function Footer() {
   return (
     <footer className="ft no-print">
       <div className="wrap">
-        <div className="cols" style={{ gridTemplateColumns: "1.6fr repeat(3, 1fr)" }}>
+        <div className="cols ft-cols">
           <div>
             <Link href={ROUTES.home} className="lockup" style={{ color: "var(--ink)", gap: 10, display: "inline-flex" }} aria-label="Ensemblis home">
               <Mark size={24} />

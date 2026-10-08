@@ -1,1 +1,14 @@
 /* shell styles — see app/styles/components.css for the shared brand layer. */
+
+/* Footer columns (was an inline style that beat the mobile rule). */
+.ft .cols.ft-cols {
+  grid-template-columns: 1.6fr repeat(3, minmax(0, 1fr));
+}
+@media (max-width: 860px) {
+  .ft .cols.ft-cols {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .ft .cols.ft-cols > :first-child {
+    grid-column: 1 / -1;
+  }
+}

@@ -14,8 +14,8 @@ export const EXAMPLE_OBJECTIVES: { label: string; statement: string; criteria: s
     criteria: ["Cover 10 competitors", "A comparison table of offers, pricing signals and positioning", "One clear opening per competitor"],
   },
   {
-    label: "Pipeline briefing",
-    statement: "Prepare a briefing on the sales opportunities most likely to close this quarter and what would move them forward.",
+    label: "Sales opportunity review",
+    statement: "Rank the sales opportunities most likely to close this quarter and what would move each one forward.",
     criteria: ["Opportunities ranked by likelihood", "A next action for each", "Risks to the forecast are stated"],
   },
   {
@@ -34,7 +34,7 @@ export const EXAMPLE_OBJECTIVES: { label: string; statement: string; criteria: s
 export const LOOP: { key: string; title: string; body: string }[] = [
   { key: "objective", title: "Objective", body: "You describe the business result you need, how success is judged, a deadline and a budget." },
   { key: "plan", title: "Plan", body: "The Chief of Staff turns it into a short plan and assigns each step to the executive who owns that capability." },
-  { key: "approve", title: "Approve", body: "You review the plan and the cost. Nothing runs or is charged before that — unless you allow it within a budget." },
+  { key: "approve", title: "Approve", body: "You review the plan and the cost. Nothing is executed or charged before that — unless you allow it within a budget." },
   { key: "execute", title: "Execute", body: "Specialists research and analyse with read-only tools. Every source becomes numbered evidence." },
   { key: "verify", title: "Verify", body: "A verification gate checks claims against the evidence, coverage of each success criterion, completeness and consistency." },
   { key: "outcome", title: "Outcome", body: "You get the result, the evidence behind it, and whether each success criterion was met." },
