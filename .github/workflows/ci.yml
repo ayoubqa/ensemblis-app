@@ -103,9 +103,12 @@ jobs:
       - name: Install frontend + Chromium
         working-directory: frontend
         run: npm ci && npx playwright install --with-deps chromium
-      - name: Run E2E
+      - name: Run E2E (mock AI)
         working-directory: frontend
         run: npm run e2e
+      - name: Run E2E (production-like — NODE_ENV=production, OpenAI-compatible provider against a local Groq-format stub)
+        working-directory: frontend
+        run: npm run e2e:prod-like
       - uses: actions/upload-artifact@v4
         if: failure()
         with:

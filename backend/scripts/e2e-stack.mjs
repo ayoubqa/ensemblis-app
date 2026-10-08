@@ -16,6 +16,18 @@ const db = process.env.E2E_DATABASE_URL || "postgresql://ensemblis:ensemblis@loc
 const port = process.env.E2E_API_PORT || "4100";
 const web = process.env.E2E_WEB_ORIGIN || "http://localhost:3100";
 
+// PROD_LIKE=1: NODE_ENV=production and the real OpenAI-compatible provider code, pointed at a local
+// stub that speaks Groq's streaming wire format (no network, no key, no mock provider).
+const prodLike = process.env.PROD_LIKE === "1";
+let stubUrl = "";
+if (prodLike) {
+  process.env.OPENAI_STUB_DELAY_MS ||= process.env.MOCK_AI_DELAY_MS || "1600";
+  const { startOpenAIStub } = await import("./openai-stub.mjs");
+  const { port } = await startOpenAIStub(0);
+  stubUrl = `http://127.0.0.1:${port}/v1`;
+  console.log(`[e2e-stack] production-like: NODE_ENV=production, AI_PROVIDER=openai → ${stubUrl}`);
+}
+
 const env = {
   ...process.env,
   NODE_ENV: "development",
@@ -35,6 +47,9 @@ const env = {
   RATE_LIMIT_LOGIN_PER_15MIN: "1000",
   RATE_LIMIT_GLOBAL_PER_15MIN: "100000",
   LOG_LEVEL: process.env.LOG_LEVEL || "warn",
+  ...(prodLike
+    ? { NODE_ENV: "production", AI_PROVIDER: "openai", OPENAI_BASE_URL: stubUrl, OPENAI_API_KEY: "stub-key", OPENAI_MODEL: "openai/gpt-oss-120b", OPENAI_FAST_MODEL: "openai/gpt-oss-20b", OPENAI_REASONING_EFFORT: "low" }
+    : {}),
 };
 
 // This database is RESET on every run: refuse anything that doesn't look like a throwaway one.

@@ -9,7 +9,8 @@
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "e2e": "playwright test"
+    "e2e": "playwright test",
+    "e2e:prod-like": "PROD_LIKE=1 playwright test"
   },
   "dependencies": {
     "docx": "^9.8.1",
