@@ -32,7 +32,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   const refresh = useCallback(async () => {
-    if (!getToken()) {
+    const sent = getToken();
+    if (!sent) {
       setUser(null);
       setLoading(false);
       return;
@@ -41,8 +42,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const { user } = await api.me();
       setUser(user);
     } catch (e) {
-      // Only drop the session on an auth failure — keep it on network errors.
-      if (e instanceof ApiError && (e.status === 401 || e.status === 403)) {
+      // Only drop the session on an auth failure — keep it on network errors, and keep a newer
+      // token another tab stored meanwhile.
+      if (e instanceof ApiError && (e.status === 401 || e.status === 403) && getToken() === sent) {
         setToken(null);
         setUser(null);
       }

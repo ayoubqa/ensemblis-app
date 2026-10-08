@@ -9,7 +9,7 @@ import { prisma } from "../db";
 import { config } from "../config";
 import { HttpError } from "../lib/http";
 import type { OrgContext } from "../org/organization";
-import { runLLM } from "../ai/llmProvider";
+import { llmQueueLength, runLLM } from "../ai/llmProvider";
 import { parseStructured } from "../ai/json";
 import { listOf, strList, text } from "../ai/lenient";
 import { clip, collapse } from "../research/text";
@@ -157,6 +157,9 @@ export async function replaceCriteria(org: OrgContext, objectiveId: string, list
 
 // ---------------------------------------------------------------- suggestions
 
+const MAX_QUEUED_SUGGEST_CALLS = 2;
+const SUGGEST_TIMEOUT_MS = 20_000;
+
 const suggestSchema = z.object({
   title: text(140, 3),
   criteria: listOf(z.object({ description: text(300, 3), kind: z.preprocess((v) => (typeof v === "string" ? v.trim().toLowerCase() : v), z.enum(["qualitative", "quantitative"])).catch("qualitative") }), 5).default([]),
@@ -192,7 +195,18 @@ export async function suggestForStatement(statement: string, companyProfile: str
     'JSON: {"title": str, "criteria": [{"description": str, "kind": "qualitative"|"quantitative"}], "questions": [str]}',
   ].join("\n\n");
   try {
-    const { text } = await runLLM(system, user, { model: "fast", purpose: "suggest", temperature: 0.2, maxTokens: 1200, timeoutMs: 20_000 });
+    // Optional, interactive work: under load answer with the heuristic instead of queueing. A queued
+    // call keeps running after the request gives up, so a burst would pile up model calls (and delay
+    // the research steps of paid executions, which share the fast-model pool).
+    if (llmQueueLength("fast") >= MAX_QUEUED_SUGGEST_CALLS) return fallback;
+    let timer: NodeJS.Timeout | undefined;
+    const waited = new Promise<null>((resolve) => {
+      timer = setTimeout(() => resolve(null), SUGGEST_TIMEOUT_MS + 5_000); // also bounds the wait for a free slot
+    });
+    const result = await Promise.race([runLLM(system, user, { model: "fast", purpose: "suggest", temperature: 0.2, maxTokens: 1200, timeoutMs: SUGGEST_TIMEOUT_MS }).catch(() => null), waited]);
+    if (timer) clearTimeout(timer);
+    if (!result) return fallback;
+    const { text } = result;
     const parsed = parseStructured(text, suggestSchema);
     if (!parsed.ok || !parsed.data.criteria.length) return fallback;
     return {

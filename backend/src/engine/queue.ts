@@ -61,34 +61,50 @@ export async function claimJobs(workerId: string, limit: number, leaseMs: number
   return rows;
 }
 
-/** Extends the lease. False when the job is no longer ours (reclaimed). */
-export async function renewLease(jobId: string, workerId: string, leaseMs: number): Promise<boolean> {
+// A claim is identified by (job id, worker id, attempts): `attempts` goes up on every claim, so a run
+// whose lease expired and whose job was claimed again — even by the same worker — can't renew,
+// complete or fail the newer claim.
+type Claim = Pick<Job, "id" | "attempts">;
+
+/** Extends the lease. False when the claim is no longer ours (reclaimed). */
+export async function renewLease(job: Claim, workerId: string, leaseMs: number): Promise<boolean> {
   const n = await prisma.$executeRaw`
     UPDATE "Job" SET "lockedUntil" = NOW() + (${leaseMs} * INTERVAL '1 millisecond'), "updatedAt" = NOW()
-     WHERE "id" = ${jobId} AND "lockedBy" = ${workerId} AND "status" = 'RUNNING'::"JobStatus"`;
+     WHERE "id" = ${job.id} AND "lockedBy" = ${workerId} AND "attempts" = ${job.attempts} AND "status" = 'RUNNING'::"JobStatus"`;
   return n > 0;
 }
 
-export async function completeJob(jobId: string, workerId: string): Promise<void> {
-  await prisma.job.updateMany({
-    where: { id: jobId, lockedBy: workerId, status: "RUNNING" },
+/** False when the claim was lost meanwhile (nothing changed). */
+export async function completeJob(job: Claim, workerId: string): Promise<boolean> {
+  const r = await prisma.job.updateMany({
+    where: { id: job.id, lockedBy: workerId, attempts: job.attempts, status: "RUNNING" },
     data: { status: "SUCCEEDED", dedupeKey: null, lockedBy: null, lockedUntil: null, completedAt: new Date() },
   });
+  return r.count > 0;
+}
+
+/** Shutdown: hands this worker's unfinished claims back to the queue so another worker resumes them now. */
+export async function releaseClaims(workerId: string): Promise<number> {
+  return prisma.$executeRaw`
+    UPDATE "Job" SET "status" = 'QUEUED'::"JobStatus", "lockedBy" = NULL, "lockedUntil" = NULL, "runAt" = NOW(),
+           "lastError" = 'Worker shut down mid-job; re-queued', "updatedAt" = NOW()
+     WHERE "lockedBy" = ${workerId} AND "status" = 'RUNNING'::"JobStatus"`;
 }
 
 export function backoffMs(attempts: number): number {
   return Math.min(5 * 60_000, 2_000 * 2 ** Math.max(0, attempts - 1));
 }
 
-/** Records a handler error. Returns "retry" (re-queued with backoff) or "dead". */
-export async function failJob(job: Job, workerId: string, error: string): Promise<"retry" | "dead"> {
+/** Records a handler error. Returns "retry" (re-queued with backoff), "dead", or "lost" (the claim was no longer ours). */
+export async function failJob(job: Job, workerId: string, error: string): Promise<"retry" | "dead" | "lost"> {
   const dead = job.attempts >= job.maxAttempts;
-  await prisma.job.updateMany({
-    where: { id: job.id, lockedBy: workerId, status: "RUNNING" },
+  const r = await prisma.job.updateMany({
+    where: { id: job.id, lockedBy: workerId, attempts: job.attempts, status: "RUNNING" },
     data: dead
       ? { status: "DEAD", dedupeKey: null, lockedBy: null, lockedUntil: null, lastError: error.slice(0, 2000), completedAt: new Date() }
       : { status: "QUEUED", lockedBy: null, lockedUntil: null, lastError: error.slice(0, 2000), runAt: new Date(Date.now() + backoffMs(job.attempts)) },
   });
+  if (r.count === 0) return "lost";
   return dead ? "dead" : "retry";
 }
 

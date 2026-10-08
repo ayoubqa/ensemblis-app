@@ -79,6 +79,27 @@ describe("crash recovery", () => {
     expect((await getExecution(auth, executionId)).status).toBe("COMPLETED");
   });
 
+  it("an execution left PLANNED (the worker died between the plan and the approval) moves on", async () => {
+    const { auth } = await createUser({ credits: 5000 });
+    await fillContext(auth);
+    const { executionId, objectiveId } = await defineObjective(auth);
+    await runWorker();
+    // Undo what happened after the plan was committed, as if the worker had died right then.
+    await prisma.approval.deleteMany({ where: { executionId } });
+    await prisma.job.deleteMany({});
+    await prisma.execution.update({ where: { id: executionId }, data: { status: "PLANNED", lastProgressAt: new Date(Date.now() - 5 * 60_000) } });
+    await prisma.objective.update({ where: { id: objectiveId }, data: { status: "PLANNED" } });
+
+    const r = await recoverExecutions();
+    expect(r.orphans).toBe(1);
+    await runWorker();
+    expect((await getExecution(auth, executionId)).status).toBe("WAITING_FOR_APPROVAL");
+    expect((await api().get("/api/approvals").set(auth).expect(200)).body.approvals).toHaveLength(1);
+    await approvePending(auth);
+    await runWorker();
+    expect((await getExecution(auth, executionId)).status).toBe("COMPLETED");
+  });
+
   it("an execution with no progress for the stall window is failed and refunded — never stuck RUNNING", async () => {
     const { user, executionId } = await startedExecution();
     await prisma.execution.update({ where: { id: executionId }, data: { lastProgressAt: new Date(Date.now() - STALL_MS - 60_000) } });

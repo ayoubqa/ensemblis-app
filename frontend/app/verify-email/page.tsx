@@ -1,13 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useRef, useState } from "react";
 import { Icon } from "@/components";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { errorText } from "@/lib/errors";
-import { ROUTES } from "@/lib/routes";
+import { ROUTES, loginUrl } from "@/lib/routes";
 import { AuthShell, AuthStatus } from "../login/_components/AuthUI";
 
 type State = { kind: "working" } | { kind: "ok" } | { kind: "bad"; message: string };
@@ -15,13 +15,19 @@ type State = { kind: "working" } | { kind: "ok" } | { kind: "bad"; message: stri
 function Verify() {
   const params = useSearchParams();
   const token = (params.get("token") || "").trim();
-  const { user, setUser } = useAuth();
+  const router = useRouter();
+  const { user, loading, setUser } = useAuth();
   const [state, setState] = useState<State>(token ? { kind: "working" } : { kind: "bad", message: "This link is missing its code. Open it straight from the email." });
   const sent = useRef(false);
 
   useEffect(() => {
     // Tokens are single-use: never submit twice (React strict mode runs effects twice in development).
-    if (!token || sent.current) return;
+    if (!token || sent.current || loading) return;
+    // The link only verifies the account it was sent to, so it needs that account's session.
+    if (!user) {
+      router.replace(loginUrl(`${ROUTES.verifyEmail}?token=${encodeURIComponent(token)}`));
+      return;
+    }
     sent.current = true;
     api
       .verifyEmail(token)
@@ -30,7 +36,7 @@ function Verify() {
         setUser((cur) => (cur && cur.id === u.id ? u : cur));
       })
       .catch((e) => setState({ kind: "bad", message: errorText(e, "This verification link is invalid or has expired.") }));
-  }, [token, setUser]);
+  }, [token, user, loading, router, setUser]);
 
   if (state.kind === "working") {
     return (

@@ -164,7 +164,14 @@ export function buildSourcesBlock(sources: PromptSource[], budget: number): stri
     return `[${s.n}] ${s.title}${where}`;
   });
   const headerChars = headers.reduce((a, h) => a + h.length + 2, 0);
-  const contents = sources.map((s) => s.content.replace(/=== (BEGIN|END) SOURCES ===/g, "").trim());
+  // Source text is untrusted: drop the block markers and turn a line that looks like a numbered
+  // source header ("[2] Eurostat — ec.europa.eu") into "(2) …", so a page can't pose as another source.
+  const contents = sources.map((s) =>
+    s.content
+      .replace(/=== (BEGIN|END) SOURCES ===/g, "")
+      .replace(/^(\s*)\[(\d{1,3})\](?=\s)/gm, "$1($2)")
+      .trim()
+  );
   const alloc = fairSplit(
     contents.map((c) => c.length),
     Math.max(sources.length * 200, budget - headerChars)

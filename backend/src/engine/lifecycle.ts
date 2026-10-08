@@ -13,6 +13,7 @@
 
 import { Prisma, type ExceptionKind, type ExecutionStatus, type RiskLevel } from "@prisma/client";
 import { prisma } from "../db";
+import { assertPlanningQuotaInTx } from "../lib/usageLimits";
 import { HttpError } from "../lib/http";
 import { log } from "../lib/log";
 import { onAttentionNeeded, onExecutionSettled } from "../lib/notify";
@@ -27,7 +28,8 @@ type Tx = Prisma.TransactionClient;
 export const EXEC_TICK = "execution.tick";
 export const execKey = (executionId: string) => `exec:${executionId}`;
 export const TERMINAL: ExecutionStatus[] = ["COMPLETED", "FAILED", "CANCELLED"];
-export const RUNNABLE: ExecutionStatus[] = ["PLANNING", "RUNNING", "VERIFYING"];
+/** States the worker moves forward by itself (everything else waits on a person or is final). */
+export const RUNNABLE: ExecutionStatus[] = ["PLANNING", "PLANNED", "RUNNING", "VERIFYING"];
 const NON_TERMINAL: ExecutionStatus[] = ["PLANNING", "PLANNED", "WAITING_FOR_APPROVAL", "RUNNING", "BLOCKED", "VERIFYING"];
 
 export async function enqueueTick(executionId: string, delayMs = 0, db: Tx | typeof prisma = prisma): Promise<void> {
@@ -49,6 +51,7 @@ export async function createExecution(
   tx: Tx,
   args: { objectiveId: string; orgId: string; triggeredById: string | null; title: string; announce?: Prisma.InputJsonValue }
 ): Promise<{ id: string }> {
+  await assertPlanningQuotaInTx(tx, args.orgId);
   const last = await tx.execution.findFirst({ where: { objectiveId: args.objectiveId }, orderBy: { attempt: "desc" }, select: { attempt: true } });
   const ex = await tx.execution.create({
     data: { objectiveId: args.objectiveId, orgId: args.orgId, attempt: (last?.attempt ?? 0) + 1, status: "PLANNING", triggeredById: args.triggeredById },
@@ -197,6 +200,7 @@ export async function decideApproval(org: OrgContext, approvalId: string, decisi
       await emit(tx, { executionId: ex.id, orgId: ex.orgId, type: "EXECUTION_CANCELLED", actor: "user", message: "Execution cancelled — nothing was charged" });
     }
   });
+  log.info("execution.approval_decided", { executionId: approval.executionId, orgId: org.orgId, objectiveId: approval.objectiveId, approvalId, decision, by: org.userId });
   return { executionId: approval.executionId };
 }
 
@@ -284,6 +288,7 @@ export async function resolveException(org: OrgContext, exceptionId: string, act
         const obj = await tx.objective.findUniqueOrThrow({ where: { id: ex.objectiveId }, select: { contextNotes: true } });
         await tx.objective.update({ where: { id: ex.objectiveId }, data: { contextNotes: [obj.contextNotes.trim(), note].filter(Boolean).join("\n\n").slice(0, 8000) } });
       }
+      await assertPlanningQuotaInTx(tx, ex.orgId);
       if (!(await flip(tx, ex.id, ["BLOCKED"], "PLANNING"))) throw new HttpError(409, "This execution is no longer blocked.");
       await mirror(tx, ex.objectiveId, "PLANNING");
       await emit(tx, { ...base, type: "PLANNING_STARTED", actor: "chief_of_staff", message: action === "provide_info" ? "Chief of Staff is re-planning with your answer" : "Chief of Staff is planning with stated assumptions" });
@@ -318,6 +323,7 @@ export async function resolveException(org: OrgContext, exceptionId: string, act
       await enqueueTick(ex.id, 0, tx);
     }
   });
+  log.info("execution.exception_resolved", { executionId: exc.executionId, orgId: org.orgId, exceptionId, kind: exc.kind, action, by: org.userId });
   return { executionId: exc.executionId };
 }
 

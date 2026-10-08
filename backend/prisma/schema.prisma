@@ -739,6 +739,7 @@ model Execution {
   @@index([orgId, createdAt])
   @@index([objectiveId, attempt])
   @@index([status, lastProgressAt])
+  @@index([createdAt]) // daily execution quota
 }
 
 model ExecutionStep {
@@ -797,6 +798,7 @@ model ExecutionEvent {
 
   @@index([executionId, id])
   @@index([orgId, id])
+  @@index([orgId, type, createdAt]) // daily planning quota
 }
 
 // Postgres-backed durable job queue (claimed with FOR UPDATE SKIP LOCKED).

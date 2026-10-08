@@ -94,6 +94,7 @@ if `NODE_ENV` was forgotten. The provider refuses the mock again at call time.
    cd backend && npm ci && npm run build
    DATABASE_URL="<neon pre-v4 branch URL>" node dist/ops/migrate.js
    # expect: "database state: legacy-db-push" → baseline 0_init → apply 20261007120000_outcome_execution_system
+   #         and 20261008090000_planning_quota_indexes
    DATABASE_URL="<neon pre-v4 branch URL>" npx prisma migrate diff \
      --from-url "<neon pre-v4 branch URL>" --to-schema-datamodel prisma/schema.prisma --exit-code
    # expect: "No difference detected."

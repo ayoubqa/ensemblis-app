@@ -228,6 +228,12 @@ describe("outcome measurement direction", () => {
     expect(measureCriterion(c, { index: 1, status: "MET", measuredValue: 38, measurement: "CAC €38", explanation: "" }).result).toBe("MET");
     expect(measureCriterion(c, { index: 1, status: "NOT_MET", measuredValue: 120, measurement: "CAC €120", explanation: "" }).result).toBe("NOT_MET");
   });
+  it("'reduce X to N' is a cap too: a smaller number is better", () => {
+    const c = { ...base, description: "Reduce churn to 5 percent", targetValue: 5, unit: "percent" };
+    expect(measureCriterion(c, { index: 1, status: "MET", measuredValue: 4, measurement: "4%", explanation: "" }).result).toBe("MET");
+    const cut = { ...base, description: "Cut onboarding time to 2 days", targetValue: 2, unit: "days" };
+    expect(measureCriterion(cut, { index: 1, status: "NOT_MET", measuredValue: 6, measurement: "6 days", explanation: "" }).result).toBe("NOT_MET");
+  });
   it("a count never upgrades the verifier's verdict", () => {
     const c = { ...base, description: "Recommend 3 markets", targetValue: 3, unit: "markets" };
     expect(measureCriterion(c, { index: 1, status: "PARTIALLY_MET", measuredValue: 3, measurement: "3 markets, 2 unsupported", explanation: "" }).result).toBe("PARTIALLY_MET");
@@ -261,5 +267,28 @@ describe("criteria suggestions from a real model", () => {
     expect(s.source).toBe("model");
     expect(s.criteria.map((c) => c.description)).toEqual(["Recommend three markets, ranked"]);
     expect(s.questions[0]).toHaveLength(200);
+  });
+});
+
+describe("criteria suggestions under load", () => {
+  it("fall back to the heuristic instead of queueing behind busy model calls", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    let calls = 0;
+    setLLMHandlerForTests(async () => {
+      calls++;
+      await gate;
+      return JSON.stringify({ title: "European markets", criteria: [{ description: "Three markets, ranked" }], questions: [] });
+    });
+    const statement = "Recommend the three best European markets for our product.";
+    // Fill every "fast" slot and the allowed queue, then one more call.
+    const busy = Array.from({ length: 6 }, () => suggestForStatement(statement, ""));
+    await new Promise((r) => setTimeout(r, 20));
+    const extra = await suggestForStatement(statement, "");
+    expect(extra.source).toBe("heuristic");
+    release();
+    const done = await Promise.all(busy);
+    expect(done.some((s) => s.source === "model")).toBe(true);
+    expect(calls).toBeLessThan(7);
   });
 });

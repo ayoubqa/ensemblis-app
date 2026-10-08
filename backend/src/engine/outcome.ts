@@ -19,7 +19,7 @@ export interface CriterionMeasurement {
   method: "model-assessed" | "deterministic" | "not-assessed";
 }
 
-const UPPER_BOUND = /\b(under|below|less than|fewer than|at most|no more than|max(imum)?|within|cap(ped)?|up to|lower than|not exceed(ing)?|or less)\b/i;
+const UPPER_BOUND = /\b(under|below|less than|fewer than|at most|no more than|max(imum)?|within|cap(ped)?|up to|lower than|not exceed(ing)?|or less|reduc(e|es|ed|ing)|cut|lower(s|ed|ing)?|decreas(e|es|ed|ing)|shrink(s|ing)?)\b/i;
 const RANK: Record<CriterionResult, number> = { MET: 3, PARTIALLY_MET: 2, NOT_MET: 1, UNKNOWN: 0 };
 /** The more conservative of two results (UNKNOWN from the model doesn't override a count). */
 function worse(counted: CriterionResult, judged: CriterionResult): CriterionResult {

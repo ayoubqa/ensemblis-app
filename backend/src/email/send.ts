@@ -3,6 +3,7 @@
 // Never throws: an email problem must never break a request or a task run.
 
 import { config } from "../config";
+import { log } from "../lib/log";
 import { recordUsage } from "../lib/usage";
 
 export interface EmailMessage {
@@ -38,11 +39,12 @@ export async function sendEmail(msg: EmailMessage): Promise<boolean> {
     });
     ok = res.ok;
     if (!ok) {
-      const detail = (await res.text().catch(() => "")).slice(0, 300);
-      console.warn(`[email] Resend rejected "${msg.subject}" (HTTP ${res.status}): ${detail}`);
+      // Only Resend's error name: subjects carry objective titles and error bodies can echo addresses.
+      const body = (await res.json().catch(() => null)) as { name?: unknown } | null;
+      log.warn("email.send_failed", { status: res.status, error: typeof body?.name === "string" ? body.name.slice(0, 80) : undefined });
     }
   } catch (err) {
-    console.warn(`[email] could not send "${msg.subject}":`, err instanceof Error ? err.message : err);
+    log.warn("email.send_failed", { error: err instanceof Error ? err.name : "unknown" });
   }
   await recordUsage({ kind: "email", provider: "resend", ok });
   return ok;

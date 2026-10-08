@@ -59,6 +59,15 @@ export const config = {
   maxTasksPerUserPerDay: int("MAX_TASKS_PER_USER_PER_DAY", 10),
   maxTasksPerDayGlobal: int("MAX_TASKS_PER_DAY_GLOBAL", 300),
 
+  // Planning caps. Planning (and re-planning) calls the main model before anything is charged, so
+  // it has its own limits — otherwise free sign-ups or guests could drain the AI quota for everyone.
+  planning: {
+    perOrgPerDay: int("MAX_PLANS_PER_ORG_PER_DAY", Math.max(10, 4 * int("MAX_TASKS_PER_USER_PER_DAY", 10)), 1),
+    perGuestPerDay: int("MAX_PLANS_PER_GUEST_PER_DAY", 3, 1),
+    globalPerDay: int("MAX_PLANS_PER_DAY_GLOBAL", Math.max(50, 4 * int("MAX_TASKS_PER_DAY_GLOBAL", 300)), 1),
+    concurrentPerOrg: int("MAX_CONCURRENT_PLANNING_PER_ORG", 3, 1),
+  },
+
   maxDescriptionLength: int("MAX_DESCRIPTION_LENGTH", 4000, 10),
 
   // Per-IP rate limits
@@ -197,8 +206,8 @@ export function productionConfigProblems(role: "api" | "worker" = "api"): string
 }
 
 /** Non-fatal production warnings, logged on boot. */
-export function productionConfigWarnings(): string[] {
-  if (!isProduction) return [];
+export function productionConfigWarnings(role: "api" | "worker" = "api"): string[] {
+  if (!mockAIForbidden()) return [];
   const warnings: string[] = [];
   const provider = (process.env.AI_PROVIDER || "ollama").toLowerCase();
   if (provider === "openai" && !process.env.OPENAI_API_KEY) {
@@ -213,8 +222,12 @@ export function productionConfigWarnings(): string[] {
   if (config.adminEmails.length && !config.email.enabled) {
     warnings.push("ADMIN_EMAILS is set but email isn't configured: admins must verify their address, so the owner dashboard stays locked until RESEND_API_KEY and EMAIL_FROM are set (or the address is verified with `npm run ops:verify-email`).");
   }
-  if (!process.env.CORS_ORIGIN) {
+  if (role === "api" && !process.env.CORS_ORIGIN) {
     warnings.push("CORS_ORIGIN is not set — only http://localhost:3000 may call this API, so your deployed frontend will be blocked.");
+  }
+  // The worker has no CORS_ORIGIN to fall back on, and it sends most execution emails.
+  if (config.email.enabled && !process.env.APP_URL?.trim() && (role === "worker" || !process.env.CORS_ORIGIN)) {
+    warnings.push(`APP_URL is not set — links in emails point to ${config.appUrl}. Set it to the frontend URL (the same value on the API and the worker).`);
   }
   return warnings;
 }

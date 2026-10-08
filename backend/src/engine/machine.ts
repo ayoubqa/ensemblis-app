@@ -1,7 +1,8 @@
 // The execution state machine, run by the worker one tick at a time.
 //
 // A tick does ONE bounded unit of work for one execution and persists it:
-//   PLANNING  → the Chief of Staff plans (→ BLOCKED / WAITING_FOR_APPROVAL / RUNNING)
+//   PLANNING  → the Chief of Staff plans (→ PLANNED)
+//   PLANNED   → the plan's next state (→ BLOCKED / WAITING_FOR_APPROVAL / RUNNING)
 //   RUNNING   → the next runnable step runs (or → VERIFYING when all are done)
 //   VERIFYING → the verification gate runs (→ revision / BLOCKED / COMPLETED)
 // After every tick the worker re-enqueues the execution while it is still in
@@ -51,6 +52,9 @@ export async function executionTick(executionId: string): Promise<TickResult> {
   switch (ex.status) {
     case "PLANNING":
       await planPhase(ex);
+      return {};
+    case "PLANNED":
+      await afterPlan(ex.id);
       return {};
     case "RUNNING":
       return advancePhase(ex);
@@ -155,7 +159,6 @@ async function planPhase(ex: Execution): Promise<void> {
     return true;
   });
   if (!persisted) return;
-  const base = { id: ex.id, orgId: ex.orgId, objectiveId: objective.id };
   log.info("execution.planned", {
     executionId: ex.id,
     orgId: ex.orgId,
@@ -167,12 +170,30 @@ async function planPhase(ex: Execution): Promise<void> {
     blockingQuestions: plan.missingInformation.filter((q) => q.blocking).length,
     normalizations: plan.notes.length,
   });
+  await afterPlan(ex.id);
+}
+
+/**
+ * PLANNED → what the persisted plan calls for: a person's answers (BLOCKED), an approval
+ * (WAITING_FOR_APPROVAL) or the start (RUNNING). Also a tick of its own, so an error here (a
+ * dropped connection while charging, a worker killed half-way) is retried instead of leaving the
+ * execution PLANNED for good. Every transition is guarded on PLANNED, so a repeat is harmless.
+ */
+async function afterPlan(executionId: string): Promise<void> {
+  const ex = await prisma.execution.findUnique({ where: { id: executionId } });
+  if (!ex || ex.status !== "PLANNED" || !ex.plan) return;
+  const plan = ex.plan as unknown as Plan;
+  const objective = await prisma.objective.findUniqueOrThrow({
+    where: { id: ex.objectiveId },
+    include: { criteria: { orderBy: { order: "asc" } }, organization: true },
+  });
+  const base = { id: ex.id, orgId: ex.orgId, objectiveId: objective.id };
 
   // 1. Missing information the result depends on → ask a person before spending anything.
   const blocking = plan.missingInformation.filter((q) => q.blocking);
   if (blocking.length) {
-    const completeness = contextCompleteness(ctx);
-    await prisma.$transaction((tx) =>
+    const completeness = contextCompleteness(await getCompanyContext(ex.orgId));
+    const opened = await prisma.$transaction((tx) =>
       openException(
         tx,
         {
@@ -190,7 +211,10 @@ async function planPhase(ex: Execution): Promise<void> {
         ["PLANNED"]
       )
     );
-    notifyAttention(ex.id, "The Chief of Staff has a question", blocking[0].question);
+    if (opened) {
+      log.info("execution.blocked", { executionId: ex.id, orgId: ex.orgId, objectiveId: ex.objectiveId, kind: "MISSING_INFORMATION", exceptionId: opened });
+      notifyAttention(ex.id, "The Chief of Staff has a question", blocking[0].question);
+    }
     return;
   }
 
@@ -205,7 +229,7 @@ async function planPhase(ex: Execution): Promise<void> {
   });
   if (decision.required) {
     const kind = decision.kind ?? "PLAN";
-    await prisma.$transaction((tx) =>
+    const requested = await prisma.$transaction((tx) =>
       requestApproval(tx, {
         execution: base,
         kind,
@@ -218,7 +242,8 @@ async function planPhase(ex: Execution): Promise<void> {
         recommendedDecision: decision.recommendedDecision,
       })
     );
-    notifyAttention(ex.id, "A plan is waiting for your approval", `${plan.steps.length} steps, estimated ${eur(plan.estimatedCostCents)}.`);
+    if (requested) log.info("execution.approval_requested", { executionId: ex.id, orgId: ex.orgId, objectiveId: ex.objectiveId, kind, estimatedCostCents: plan.estimatedCostCents });
+    if (requested) notifyAttention(ex.id, "A plan is waiting for your approval", `${plan.steps.length} steps, estimated ${eur(plan.estimatedCostCents)}.`);
     return;
   }
 
@@ -230,10 +255,11 @@ async function planPhase(ex: Execution): Promise<void> {
 async function startOrBlock(executionId: string, actorUserId: string, base: { id: string; orgId: string; objectiveId: string }): Promise<void> {
   try {
     await prisma.$transaction((tx) => startInTx(tx, executionId, actorUserId, ["PLANNED"]));
+    log.info("execution.started", { executionId, orgId: base.orgId, objectiveId: base.objectiveId, by: "policy" });
   } catch (err) {
     if (err instanceof HttpError && (err.status === 402 || err.status === 429 || err.status === 403)) {
       const funds = err.status === 402;
-      await prisma.$transaction((tx) =>
+      const opened = await prisma.$transaction((tx) =>
         openException(
           tx,
           {
@@ -250,7 +276,10 @@ async function startOrBlock(executionId: string, actorUserId: string, base: { id
           ["PLANNED"]
         )
       );
-      notifyAttention(executionId, funds ? "Not enough balance to start" : "An execution couldn't start", err.message);
+      if (opened) {
+        log.info("execution.blocked", { executionId, orgId: base.orgId, objectiveId: base.objectiveId, kind: funds ? "INSUFFICIENT_FUNDS" : "POLICY_BLOCKED", exceptionId: opened });
+        notifyAttention(executionId, funds ? "Not enough balance to start" : "An execution couldn't start", err.message);
+      }
       return;
     }
     throw err;
@@ -391,10 +420,11 @@ async function runOneStep(ex: Execution, step: ExecutionStep, steps: ExecutionSt
       }
       return { nextRunInMs: delay };
     }
-    await prisma.executionStep.updateMany({
+    const failed = await prisma.executionStep.updateMany({
       where: { id: step.id, status: "RUNNING", attempts: attempt },
       data: { status: "FAILED", error: e.message.slice(0, 2000), partialOutput: null, completedAt: new Date() },
     });
+    if (failed.count === 0) return {}; // cancelled meanwhile, or a newer attempt owns the step
     await emit(prisma, { executionId: ex.id, orgId: ex.orgId, stepId: step.id, type: "STEP_FAILED", actor: step.executive, message: `“${step.title}” failed: ${e.message.slice(0, 300)}` });
     return blockOnStep(ex, step, e.message, e.kind === "policy");
   }
@@ -402,7 +432,8 @@ async function runOneStep(ex: Execution, step: ExecutionStep, steps: ExecutionSt
 
 async function blockOnStep(ex: Execution, step: ExecutionStep, message: string, policy: boolean): Promise<TickResult> {
   const config = /isn't configured|API key|recognise the model/i.test(message);
-  await prisma.$transaction((tx) =>
+  const tooLarge = /too large for the AI model/i.test(message);
+  const opened = await prisma.$transaction((tx) =>
     openException(
       tx,
       {
@@ -415,7 +446,9 @@ async function blockOnStep(ex: Execution, step: ExecutionStep, message: string, 
         whyItMatters: "The remaining steps depend on this one, so the execution is paused. Completed work is kept.",
         recommendation: policy
           ? "Cancel this execution. This step needs a permission your organization doesn't grant."
-          : config
+          : tooLarge
+            ? "This step's input is larger than the AI model accepts. Shorten the objective's context notes or remove large Company Context documents, then retry. Or cancel for a refund of the work that didn't run."
+            : config
             ? "The AI provider is misconfigured on the server. Ask the operator to fix it, then retry. Or cancel for a refund of the work that didn't run."
             : "Retry the step — most failures are temporary (rate limits, timeouts). If it keeps failing, cancel and you'll be refunded for the work that didn't run.",
         neededFromUser: policy ? "Cancel the execution." : "Choose Retry or Cancel.",
@@ -424,7 +457,10 @@ async function blockOnStep(ex: Execution, step: ExecutionStep, message: string, 
       ["RUNNING"]
     )
   );
-  notifyAttention(ex.id, "An execution needs your attention", `“${step.title}” couldn't be completed.`);
+  if (opened) {
+    log.info("execution.blocked", { executionId: ex.id, orgId: ex.orgId, objectiveId: ex.objectiveId, kind: policy ? "POLICY_BLOCKED" : "STEP_FAILED", stepId: step.id, exceptionId: opened });
+    notifyAttention(ex.id, "An execution needs your attention", `“${step.title}” couldn't be completed.`);
+  }
   return {};
 }
 
@@ -470,7 +506,7 @@ async function verifyPhase(ex: Execution): Promise<void> {
       });
       return;
     }
-    await prisma.$transaction((tx) =>
+    const opened = await prisma.$transaction((tx) =>
       openException(
         tx,
         {
@@ -488,7 +524,10 @@ async function verifyPhase(ex: Execution): Promise<void> {
         ["VERIFYING"]
       )
     );
-    notifyAttention(ex.id, "A result failed verification", v.summary);
+    if (opened) {
+      log.info("execution.blocked", { executionId: ex.id, orgId: ex.orgId, objectiveId: ex.objectiveId, kind: "VERIFICATION_FAILED", exceptionId: opened });
+      notifyAttention(ex.id, "A result failed verification", v.summary);
+    }
     return;
   }
   await finalize(ex, v.model, false);

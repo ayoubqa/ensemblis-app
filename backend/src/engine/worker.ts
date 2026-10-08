@@ -20,7 +20,7 @@ import { prisma } from "../db";
 import { log } from "../lib/log";
 import { EXEC_TICK, RUNNABLE, enqueueTick, failExecution } from "./lifecycle";
 import { executionTick, type TickResult } from "./machine";
-import { claimJobs, completeJob, failJob, renewLease } from "./queue";
+import { claimJobs, completeJob, failJob, releaseClaims, renewLease } from "./queue";
 
 export const LEASE_MS = Number(process.env.WORKER_LEASE_MS) || 120_000;
 
@@ -60,6 +60,7 @@ export interface WorkerOptions {
 export class Worker {
   readonly id = `${os.hostname()}:${process.pid}:${randomBytes(3).toString("hex")}`;
   private active = new Map<string, Promise<void>>();
+  private polling: Promise<void> | null = null;
   private stopping = false;
   private timer: NodeJS.Timeout | null = null;
   private lastMaintenance = 0;
@@ -76,21 +77,30 @@ export class Worker {
     const loop = async () => {
       if (this.stopping) return;
       try {
-        await this.poll();
+        this.polling = this.poll();
+        await this.polling;
       } catch (err) {
         log.error("worker.poll_failed", { workerId: this.id, error: err });
+      } finally {
+        this.polling = null;
       }
       if (!this.stopping) this.timer = setTimeout(loop, this.pollMs);
     };
     this.timer = setTimeout(loop, 250);
   }
 
+  /** Stops claiming, waits for running jobs up to `graceMs`, then re-queues what's left. The caller exits next. */
   async stop(graceMs = 25_000): Promise<void> {
     this.stopping = true;
     if (this.timer) clearTimeout(this.timer);
+    // Wait for an in-flight poll too: it may still claim (it re-checks `stopping` first, but can be mid-claim).
+    await this.polling?.catch(() => undefined);
     const all = Promise.allSettled([...this.active.values()]);
     await Promise.race([all, new Promise((r) => setTimeout(r, graceMs))]);
-    log.info("worker.stopped", { workerId: this.id, unfinished: this.active.size });
+    const unfinished = this.active.size;
+    // Without this, an unfinished job keeps its lease (up to LEASE_MS) and sits idle until it expires.
+    const released = unfinished ? await releaseClaims(this.id).catch(() => 0) : 0;
+    log.info("worker.stopped", { workerId: this.id, unfinished, released });
   }
 
   private async poll(): Promise<void> {
@@ -100,11 +110,12 @@ export class Worker {
       await this.opts.maintenance().catch((err) => log.error("worker.maintenance_failed", { error: err }));
     }
     const free = this.concurrency - this.active.size;
-    if (free <= 0) return;
+    if (free <= 0 || this.stopping) return; // stop() may have begun during maintenance
     const jobs = await claimJobs(this.id, free, LEASE_MS);
     for (const job of jobs) {
-      const p = this.run(job).finally(() => this.active.delete(job.id));
-      this.active.set(job.id, p);
+      const key = `${job.id}#${job.attempts}`; // a re-claim of the same job is a different run
+      const p = this.run(job).finally(() => this.active.delete(key));
+      this.active.set(key, p);
     }
   }
 
@@ -112,24 +123,35 @@ export class Worker {
   async run(job: Job): Promise<void> {
     const handler = HANDLERS[job.kind];
     const heartbeat = setInterval(() => {
-      renewLease(job.id, this.id, LEASE_MS).catch(() => undefined);
+      renewLease(job, this.id, LEASE_MS).catch(() => undefined);
     }, Math.max(1000, Math.floor(LEASE_MS / 4)));
     const started = Date.now();
+    const executionId = job.kind === EXEC_TICK ? String((job.payload as { executionId?: string })?.executionId ?? "") || undefined : undefined;
+    let result: TickResult | void;
     try {
       if (!handler) throw new Error(`No handler for job kind "${job.kind}"`);
-      const result = await handler(job);
-      await completeJob(job.id, this.id);
-      if (job.kind === EXEC_TICK) await afterExecutionJob(job, result);
-      log.debug("worker.job_done", { jobId: job.id, kind: job.kind, ms: Date.now() - started });
+      result = await handler(job);
     } catch (err) {
+      clearInterval(heartbeat);
       const message = err instanceof Error ? err.message : String(err);
       const outcome = await failJob(job, this.id, message).catch(() => "retry" as const);
-      const executionId = job.kind === EXEC_TICK ? String((job.payload as { executionId?: string })?.executionId ?? "") || undefined : undefined;
       log.warn("worker.job_failed", { jobId: job.id, kind: job.kind, executionId, attempt: job.attempts, outcome, error: message.slice(0, 300) });
       if (outcome === "dead") await onDeadJob({ ...job, lastError: message });
-    } finally {
-      clearInterval(heartbeat);
+      return;
     }
+    clearInterval(heartbeat);
+    // The handler succeeded: from here on nothing may fail the job (or, on a last attempt, the execution).
+    // A lost claim or a failed follow-up is picked up by the recovery sweep (orphans).
+    try {
+      if (!(await completeJob(job, this.id))) {
+        log.warn("worker.claim_lost", { jobId: job.id, kind: job.kind, executionId, attempt: job.attempts });
+        return;
+      }
+      if (job.kind === EXEC_TICK) await afterExecutionJob(job, result);
+    } catch (err) {
+      log.error("worker.after_job_failed", { jobId: job.id, kind: job.kind, executionId, error: err });
+    }
+    log.info("worker.job_done", { jobId: job.id, kind: job.kind, executionId, attempt: job.attempts, ms: Date.now() - started });
   }
 }
 

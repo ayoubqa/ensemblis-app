@@ -138,3 +138,30 @@ export async function assertDailyQuotaInTx(tx: Prisma.TransactionClient, userId:
     );
   }
 }
+
+const PLAN_QUOTA_LOCK = "daily-plan-quota";
+
+/**
+ * Planning caps, checked wherever the Chief of Staff starts (or restarts) planning: per
+ * organization per UTC day (lower for guest trials), server-wide new executions per day, and
+ * concurrent planning per organization. Serialised with an advisory lock, like the run quota.
+ */
+export async function assertPlanningQuotaInTx(tx: Prisma.TransactionClient, orgId: string): Promise<void> {
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${PLAN_QUOTA_LOCK}))`;
+  const since = startOfTodayUTC();
+  const p = config.planning;
+  const [org, orgPlans, planningNow, globalNew] = await Promise.all([
+    tx.organization.findUnique({ where: { id: orgId }, select: { owner: { select: { isGuest: true } } } }),
+    tx.executionEvent.count({ where: { orgId, type: "PLANNING_STARTED", createdAt: { gte: since } } }),
+    tx.execution.count({ where: { orgId, status: "PLANNING" } }),
+    tx.execution.count({ where: { createdAt: { gte: since } } }),
+  ]);
+  if (globalNew >= p.globalPerDay) throw globalLimitError();
+  if (planningNow >= p.concurrentPerOrg) {
+    throw new HttpError(429, `The Chief of Staff is already planning ${planningNow} objectives for your organization. Wait for one of those plans before starting another.`);
+  }
+  const cap = org?.owner.isGuest ? p.perGuestPerDay : p.perOrgPerDay;
+  if (orgPlans >= cap) {
+    throw new DailyLimitError("user", `Your organization has reached today's limit of ${cap} plans. Limits reset at midnight UTC (in ${resetsIn()}).`);
+  }
+}

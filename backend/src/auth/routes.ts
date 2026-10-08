@@ -350,12 +350,18 @@ export async function requestEmailVerification(userId: string): Promise<boolean>
   }
 }
 
-/** Consumes a verification token (single use). Returns the user id; throws 400 when invalid. */
-export async function consumeEmailVerification(token: string): Promise<string> {
+/**
+ * Consumes a verification token (single use) for the signed-in account. Returns the user id; throws
+ * 400 when invalid and 403 when the link belongs to another account. Requiring the session means a
+ * link opened in someone else's browser can't verify an account they don't control — an address
+ * registered by someone else would otherwise become verified (and, on ADMIN_EMAILS, an operator).
+ */
+export async function consumeEmailVerification(token: string, userId: string): Promise<string> {
   const invalid = () => new HttpError(400, "This verification link is invalid or has expired. Request a new one from Settings.");
   const row = await prisma.emailVerification.findUnique({ where: { tokenHash: hashVerifyToken(token) } });
   const now = new Date();
   if (!row || row.usedAt || row.expiresAt <= now) throw invalid();
+  if (row.userId !== userId) throw new HttpError(403, "This link was sent for a different account. Log in with the account that requested it, then open the link again.");
   await prisma.$transaction(async (tx) => {
     const used = await tx.emailVerification.updateMany({ where: { id: row.id, usedAt: null, expiresAt: { gt: now } }, data: { usedAt: now } });
     if (used.count === 0) throw invalid();
@@ -380,9 +386,10 @@ router.post(
 router.post(
   "/verify-email",
   resetPasswordLimiter,
-  ah(async (req, res) => {
+  requireAuth,
+  ah<AuthedRequest>(async (req, res) => {
     const { token } = parse(z.object({ token: z.string().trim().min(10).max(200) }), req.body);
-    const userId = await consumeEmailVerification(token);
+    const userId = await consumeEmailVerification(token, req.userId!);
     res.json({ ok: true, user: await loadPublicUser(userId) });
   })
 );

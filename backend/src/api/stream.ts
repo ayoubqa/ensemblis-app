@@ -25,17 +25,36 @@ interface Sub {
   cursor: number;
   partials: Map<string, number>; // stepId -> length sent
   quietTicks: number;
+  /** Ends the stream and unregisters it (idempotent). */
+  finish: () => void;
 }
 
 const watched = new Map<string, Set<Sub>>();
 const perUser = new Map<string, number>();
 let timer: NodeJS.Timeout | null = null;
+let polling = false;
 
+const writable = (res: Response) => !res.writableEnded && !res.destroyed;
+
+// Never write to an ended response: with no 'error' listener that throws ERR_STREAM_WRITE_AFTER_END
+// out of the timer and takes the whole process down.
 function send(res: Response, event: string, data: unknown, id?: number) {
+  if (!writable(res)) return;
   res.write(`${id !== undefined ? `id: ${id}\n` : ""}event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
 }
 
 async function pollOnce() {
+  // A slow pass (cold database, many streams) must not overlap the next one and pile up queries.
+  if (polling) return;
+  polling = true;
+  try {
+    await pollAll();
+  } finally {
+    polling = false;
+  }
+}
+
+async function pollAll() {
   for (const [executionId, subs] of watched) {
     if (!subs.size) {
       watched.delete(executionId);
@@ -58,6 +77,9 @@ async function pollOnce() {
         }
         for (const r of running) {
           const text = r.partialOutput ?? "";
+          // A client that isn't reading (frozen tab, stalled network) gets no more progress snapshots
+          // until it drains; the next snapshot carries the latest text anyway.
+          if (sub.res.writableNeedDrain) break;
           if (text.length && text.length !== sub.partials.get(r.id)) {
             sub.partials.set(r.id, text.length);
             send(sub.res, "step-progress", { stepId: r.id, partialOutput: text.slice(-12000) });
@@ -67,7 +89,7 @@ async function pollOnce() {
         sub.quietTicks = sent ? 0 : sub.quietTicks + 1;
         if (ex && TERMINAL.includes(ex.status) && !sent && sub.quietTicks > 2) {
           send(sub.res, "end", { status: ex.status });
-          sub.res.end();
+          sub.finish();
         }
       }
     } catch {
@@ -81,6 +103,9 @@ async function pollOnce() {
 }
 
 export function streamExecution(req: Request, res: Response, args: { executionId: string; userId: string }) {
+  // The client may have gone while auth and the ownership check ran: 'close' has already fired then,
+  // so a stream registered now would never be cleaned up (polled forever, holding a slot).
+  if (req.socket.destroyed || !writable(res)) return;
   const used = perUser.get(args.userId) ?? 0;
   if (used >= MAX_STREAMS_PER_USER) {
     res.status(429).json({ error: "Too many live views open. Close a tab and try again." });
@@ -98,19 +123,14 @@ export function streamExecution(req: Request, res: Response, args: { executionId
   res.flushHeaders?.();
   res.write(`retry: 3000\n\n`);
 
-  const sub: Sub = { res, cursor, partials: new Map(), quietTicks: 0 };
   let set = watched.get(args.executionId);
   if (!set) watched.set(args.executionId, (set = new Set()));
-  set.add(sub);
   perUser.set(args.userId, used + 1);
-  if (!timer) timer = setInterval(() => void pollOnce(), POLL_MS);
 
-  const heartbeat = setInterval(() => res.write(`: ping\n\n`), HEARTBEAT_MS);
-  const maxAge = setTimeout(() => {
-    send(res, "reconnect", { after: sub.cursor });
-    res.end();
-  }, MAX_STREAM_MS);
+  let done = false;
   const cleanup = () => {
+    if (done) return;
+    done = true;
     clearInterval(heartbeat);
     clearTimeout(maxAge);
     set!.delete(sub);
@@ -118,5 +138,26 @@ export function streamExecution(req: Request, res: Response, args: { executionId
     if (n > 0) perUser.set(args.userId, n);
     else perUser.delete(args.userId);
   };
+  const sub: Sub = {
+    res,
+    cursor,
+    partials: new Map(),
+    quietTicks: 0,
+    finish: () => {
+      cleanup();
+      if (writable(res)) res.end();
+    },
+  };
+  set.add(sub);
+  if (!timer) timer = setInterval(() => void pollOnce(), POLL_MS);
+
+  const heartbeat = setInterval(() => {
+    if (writable(res)) res.write(`: ping\n\n`);
+  }, HEARTBEAT_MS);
+  const maxAge = setTimeout(() => {
+    send(res, "reconnect", { after: sub.cursor });
+    sub.finish();
+  }, MAX_STREAM_MS);
   res.on("close", cleanup);
+  res.on("error", cleanup);
 }

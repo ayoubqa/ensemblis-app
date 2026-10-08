@@ -32,13 +32,27 @@ describe("authentication & authorization", () => {
   });
 
   it("email verification tokens are single-use", async () => {
-    const { user } = await createUser();
+    const { user, auth } = await createUser();
     await prisma.emailVerification.create({ data: { userId: user.id, tokenHash: hashVerifyToken("tok-1234567890"), expiresAt: new Date(Date.now() + 3600_000) } });
-    await consumeEmailVerification("tok-1234567890");
+    await consumeEmailVerification("tok-1234567890", user.id);
     expect((await prisma.user.findUniqueOrThrow({ where: { id: user.id } })).emailVerifiedAt).not.toBeNull();
-    await expect(consumeEmailVerification("tok-1234567890")).rejects.toThrow(/invalid or has expired/);
-    const r = await api().post("/api/auth/verify-email").send({ token: "tok-1234567890" }).expect(400);
+    await expect(consumeEmailVerification("tok-1234567890", user.id)).rejects.toThrow(/invalid or has expired/);
+    const r = await api().post("/api/auth/verify-email").set(auth).send({ token: "tok-1234567890" }).expect(400);
     expect(r.body.error).toMatch(/invalid/);
+  });
+
+  it("a verification link only works in the session of the account it was sent to", async () => {
+    // Someone registers the operator's address first; the operator opens the emailed link.
+    const squatter = await createUser({ email: "owner@example.com" });
+    const operator = await createUser({ email: "someone-else@example.com" });
+    await prisma.emailVerification.create({ data: { userId: squatter.user.id, tokenHash: hashVerifyToken("tok-squatter-123"), expiresAt: new Date(Date.now() + 3600_000) } });
+    await api().post("/api/auth/verify-email").send({ token: "tok-squatter-123" }).expect(401);
+    const r = await api().post("/api/auth/verify-email").set(operator.auth).send({ token: "tok-squatter-123" }).expect(403);
+    expect(r.body.error).toMatch(/different account/);
+    expect((await prisma.user.findUniqueOrThrow({ where: { id: squatter.user.id } })).emailVerifiedAt).toBeNull();
+    // The rightful session can still use it (the failed attempts didn't consume it).
+    const ok = await api().post("/api/auth/verify-email").set(squatter.auth).send({ token: "tok-squatter-123" }).expect(200);
+    expect(ok.body.user.id).toBe(squatter.user.id);
   });
 
   it("completing a password reset also verifies the address", async () => {

@@ -694,10 +694,16 @@ export function apiUrl(path: string): string {
   return `${API_URL}${path}`;
 }
 
+// These answer 401 for a wrong password, which says nothing about the session in this browser (a
+// guest who mistypes their real account's password must keep the trial).
+const CREDENTIAL_CHECKS = new Set(["/api/auth/login", "/api/auth/signup", "/api/auth/forgot", "/api/auth/reset"]);
+
 /**
- * Every request goes through here. A 401 on a request that carried a token
- * means the session ended (expired, password changed, account removed): the
- * token is dropped and UNAUTHORIZED_EVENT tells the app to sign out.
+ * Every request goes through here. A 401 means the session ended (expired,
+ * password changed, account removed, or signed out in another tab): the token
+ * that failed is dropped and UNAUTHORIZED_EVENT tells the app to sign out —
+ * unless another tab stored a different token meanwhile (e.g. a password change
+ * issues a new one), which stays.
  */
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const token = getToken();
@@ -715,8 +721,8 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
     throw new ApiError("Can't reach the Ensemblis server. Check your connection and try again.", 0);
   }
   const data = await res.json().catch(() => ({}));
-  if (res.status === 401 && token) {
-    setToken(null);
+  if (res.status === 401 && !CREDENTIAL_CHECKS.has(path) && getToken() === token) {
+    if (token) setToken(null);
     if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent(UNAUTHORIZED_EVENT, { detail: data.error }));
   }
   if (!res.ok) throw new ApiError(data.error || `Request failed (${res.status})`, res.status);
