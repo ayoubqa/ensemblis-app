@@ -95,6 +95,7 @@ Keyboard: ⌘K / Ctrl K palette · `?` shortcuts · `N` define an outcome · `G`
 npm run lint && npm run typecheck
 npm test                 # vitest: SSE parser + resume, redirect safety, status vocabulary, markdown/citations
 npm run e2e              # Playwright, needs backend built (cd ../backend && npm run build) and local Postgres
+npm run e2e:prod-like    # same suite with NODE_ENV=production and the OpenAI-compatible provider against a local stub
 E2E_TOUR=1 npm run e2e -- tour   # optional: screenshots of every main screen in test-results/tour/
 ```
 

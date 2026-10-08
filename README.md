@@ -102,6 +102,9 @@ cd frontend && npm run lint && npm run typecheck && npm test
 
 # end to end — real browser, real API, separate worker, mock AI
 cd backend && npm run build && cd ../frontend && npm run e2e
+# …and production-like: NODE_ENV=production, the real OpenAI-compatible provider code
+# against a local stub that speaks Groq's streaming format
+cd frontend && npm run e2e:prod-like
 
 # worker crash/deploy recovery with real processes (SIGKILL and SIGTERM mid-step)
 cd backend && npm run build && npm run check:worker-restart
