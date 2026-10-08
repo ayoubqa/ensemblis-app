@@ -4,11 +4,13 @@ import { afterEach, describe, expect, it } from "vitest";
 import { mockAIForbidden, productionConfigProblems } from "../../src/config";
 import { currentProvider } from "../../src/ai/llmProvider";
 
-const saved = { RENDER: process.env.RENDER, AI_PROVIDER: process.env.AI_PROVIDER };
+const saved = { RENDER: process.env.RENDER, AI_PROVIDER: process.env.AI_PROVIDER, JWT_SECRET: process.env.JWT_SECRET };
 afterEach(() => {
   if (saved.RENDER === undefined) delete process.env.RENDER;
   else process.env.RENDER = saved.RENDER;
   process.env.AI_PROVIDER = saved.AI_PROVIDER;
+  if (saved.JWT_SECRET === undefined) delete process.env.JWT_SECRET;
+  else process.env.JWT_SECRET = saved.JWT_SECRET;
 });
 
 describe("mock AI guard", () => {
@@ -25,5 +27,13 @@ describe("mock AI guard", () => {
     expect(mockAIForbidden()).toBe(true);
     expect(productionConfigProblems().join(" ")).toMatch(/AI_PROVIDER="mock"/);
     expect(() => currentProvider()).toThrow(/development and tests only/);
+  });
+
+  it("on a host without NODE_ENV, the API still refuses a missing JWT_SECRET (the worker doesn't need one)", () => {
+    process.env.RENDER = "true";
+    process.env.AI_PROVIDER = "openai";
+    delete process.env.JWT_SECRET;
+    expect(productionConfigProblems("api").join(" ")).toMatch(/JWT_SECRET/);
+    expect(productionConfigProblems("worker").join(" ")).not.toMatch(/JWT_SECRET/);
   });
 });

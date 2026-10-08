@@ -178,14 +178,16 @@ const INSECURE_SECRETS = new Set(["", "change-me-to-a-long-random-string", "dev-
  * In production, refuse to start with settings that would be unsafe or can't
  * work. Returns the list of problems (empty = OK).
  */
-export function productionConfigProblems(): string[] {
+export function productionConfigProblems(role: "api" | "worker" = "api"): string[] {
   const problems: string[] = [];
-  if (mockAIForbidden() && (process.env.AI_PROVIDER || "").trim().toLowerCase() === "mock") {
+  // Production, or a hosting platform with NODE_ENV forgotten: the same checks apply.
+  if (!mockAIForbidden()) return problems;
+  if ((process.env.AI_PROVIDER || "").trim().toLowerCase() === "mock") {
     problems.push('AI_PROVIDER="mock" is a scripted provider for development and tests only. Use "openai", "anthropic" or "ollama".');
   }
-  if (!isProduction) return problems;
+  // The worker never signs or verifies sessions; the API must not fall back to the public dev secret.
   const secret = process.env.JWT_SECRET?.trim() ?? "";
-  if (INSECURE_SECRETS.has(secret) || secret.length < 16) {
+  if (role === "api" && (INSECURE_SECRETS.has(secret) || secret.length < 16)) {
     problems.push("JWT_SECRET is missing, a placeholder, or shorter than 16 characters. Set it to a long random string.");
   }
   if (!process.env.DATABASE_URL?.trim()) {

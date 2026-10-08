@@ -12,76 +12,19 @@
 #                     a database created by the old `prisma db push` is baselined
 #                     first — no data is touched) and then serves the API.
 #   ensemblis-worker  background worker. Claims jobs from the Postgres queue and
-#                     runs executions, recovery and recurring objectives.
-# Background workers need a paid Render plan. On the free plan, delete the
-# worker service and set EMBEDDED_WORKER=true on the API instead (the API then
-# runs the worker in-process; a sleeping free instance pauses executions until
-# it wakes, and recovery resumes them).
-
-envVarGroups:
-  - name: ensemblis-shared
-    envVars:
-      - key: NODE_VERSION
-        value: "20"
-      - key: NODE_ENV
-        value: production
-      - key: DEMO_MODE
-        value: "true"
-      - key: JWT_SECRET
-        generateValue: true
-      - key: IP_HASH_SALT
-        generateValue: true
-
-      # --- AI provider: Groq free plan via its OpenAI-compatible API ---
-      - key: AI_PROVIDER
-        value: openai
-      - key: OPENAI_BASE_URL
-        value: https://api.groq.com/openai/v1
-      - key: OPENAI_MODEL
-        value: openai/gpt-oss-120b
-      # gpt-oss is a reasoning model: keep its hidden "thinking" short so answers aren't cut off.
-      - key: OPENAI_REASONING_EFFORT
-        value: low
-      - key: OPENAI_MAX_TOKENS
-        value: "8192"
-      # Smaller, faster model for planning helpers (criteria suggestions, memory).
-      - key: OPENAI_FAST_MODEL
-        value: openai/gpt-oss-20b
-      # Groq's free tier allows few tokens per minute: one model call at a time per process.
-      - key: MAX_CONCURRENT_LLM
-        value: "1"
-      - key: LLM_TIMEOUT_MS
-        value: "120000"
-
-      # --- cost & abuse protection ---
-      - key: STARTING_CREDITS_CENTS
-        value: "3000"
-      - key: DEMO_TOPUP_ENABLED
-        value: "true"
-      - key: DEMO_TOPUP_MAX_CENTS
-        value: "2000"
-      - key: MAX_TASKS_PER_USER_PER_DAY # executions started per user per UTC day
-        value: "5"
-      - key: MAX_TASKS_PER_DAY_GLOBAL # executions started across the server per UTC day
-        value: "150"
-      - key: MAX_DESCRIPTION_LENGTH
-        value: "4000"
-      - key: SEARCH_DAILY_BUDGET
-        value: "30"
-
-      # --- guest trial ("try without an account") ---
-      - key: GUEST_TRIAL_ENABLED
-        value: "true"
-      - key: GUEST_CREDITS_CENTS # covers one execution (plans are capped at 7 steps ≈ €21 incl. verification)
-        value: "3000"
-      - key: GUEST_MAX_TASKS # executions a guest may start
-        value: "1"
-      - key: GUEST_TRIALS_PER_IP_PER_DAY
-        value: "2"
-      - key: GUEST_TRIALS_PER_DAY
-        value: "30"
-      - key: GUEST_RETENTION_DAYS
-        value: "7"
+#                     runs executions, recovery and recurring objectives. It waits
+#                     for the API to finish migrating before it starts.
+#
+# COST: background workers need a paid Render plan (`plan: starter` below), and an
+# always-on worker keeps the database awake 24/7 (check your Neon plan's compute
+# allowance). To run on the free plan instead, change THIS FILE (a dashboard edit
+# is overwritten by the next Blueprint sync): delete the ensemblis-worker service
+# and set EMBEDDED_WORKER to "true" on ensemblis-api. Executions then run inside the
+# API and pause while the free instance sleeps.
+#
+# The API keeps the same service-level variables v3 had (JWT_SECRET and
+# IP_HASH_SALT keep their existing generated values). Settings both services use
+# are listed on each service: keep the copies identical.
 
 services:
   - type: web
@@ -100,8 +43,17 @@ services:
     healthCheckPath: /health
     autoDeploy: true
     envVars:
-      - fromGroup: ensemblis-shared
-      # The worker runs as its own service below. Set to "true" on the free plan without a worker.
+      - key: NODE_VERSION
+        value: "22"
+      - key: NODE_ENV
+        value: production
+      - key: DEMO_MODE
+        value: "true"
+      - key: JWT_SECRET
+        generateValue: true
+      - key: IP_HASH_SALT
+        generateValue: true
+      # The separate ensemblis-worker runs executions. "true" only without that service (see COST above).
       - key: EMBEDDED_WORKER
         value: "false"
 
@@ -135,21 +87,75 @@ services:
       - key: TURNSTILE_SECRET_KEY
         sync: false
 
+      # --- AI provider: Groq via its OpenAI-compatible API (same on the worker) ---
+      - key: AI_PROVIDER
+        value: openai
+      - key: OPENAI_BASE_URL
+        value: https://api.groq.com/openai/v1
+      - key: OPENAI_MODEL
+        value: openai/gpt-oss-120b
+      # gpt-oss is a reasoning model: keep its hidden "thinking" short so answers aren't cut off.
+      - key: OPENAI_REASONING_EFFORT
+        value: low
+      - key: OPENAI_MAX_TOKENS
+        value: "8192"
+      - key: OPENAI_FAST_MODEL
+        value: openai/gpt-oss-20b
+      # Groq's free tier allows few tokens per minute: one model call at a time per process.
+      - key: MAX_CONCURRENT_LLM
+        value: "1"
+      - key: LLM_TIMEOUT_MS
+        value: "120000"
+
+      # --- cost & abuse protection (same on the worker) ---
+      - key: STARTING_CREDITS_CENTS
+        value: "3000"
+      - key: DEMO_TOPUP_ENABLED
+        value: "true"
+      - key: DEMO_TOPUP_MAX_CENTS
+        value: "2000"
+      - key: MAX_TASKS_PER_USER_PER_DAY # executions started per user per UTC day
+        value: "5"
+      - key: MAX_TASKS_PER_DAY_GLOBAL # executions started across the server per UTC day
+        value: "150"
+      - key: MAX_DESCRIPTION_LENGTH
+        value: "4000"
+      - key: SEARCH_DAILY_BUDGET
+        value: "30"
+
+      # --- guest trial ("try without an account") (same on the worker) ---
+      - key: GUEST_TRIAL_ENABLED
+        value: "true"
+      - key: GUEST_CREDITS_CENTS # covers one execution (plans are capped at 7 steps ≈ €23 incl. verification)
+        value: "5000"
+      - key: GUEST_MAX_TASKS # executions a guest may start
+        value: "1"
+      - key: GUEST_TRIALS_PER_IP_PER_DAY
+        value: "2"
+      - key: GUEST_TRIALS_PER_DAY
+        value: "30"
+      - key: GUEST_RETENTION_DAYS
+        value: "7"
+
   - type: worker
     name: ensemblis-worker
     runtime: node
-    plan: starter
+    plan: starter # paid: Render has no free background workers
     region: frankfurt
     rootDir: backend
     buildCommand: npm ci --include=dev && npm run build
-    # The API service applies migrations; the worker only needs the generated client.
+    # The API applies migrations; the worker waits until they are recorded, then starts.
     startCommand: npm run start:worker
     autoDeploy: true
     envVars:
-      - fromGroup: ensemblis-shared
+      - key: NODE_VERSION
+        value: "22"
+      - key: NODE_ENV
+        value: production
       - key: WORKER_CONCURRENCY
         value: "2"
-      # Same values as on ensemblis-api.
+
+      # --- entered by you: the same values as on ensemblis-api ---
       - key: DATABASE_URL
         sync: false
       - key: APP_URL
@@ -162,3 +168,31 @@ services:
         sync: false
       - key: EMAIL_FROM
         sync: false
+
+      # --- keep identical to ensemblis-api ---
+      - key: AI_PROVIDER
+        value: openai
+      - key: OPENAI_BASE_URL
+        value: https://api.groq.com/openai/v1
+      - key: OPENAI_MODEL
+        value: openai/gpt-oss-120b
+      - key: OPENAI_REASONING_EFFORT
+        value: low
+      - key: OPENAI_MAX_TOKENS
+        value: "8192"
+      - key: OPENAI_FAST_MODEL
+        value: openai/gpt-oss-20b
+      - key: MAX_CONCURRENT_LLM
+        value: "1"
+      - key: LLM_TIMEOUT_MS
+        value: "120000"
+      - key: MAX_TASKS_PER_USER_PER_DAY
+        value: "5"
+      - key: MAX_TASKS_PER_DAY_GLOBAL
+        value: "150"
+      - key: SEARCH_DAILY_BUDGET
+        value: "30"
+      - key: GUEST_MAX_TASKS
+        value: "1"
+      - key: GUEST_RETENTION_DAYS
+        value: "7"

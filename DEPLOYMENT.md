@@ -21,23 +21,37 @@ tokens survive unchanged, and the schema ends with zero drift.
 
 ---
 
-## 1. Decide the worker plan
+## 1. Decide the worker plan (and check the database plan)
 
-Render background workers are **not available on the free plan** (`render.yaml`
-uses `plan: starter` for `ensemblis-worker`).
+Render background workers are **not available on the free plan**: `render.yaml`
+declares `ensemblis-worker` with `plan: starter` (paid). The first Blueprint
+sync after merging creates it — and bills it, or fails if the workspace has no
+payment method. Decide before merging:
 
-- **Recommended:** keep `ensemblis-worker` on a paid plan. The API can sleep or
+- **Recommended:** keep `ensemblis-worker` (paid). The API can sleep or
   redeploy without pausing executions.
-- **Free plan only:** delete the `ensemblis-worker` block from `render.yaml`
-  before merging and set `EMBEDDED_WORKER=true` on `ensemblis-api`. Executions
-  then run inside the API process and pause while a free instance sleeps
-  (recovery resumes them when it wakes). Workable for a demo, not for real
-  customers.
+  - An always-on worker polls the database every second, so a Neon database
+    **never scales to zero** (≈730 compute-hours a month). On Neon's Free plan
+    that can exhaust the monthly compute allowance and suspend the database —
+    move Neon to a paid plan when you enable the worker.
+- **Free plan only:** change **`render.yaml`** in the merge (a dashboard edit
+  is overwritten by the next Blueprint sync): delete the `ensemblis-worker`
+  service block and set `EMBEDDED_WORKER` to `"true"` on `ensemblis-api`.
+  Executions then run inside the API process and pause while a free instance
+  sleeps (recovery resumes them when it wakes); the database can idle. Workable
+  for a demo, not for real customers.
 
 ## 2. Environment checklist (names only — never commit values)
 
-Set in Render (`ensemblis-shared` group values are in `render.yaml`; the ones
-below are entered in the dashboard, `sync: false`):
+`ensemblis-api` keeps every service-level variable v3 had — `JWT_SECRET` and
+`IP_HASH_SALT` keep their existing generated values, so nobody is logged out.
+`ensemblis-worker` is new; settings both services read are listed on each
+service in `render.yaml` and must stay identical (`AI_PROVIDER`, `OPENAI_*`,
+`MAX_CONCURRENT_LLM`, `LLM_TIMEOUT_MS`, `MAX_TASKS_PER_*`,
+`SEARCH_DAILY_BUDGET`, `GUEST_MAX_TASKS`, `GUEST_RETENTION_DAYS`).
+
+Entered in the dashboard (`sync: false`) — Render asks for the worker's when
+the Blueprint sync creates it:
 
 | Variable | API | Worker | Notes |
 |---|---|---|---|
@@ -52,20 +66,22 @@ below are entered in the dashboard, `sync: false`):
 | `TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET_KEY` | ✔ | – | optional bot check |
 | `SIGNUP_INVITE_CODE` | ✔ | – | optional invite-only sign-up |
 
-Set by `render.yaml` (check they are present after the Blueprint sync):
-`NODE_ENV=production`, `AI_PROVIDER=openai`, `OPENAI_BASE_URL`, `OPENAI_MODEL`,
-`OPENAI_FAST_MODEL`, `OPENAI_REASONING_EFFORT=low`, `OPENAI_MAX_TOKENS`,
-`MAX_CONCURRENT_LLM`, `JWT_SECRET` (generated once in the group, shared by API
-and worker), `IP_HASH_SALT`, `EMBEDDED_WORKER=false` (API),
-`WORKER_CONCURRENCY` (worker), cost caps and guest-trial settings.
+Set by `render.yaml`: `NODE_VERSION=22`, `NODE_ENV=production`,
+`AI_PROVIDER=openai`, `OPENAI_BASE_URL`, `OPENAI_MODEL`, `OPENAI_FAST_MODEL`,
+`OPENAI_REASONING_EFFORT=low`, `OPENAI_MAX_TOKENS`, `MAX_CONCURRENT_LLM`,
+`EMBEDDED_WORKER=false` (API), `WORKER_CONCURRENCY` (worker), cost caps and
+guest-trial settings. v3-only variables left on the API (`FOLLOWUP_COST_CENTS`,
+`CLARIFY_ENABLED`, `MAX_ATTACHMENTS`, `MAX_ATTACHMENT_CHARS`,
+`DEV_TEST_RUNS_PER_DAY`) are ignored and can be deleted.
 
 Vercel (frontend): `NEXT_PUBLIC_API_URL` (the API's `https://…onrender.com`
 URL, no trailing slash) and `NEXT_PUBLIC_CONTACT_EMAIL`. `NEXT_PUBLIC_*` values
 are baked in at build time: redeploy the frontend after changing them.
 
 `AI_PROVIDER=mock` cannot run in production: the API and worker refuse to
-start with it when `NODE_ENV=production` **or** on Render (`RENDER` is set),
-and the provider refuses it at call time.
+start with it when `NODE_ENV=production` **or** on Render (`RENDER` is set) —
+and on Render the API also refuses a missing or placeholder `JWT_SECRET` even
+if `NODE_ENV` was forgotten. The provider refuses the mock again at call time.
 
 ## 3. Before merging: rehearse on a copy of production (recommended, ~10 min)
 
@@ -113,7 +129,9 @@ reset their database (the scripts refuse names without `smoke`/`test`).
      `node dist/ops/migrate.js && node dist/index.js`. The first boot baselines
      the existing schema and applies the additive migration, then serves.
    - `ensemblis-worker` is created from the Blueprint. Fill in its `sync: false`
-     variables (§2) if Render asks, then make sure it is **running**.
+     variables (§2) when Render asks, then make sure it is **running**. It logs
+     `worker.waiting_for_migrations` until the API has migrated, then starts
+     (it gives up and restarts after 10 minutes if the API's migration fails).
    - Check `https://<api>/health` → `{"ok":true,"db":"ok","queue":{…}}`.
 3. Vercel builds `main` and promotes it to production.
 
