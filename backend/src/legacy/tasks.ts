@@ -103,12 +103,24 @@ export async function failRevision(revisionId: string, message: string): Promise
 const STOPPED =
   "This task was interrupted while Ensemblis moved to its new execution engine. Your credits were refunded — create an objective to run it again.";
 
-/** Fails + refunds every legacy task / follow-up that is still RUNNING (nothing can finish them any more). */
-export async function sweepLegacyRuns(): Promise<number> {
+/**
+ * Same grace as v3's own orphan sweeper: during a deploy (or a rollback to
+ * v3) an old v3 instance may still be finishing its runs, so only runs older
+ * than this are treated as orphaned.
+ */
+export const LEGACY_GRACE_MS = 15 * 60_000;
+
+/** Fails + refunds every legacy task / follow-up still RUNNING after the grace period (nothing can finish them any more). */
+export async function sweepLegacyRuns(now = new Date()): Promise<number> {
   let n = 0;
-  const tasks = await prisma.task.findMany({ where: { status: { in: ["RUNNING", "PLANNING"] } }, select: { id: true }, take: 50 });
+  const cutoff = new Date(now.getTime() - LEGACY_GRACE_MS);
+  const tasks = await prisma.task.findMany({
+    where: { status: { in: ["RUNNING", "PLANNING"] }, OR: [{ startedAt: { lt: cutoff } }, { startedAt: null, createdAt: { lt: cutoff } }] },
+    select: { id: true },
+    take: 50,
+  });
   for (const t of tasks) if (await failAndRefund(t.id, STOPPED).catch(() => false)) n++;
-  const revs = await prisma.taskRevision.findMany({ where: { status: "RUNNING" }, select: { id: true }, take: 50 });
+  const revs = await prisma.taskRevision.findMany({ where: { status: "RUNNING", createdAt: { lt: cutoff } }, select: { id: true }, take: 50 });
   for (const r of revs) {
     await failRevision(r.id, STOPPED).catch((err) => log.error("legacy.revision_sweep_failed", { revisionId: r.id, error: err }));
     n++;

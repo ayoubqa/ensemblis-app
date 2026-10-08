@@ -124,7 +124,8 @@ export class Worker {
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       const outcome = await failJob(job, this.id, message).catch(() => "retry" as const);
-      log.warn("worker.job_failed", { jobId: job.id, kind: job.kind, attempt: job.attempts, outcome, error: message });
+      const executionId = job.kind === EXEC_TICK ? String((job.payload as { executionId?: string })?.executionId ?? "") || undefined : undefined;
+      log.warn("worker.job_failed", { jobId: job.id, kind: job.kind, executionId, attempt: job.attempts, outcome, error: message.slice(0, 300) });
       if (outcome === "dead") await onDeadJob({ ...job, lastError: message });
     } finally {
       clearInterval(heartbeat);

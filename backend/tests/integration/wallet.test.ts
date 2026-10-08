@@ -47,11 +47,14 @@ describe("wallet", () => {
     expect(await fulfillCheckoutSession({ ...session, payment_status: "unpaid" } as Stripe.Checkout.Session)).toBe("ignored");
   });
 
-  it("legacy tasks still running at deploy time are failed and refunded once", async () => {
+  it("legacy tasks still running at deploy time are failed and refunded once — after v3's 15-minute grace", async () => {
     const { user } = await createUser({ credits: 0 });
-    const task = await prisma.task.create({ data: { userId: user.id, title: "Old", description: "d", status: "RUNNING", costCents: 1500, walletUserId: user.id } });
+    const startedAt = new Date(Date.now() - 5 * 60_000);
+    const task = await prisma.task.create({ data: { userId: user.id, title: "Old", description: "d", status: "RUNNING", costCents: 1500, walletUserId: user.id, startedAt } });
     await prisma.$transaction((tx) => creditWallet(tx, { walletUserId: user.id, actorUserId: null, type: "TOP_UP", amountCents: 1, description: "seed" }));
-    expect(await sweepLegacyRuns()).toBe(1);
+    // A v3 instance may still be finishing it (deploy overlap, or a rollback to v3): leave it alone for now.
+    expect(await sweepLegacyRuns()).toBe(0);
+    expect(await sweepLegacyRuns(new Date(Date.now() + 11 * 60_000))).toBe(1);
     expect(await failAndRefund(task.id, "again")).toBe(false);
     expect(await balance(user.id)).toBe(1501);
     expect((await prisma.task.findUniqueOrThrow({ where: { id: task.id } })).status).toBe("FAILED");

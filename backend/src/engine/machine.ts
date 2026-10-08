@@ -156,6 +156,17 @@ async function planPhase(ex: Execution): Promise<void> {
   });
   if (!persisted) return;
   const base = { id: ex.id, orgId: ex.orgId, objectiveId: objective.id };
+  log.info("execution.planned", {
+    executionId: ex.id,
+    orgId: ex.orgId,
+    objectiveId: objective.id,
+    planSource: plan.source,
+    steps: plan.steps.length,
+    capabilities: plan.steps.map((s) => s.capability),
+    estimatedCostCents: plan.estimatedCostCents,
+    blockingQuestions: plan.missingInformation.filter((q) => q.blocking).length,
+    normalizations: plan.notes.length,
+  });
 
   // 1. Missing information the result depends on → ask a person before spending anything.
   const blocking = plan.missingInformation.filter((q) => q.blocking);
@@ -555,7 +566,23 @@ async function finalize(ex: Execution, model: ModelAssessment | null, accepted: 
     return true;
   });
   if (completed) {
-    log.info("execution.completed", { executionId: ex.id, orgId: ex.orgId, objectiveId: ex.objectiveId, outcome: outcome.status });
+    const final = await prisma.execution.findUnique({
+      where: { id: ex.id },
+      select: { costCents: true, refundedCents: true, startedAt: true, completedAt: true, verificationStatus: true, verificationScore: true, revisionCount: true, planSource: true },
+    });
+    log.info("execution.completed", {
+      executionId: ex.id,
+      orgId: ex.orgId,
+      objectiveId: ex.objectiveId,
+      outcome: outcome.status,
+      verification: final?.verificationStatus,
+      score: final?.verificationScore,
+      revisions: final?.revisionCount,
+      planSource: final?.planSource,
+      costCents: final?.costCents,
+      refundedCents: final?.refundedCents,
+      durationMs: final?.startedAt && final.completedAt ? final.completedAt.getTime() - final.startedAt.getTime() : undefined,
+    });
     onExecutionSettled(ex.id).catch(() => undefined);
   }
 }

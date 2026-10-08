@@ -352,6 +352,7 @@ export async function addRevisionStep(tx: Tx, executionId: string, feedback: str
 
 /** Fails an execution and refunds everything not yet refunded. Idempotent. */
 export async function failExecution(executionId: string, message: string): Promise<boolean> {
+  let meta: { orgId: string; objectiveId: string; costCents: number; refundedCents: number } | null = null;
   const done = await prisma.$transaction(async (tx) => {
     const ex = await tx.execution.findUnique({ where: { id: executionId } });
     if (!ex) return false;
@@ -366,10 +367,11 @@ export async function failExecution(executionId: string, message: string): Promi
     if (refunded > 0) {
       await emit(tx, { executionId, orgId: ex.orgId, type: "FUNDS_REFUNDED", actor: "system", message: `${eur(refunded)} refunded`, data: { amountCents: refunded } });
     }
+    meta = { orgId: ex.orgId, objectiveId: ex.objectiveId, costCents: ex.costCents, refundedCents: ex.refundedCents + refunded };
     return true;
   });
   if (done) {
-    log.warn("execution.failed", { executionId, error: message });
+    log.warn("execution.failed", { executionId, ...(meta ?? {}), error: message.slice(0, 300) });
     onExecutionSettled(executionId).catch(() => undefined);
   }
   return done;
