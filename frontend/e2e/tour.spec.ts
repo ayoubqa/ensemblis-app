@@ -1,6 +1,7 @@
 // Optional visual tour (E2E_TOUR=1 npm run e2e -- tour): runs one objective and
-// saves full-page screenshots of every main screen to test-results/tour/ for
-// design review. Skipped in normal runs.
+// saves full-page screenshots of every main screen (desktop, tablet and phone,
+// dark and light) to test-results/tour/ for design review, failing on any
+// horizontal overflow. Skipped in normal runs.
 import { expect, test, type Page } from "@playwright/test";
 import { defineObjective, expectStatus, signUpViaUI, uniqueEmail } from "./helpers";
 
@@ -38,6 +39,7 @@ for (const scheme of ["dark", "light"] as const) {
     await shot("05-define-outcome");
     await page.getByTestId("submit-objective").click();
     await page.waitForURL(/\/objectives\/(?!new)[^/]+$/);
+    const objectiveUrl = new URL(page.url()).pathname;
     await expectStatus(page, "WAITING_FOR_APPROVAL");
     await shot("06-plan-approval");
     await page.getByTestId("approval-card").getByRole("button", { name: /^Approve/ }).click();
@@ -64,9 +66,35 @@ for (const scheme of ["dark", "light"] as const) {
     await shot("12-usage");
     await page.goto("/context");
     await shot("13-context");
-    await page.setViewportSize({ width: 390, height: 844 });
-    await page.goto("/dashboard");
-    await shot("14-mobile-briefing");
+    await page.goto("/reports");
+    await shot("12b-reports");
+    await page.goto("/exceptions");
+    await shot("12c-exceptions");
+    await page.goto("/how-it-works");
+    await shot("00b-how-it-works");
+
+    // Tablet and phone: the main screens must hold up without horizontal scroll.
+    for (const [w, h, tag] of [
+      [820, 1180, "tablet"],
+      [390, 844, "mobile"],
+    ] as const) {
+      await page.setViewportSize({ width: w, height: h });
+      for (const [path, name] of [
+        ["/", "landing"],
+        ["/dashboard", "home"],
+        ["/objectives/new", "define"],
+        [objectiveUrl, "console"],
+        ["/reports", "reports"],
+        ["/context", "context"],
+        ["/ai-team", "ai-team"],
+        ["/usage", "usage"],
+      ] as const) {
+        await page.goto(path);
+        await settle(page);
+        expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth), `${path} overflows at ${w}px`).toBeLessThanOrEqual(0);
+        await page.screenshot({ path: `test-results/tour/${scheme}-${tag}-${name}.png`, fullPage: true });
+      }
+    }
 
     // A second organization with no Company Context: the Chief of Staff stops and asks.
     const second = await browser.newContext({ colorScheme: scheme, reducedMotion: "reduce", viewport: { width: 1400, height: 900 } });
