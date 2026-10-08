@@ -6,9 +6,8 @@ import { Icon } from "@/components";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { CONTACT_EMAIL, useConfig } from "@/lib/config";
-import { errorText } from "@/lib/errors";
 import { ROUTES } from "@/lib/routes";
-import { AuthShell, AuthStatus, EMAIL_RE, Field, FormError } from "../login/_components/AuthUI";
+import { AuthHead, AuthLoading, AuthShell, AuthStatus, EMAIL_RE, Field, FormError, authErrorText, useAutoFocus } from "../login/_components/AuthUI";
 
 const RESEND_SECONDS = 30;
 
@@ -25,12 +24,7 @@ export default function ForgotPasswordPage() {
   if (!loaded && !gaveUp) {
     return (
       <AuthShell>
-        <div aria-busy="true" aria-label="Loading">
-          <div className="sk" style={{ height: 30, width: "64%" }} />
-          <div className="sk" style={{ height: 14, width: "92%", marginTop: 12 }} />
-          <div className="sk" style={{ height: 44, marginTop: 24 }} />
-          <div className="sk" style={{ height: 48, marginTop: 20 }} />
-        </div>
+        <AuthLoading lines={1} />
       </AuthShell>
     );
   }
@@ -38,20 +32,20 @@ export default function ForgotPasswordPage() {
   return <AuthShell>{loaded && !config.emailEnabled ? <EmailOff /> : <ForgotForm />}</AuthShell>;
 }
 
-// ------------------------------------------------------------- email is off on this server
+// ------------------------------------------------------------- email is off on this deployment
 function EmailOff() {
   const { user } = useAuth();
   return (
     <AuthStatus
       icon="mail"
       tone="warn"
-      title="Password reset by email isn't available here"
+      title="Password reset by email isn't available yet"
       actions={
         <>
           {CONTACT_EMAIL && (
             <a className="btn p" href={`mailto:${CONTACT_EMAIL}?subject=${encodeURIComponent("Ensemblis password reset")}`}>
               <Icon name="mail" />
-              Email {CONTACT_EMAIL}
+              Email support
             </a>
           )}
           <Link className={CONTACT_EMAIL ? "btn" : "btn p"} href={ROUTES.login}>
@@ -60,23 +54,19 @@ function EmailOff() {
         </>
       }
     >
-      <p style={{ margin: 0 }}>
-        This Ensemblis server doesn&apos;t have email set up yet, so it can&apos;t send reset links.{" "}
+      <p>
+        Ensemblis can&apos;t send password reset emails at the moment.{" "}
         {CONTACT_EMAIL ? (
           <>
-            Contact the operator at <b style={{ color: "var(--ink)" }}>{CONTACT_EMAIL}</b> and they can reset your password for you.
+            Write to <b>{CONTACT_EMAIL}</b> from the address on your account and we&apos;ll help you reset your password.
           </>
         ) : (
-          "Contact the person who runs this server and they can reset your password for you."
+          "Contact your Ensemblis administrator to reset your password."
         )}
       </p>
       {user && !user.isGuest && (
-        <p className="small" style={{ margin: "12px 0 0" }}>
-          You&apos;re signed in — if you know your current password, you can{" "}
-          <Link href={`${ROUTES.settings}#security`} style={{ color: "var(--accent)", fontWeight: 600 }}>
-            change it in Settings
-          </Link>
-          .
+        <p>
+          You&apos;re logged in, so if you know your current password you can <Link href={`${ROUTES.settings}#security`}>change it in Settings</Link>.
         </p>
       )}
     </AuthStatus>
@@ -94,9 +84,7 @@ function ForgotForm() {
   const [cooldown, setCooldown] = useState(0);
   const emailRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => {
-    emailRef.current?.focus();
-  }, []);
+  useAutoFocus(emailRef);
 
   useEffect(() => {
     if (cooldown <= 0) return;
@@ -115,7 +103,7 @@ function ForgotForm() {
       setSentTo(address);
       setCooldown(RESEND_SECONDS);
     } catch (e) {
-      setError(errorText(e, "Couldn't send the link. Please try again."));
+      setError(authErrorText(e, "Couldn't send the link. Please try again."));
     } finally {
       setBusy(false);
     }
@@ -148,25 +136,31 @@ function ForgotForm() {
           </>
         }
       >
-        <p style={{ margin: 0 }} role="status">
-          If an account exists for that email, we&apos;ve sent a reset link to <b style={{ color: "var(--ink)", wordBreak: "break-all" }}>{sentTo}</b>.
+        <p>
+          If an account exists for that email, we&apos;ve sent a reset link to <b>{sentTo}</b>.
         </p>
-        <ul className="small" style={{ margin: "14px 0 0", paddingLeft: 18, display: "grid", gap: 4 }}>
-          <li>The link works once and expires after an hour.</li>
-          <li>Nothing yet? Check your spam folder, or make sure it&apos;s the email you signed up with.</li>
+        <ul className="au-points">
+          <li>
+            <Icon name="clock" />
+            <span>The link works once and expires after an hour.</span>
+          </li>
+          <li>
+            <Icon name="inbox" />
+            <span>Nothing yet? Check your spam folder, or make sure it&apos;s the email you signed up with.</span>
+          </li>
         </ul>
         {error && <FormError>{error}</FormError>}
-        <p className="small" style={{ margin: "14px 0 0" }}>
+        <p>
           Wrong address?{" "}
           <button
             type="button"
+            className="au-textbtn"
             onClick={() => {
               setSentTo(null);
               setSubmitted(false);
               setError(null);
               setTimeout(() => emailRef.current?.focus(), 0);
             }}
-            style={{ background: "none", border: 0, padding: 0, color: "var(--accent)", fontWeight: 600, cursor: "pointer", font: "inherit" }}
           >
             Use a different email
           </button>
@@ -177,12 +171,7 @@ function ForgotForm() {
 
   return (
     <>
-      <h1 className="serif" style={{ fontSize: 30, fontWeight: 600, letterSpacing: "-.03em", lineHeight: 1.1 }}>
-        Forgot your password?
-      </h1>
-      <p className="muted" style={{ margin: "4px 0 6px" }}>
-        Enter your account email and we&apos;ll send you a link to choose a new one.
-      </p>
+      <AuthHead title="Forgot your password?">Enter your account email and we&apos;ll send you a link to choose a new one.</AuthHead>
       <form onSubmit={submit} noValidate>
         <Field id="fp-email" label="Email" error={showErr || null}>
           <input
@@ -192,6 +181,7 @@ function ForgotForm() {
             type="email"
             autoComplete="email"
             inputMode="email"
+            required
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             onBlur={() => email.trim() && setTouched(true)}
@@ -201,17 +191,16 @@ function ForgotForm() {
           />
         </Field>
         {error && <FormError>{error}</FormError>}
-        <button type="submit" className="btn p lg" style={{ width: "100%", marginTop: 20 }} disabled={busy} aria-busy={busy}>
+        <button type="submit" className="btn p lg au-submit" disabled={busy} aria-busy={busy}>
           {busy ? "Sending…" : "Send reset link"}
           {!busy && <Icon name="arrow" />}
         </button>
       </form>
-      <p className="small muted" style={{ textAlign: "center", marginTop: 20 }}>
-        Remembered it?{" "}
-        <Link href={ROUTES.login} style={{ color: "var(--accent)", fontWeight: 600 }}>
-          Log in
-        </Link>
-      </p>
+      <div className="au-alt">
+        <p>
+          Remembered it? <Link href={ROUTES.login}>Log in</Link>
+        </p>
+      </div>
     </>
   );
 }

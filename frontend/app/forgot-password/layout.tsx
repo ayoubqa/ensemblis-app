@@ -1,8 +1,9 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
+import { privateMetadata } from "@/lib/site";
 
 export const metadata: Metadata = {
-  title: "Reset your password",
+  ...privateMetadata("Reset your password"),
   description: "Get a link to choose a new password for your Ensemblis account.",
 };
 

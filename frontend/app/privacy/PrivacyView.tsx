@@ -2,16 +2,41 @@
 
 import Link from "next/link";
 import { ROUTES } from "@/lib/routes";
-import { AiProvider, Contact, LegalPage, Sec } from "../_legal/LegalBits";
+import type { ReactNode } from "react";
+import { AiProvider, Contact, LegalPage, Sec, type LegalSection } from "../_legal/LegalBits";
+
+const SECTIONS: LegalSection[] = [
+  { id: "who", title: "Who is responsible" },
+  { id: "what", title: "What we collect and why" },
+  { id: "browser", title: "What's stored in your browser" },
+  { id: "sharing", title: "Who receives your data" },
+  { id: "retention", title: "How long we keep it" },
+  { id: "rights", title: "Your rights" },
+  { id: "security", title: "Security" },
+  { id: "age", title: "Age" },
+  { id: "changes", title: "Changes to this policy" },
+];
+
+/** One row of the "what we collect" table (stacks into a labelled record on phones). */
+function DataRow({ data, why, basis }: { data: ReactNode; why: ReactNode; basis: ReactNode }) {
+  return (
+    <tr>
+      <td data-label="Data">{data}</td>
+      <td data-label="Why">{why}</td>
+      <td data-label="Legal basis (GDPR)">{basis}</td>
+    </tr>
+  );
+}
 
 export function PrivacyView() {
   return (
     <LegalPage
       title="Privacy Policy"
       other="terms"
-      intro="Ensemblis is a free public demo of an AI operating layer for business, run by an individual based in Spain. This page explains, in plain language, what personal data it handles and what you can do about it."
+      sections={SECTIONS}
+      intro="Ensemblis is a free public demo of an AI operating layer for business, operated by an individual based in Spain. This page explains, in plain language, what personal data it handles and what you can do about it."
       summary={[
-        "We collect only what's needed to run the demo: your account details, the objectives, Company Context and documents you provide, the AI results, and your usage history.",
+        "We collect only what's needed to operate the demo: your account details, the objectives, Company Context and documents you provide, the AI results, and your usage history.",
         <>
           The text of your objectives — with the relevant Company Context, document passages and memory — is sent to our AI provider (<AiProvider />) to generate results.
         </>,
@@ -21,66 +46,79 @@ export function PrivacyView() {
         </>,
       ]}
     >
-      <Sec id="who" title="1. Who is responsible">
+      <Sec id="who">
         <p>
           The data controller is the individual who operates this Ensemblis demo, based in Spain (European Union). Ensemblis is a personal project, not a
           registered company. You can reach the operator at <Contact />.
         </p>
       </Sec>
 
-      <Sec id="what" title="2. What we collect and why">
-        <div className="tw" style={{ margin: "6px 0 10px" }}>
-          <table>
+      <Sec id="what">
+        <div className="au-dtable-wrap">
+          <table className="au-dtable">
+            <caption>Personal data we process, why, and the legal basis</caption>
             <thead>
               <tr>
-                <th>Data</th>
-                <th>Why</th>
-                <th>Legal basis (GDPR)</th>
+                <th scope="col">Data</th>
+                <th scope="col">Why</th>
+                <th scope="col">Legal basis (GDPR)</th>
               </tr>
             </thead>
             <tbody>
-              <tr>
-                <td>
-                  <b>Account details</b> — name, email, and optionally company and role
-                </td>
-                <td>To create your account, sign you in and show your profile</td>
-                <td>Performing our agreement with you (Art. 6(1)(b))</td>
-              </tr>
-              <tr>
-                <td>
-                  <b>Password</b> — stored only as a one-way hash, never in readable form
-                </td>
-                <td>To secure your account</td>
-                <td>Art. 6(1)(b)</td>
-              </tr>
-              <tr>
-                <td>
-                  <b>Objective content</b> — objectives, success criteria, plans, AI-generated outputs, evidence, verification results, and recurring objectives you set up
-                </td>
-                <td>To run your objectives and show you the results</td>
-                <td>Art. 6(1)(b)</td>
-              </tr>
-              <tr>
-                <td>
-                  <b>Usage records</b> — which executions ran, when, their cost, top-ups and refunds
-                </td>
-                <td>To run the balance system, apply fair-use limits and prevent abuse</td>
-                <td>Art. 6(1)(b) and our legitimate interest in keeping the service working (Art. 6(1)(f))</td>
-              </tr>
-              <tr>
-                <td>
-                  <b>Company Context and memory</b> — the business profile, documents and website you provide, and learnings you confirm
-                </td>
-                <td>To ground your objectives in your business. Documents are treated as data, never as instructions to the AI.</td>
-                <td>Art. 6(1)(b)</td>
-              </tr>
-              <tr>
-                <td>
-                  <b>Technical logs</b> — IP address, browser type and request times, recorded by the hosting infrastructure
-                </td>
-                <td>Security, debugging and preventing abuse</td>
-                <td>Legitimate interest (Art. 6(1)(f))</td>
-              </tr>
+              <DataRow
+                data={
+                  <>
+                    <b>Account details</b> — name, email, and optionally company and role
+                  </>
+                }
+                why="To create your account, sign you in and show your profile"
+                basis="Performing our agreement with you (Art. 6(1)(b))"
+              />
+              <DataRow
+                data={
+                  <>
+                    <b>Password</b> — stored only as a one-way hash, never in readable form
+                  </>
+                }
+                why="To secure your account"
+                basis="Art. 6(1)(b)"
+              />
+              <DataRow
+                data={
+                  <>
+                    <b>Objective content</b> — objectives, success criteria, plans, AI-generated outputs, evidence, verification results, and recurring objectives you set up
+                  </>
+                }
+                why="To execute your objectives and show you the results"
+                basis="Art. 6(1)(b)"
+              />
+              <DataRow
+                data={
+                  <>
+                    <b>Usage records</b> — which executions took place, when, their cost, top-ups and refunds
+                  </>
+                }
+                why="To operate your usage balance, apply fair-use limits and prevent abuse"
+                basis="Art. 6(1)(b) and our legitimate interest in keeping the service working (Art. 6(1)(f))"
+              />
+              <DataRow
+                data={
+                  <>
+                    <b>Company Context and memory</b> — the business profile, documents and website you provide, and learnings you confirm
+                  </>
+                }
+                why="To ground your objectives in your business. Documents are treated as data, never as instructions to the AI."
+                basis="Art. 6(1)(b)"
+              />
+              <DataRow
+                data={
+                  <>
+                    <b>Technical logs</b> — IP address, browser type and request times, recorded by the hosting infrastructure
+                  </>
+                }
+                why="Security, debugging and preventing abuse"
+                basis="Legitimate interest (Art. 6(1)(f))"
+              />
             </tbody>
           </table>
         </div>
@@ -90,7 +128,7 @@ export function PrivacyView() {
         </p>
       </Sec>
 
-      <Sec id="browser" title="3. What's stored in your browser">
+      <Sec id="browser">
         <p>We don&apos;t use advertising or analytics trackers. The site stores only what it needs to work:</p>
         <ul>
           <li>
@@ -101,8 +139,8 @@ export function PrivacyView() {
         <p>These are strictly necessary for the service you asked for, so they don&apos;t require a consent banner.</p>
       </Sec>
 
-      <Sec id="sharing" title="4. Who receives your data">
-        <p>We never sell your data or use it for advertising. To run the demo we rely on a few service providers who process data on our behalf:</p>
+      <Sec id="sharing">
+        <p>We never sell your data or use it for advertising. To operate the demo we rely on a few service providers who process data on our behalf:</p>
         <ul>
           <li>
             <b>Hosting provider</b> — serves the website and the application server.
@@ -111,7 +149,7 @@ export function PrivacyView() {
             <b>Database provider</b> — stores accounts, objectives, Company Context, memory, results and usage records.
           </li>
           <li>
-            <b>AI provider: <AiProvider /></b> — when an objective runs, its description, relevant context and the intermediate steps are sent to this provider so its models
+            <b>AI provider: <AiProvider /></b> — when an objective is executed, its description, relevant context and the intermediate steps are sent to this provider so its models
             can generate the result. The provider processes that text under its own API terms.
           </li>
         </ul>
@@ -123,7 +161,7 @@ export function PrivacyView() {
         <p>We may also disclose data if the law requires it.</p>
       </Sec>
 
-      <Sec id="retention" title="5. How long we keep it">
+      <Sec id="retention">
         <ul>
           <li>Account data, objectives, Company Context, memory and results are kept while your account exists. You can edit or delete documents and memory items at any time.</li>
           <li>
@@ -135,7 +173,7 @@ export function PrivacyView() {
         </ul>
       </Sec>
 
-      <Sec id="rights" title="6. Your rights">
+      <Sec id="rights">
         <p>Under the GDPR and Spain&apos;s data-protection law (LOPDGDD) you can ask to:</p>
         <ul>
           <li>
@@ -161,18 +199,18 @@ export function PrivacyView() {
         </p>
       </Sec>
 
-      <Sec id="security" title="7. Security">
+      <Sec id="security">
         <p>
           Passwords are hashed, traffic is encrypted over HTTPS, and access to the database is restricted to the operator. No online service is perfectly
           secure, though — another reason not to put confidential information into a public demo.
         </p>
       </Sec>
 
-      <Sec id="age" title="8. Age">
+      <Sec id="age">
         <p>The demo is intended for adults (18+) evaluating it for work. Please don&apos;t use it if you&apos;re younger.</p>
       </Sec>
 
-      <Sec id="changes" title="9. Changes to this policy">
+      <Sec id="changes">
         <p>If this policy changes, we&apos;ll update the date at the top of the page. For significant changes we&apos;ll let account holders know.</p>
       </Sec>
     </LegalPage>

@@ -1,8 +1,9 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
+import { privateMetadata } from "@/lib/site";
 
 export const metadata: Metadata = {
-  title: "Create your account",
+  ...privateMetadata("Create your organization"),
   description: "Create your organization on Ensemblis — the AI operating layer for business.",
 };
 

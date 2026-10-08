@@ -3,12 +3,14 @@
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
-import { Avatar, Icon, Skeleton, SkeletonText, useToast } from "@/components";
+import { Avatar, Icon, useToast } from "@/components";
+import { claimUrl } from "@/components/GuestBanner";
 import { api, ApiError, type InvitePreview } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { errorText, toastApiError } from "@/lib/errors";
 import { plural } from "@/lib/format";
 import { ROUTES, loginUrl, signupUrl } from "@/lib/routes";
+import { AuthHead, AuthLoading, AuthNotice, AuthShell, FormError } from "../../login/_components/AuthUI";
 
 const REASONS: Record<string, { title: string; body: string }> = {
   expired: { title: "This invite link has expired", body: "Invite links only work for a limited time." },
@@ -25,6 +27,7 @@ export default function JoinPage() {
   const [invite, setInvite] = useState<InvitePreview | null>(null);
   const [error, setError] = useState<{ status: number; message: string } | null>(null);
   const [joining, setJoining] = useState(false);
+  const [joinError, setJoinError] = useState<string | null>(null);
 
   const here = ROUTES.joinTeam(token);
 
@@ -44,6 +47,7 @@ export default function JoinPage() {
 
   const join = async () => {
     setJoining(true);
+    setJoinError(null);
     try {
       const r = await api.joinTeam(token);
       setUser(r.user);
@@ -51,10 +55,17 @@ export default function JoinPage() {
       router.push(ROUTES.dashboard);
     } catch (e) {
       toastApiError(toast, e, "Couldn't join this organization");
+      setJoinError(errorText(e, "Couldn't join this organization. Please try again."));
       setJoining(false);
       load();
     }
   };
+
+  const leave = (
+    <Link className="btn" href={user ? ROUTES.dashboard : ROUTES.home}>
+      {user ? "Open your workspace" : "Go to the home page"}
+    </Link>
+  );
 
   // ------------------------------------------------------------- states
   let body: React.ReactNode;
@@ -62,145 +73,142 @@ export default function JoinPage() {
     const notFound = error.status === 404 || error.status === 400;
     body = (
       <>
-        <span className="tag bad">
-          <Icon name="alert" />
-          {notFound ? "Invalid invite" : "Something went wrong"}
-        </span>
-        <h1 className="serif" style={titleStyle}>
-          {notFound ? "We couldn't find this invite link." : "We couldn't check this invite."}
-        </h1>
-        <p className="muted">
+        <AuthHead
+          tag={
+            <span className="tag bad">
+              <Icon name="alert" />
+              {notFound ? "Invalid invite" : "Something went wrong"}
+            </span>
+          }
+          title={notFound ? "We couldn't find this invite link" : "We couldn't check this invite"}
+        >
           {notFound ? "Check that you copied the whole link, or ask the organization owner to send a new one." : error.message}
-        </p>
-        <div className="row wrapflex" style={{ marginTop: 18 }}>
+        </AuthHead>
+        <div className="au-cta-row">
           {!notFound && (
             <button type="button" className="btn p" onClick={load}>
               <Icon name="redo" />
               Try again
             </button>
           )}
-          <Link className="btn" href={user ? ROUTES.dashboard : ROUTES.home}>
-            {user ? "Go to my dashboard" : "Go to the home page"}
-          </Link>
+          {leave}
         </div>
       </>
     );
   } else if (!invite) {
-    body = (
-      <div aria-busy="true" aria-label="Checking your invite">
-        <Skeleton width={110} height={22} />
-        <Skeleton width="80%" height={34} style={{ marginTop: 14 }} />
-        <div style={{ marginTop: 16 }}>
-          <SkeletonText lines={3} />
-        </div>
-      </div>
-    );
+    body = <AuthLoading label="Checking your invite…" lines={2} />;
   } else if (!invite.valid) {
     const r = REASONS[invite.reason ?? ""] ?? { title: "This invite link no longer works", body: invite.reason ? `Reason: ${invite.reason}.` : "" };
     body = (
       <>
-        <span className="tag warn">
-          <Icon name="clock" />
-          Invite unavailable
-        </span>
-        <h1 className="serif" style={titleStyle}>
-          {r.title}
-        </h1>
-        <p className="muted">
-          {r.body} Ask {invite.ownerName || "the organization owner"} for a new link to join <b style={{ color: "var(--ink)" }}>{invite.teamName}</b>.
-        </p>
-        <div className="row wrapflex" style={{ marginTop: 18 }}>
-          <Link className="btn" href={user ? ROUTES.dashboard : ROUTES.home}>
-            {user ? "Go to my dashboard" : "Go to the home page"}
-          </Link>
-        </div>
+        <AuthHead
+          tag={
+            <span className="tag warn">
+              <Icon name="clock" />
+              Invite unavailable
+            </span>
+          }
+          title={r.title}
+        >
+          {r.body} Ask {invite.ownerName || "the organization owner"} for a new link to join <b>{invite.teamName}</b>.
+        </AuthHead>
+        <div className="au-cta-row">{leave}</div>
       </>
     );
   } else {
     const sameTeam = !!user?.team && user.team.name === invite.teamName;
     body = (
       <>
-        <span className="tag">
-          <Icon name="share" />
-          Organization invite
-        </span>
-        <div className="row" style={{ gap: 14, marginTop: 16 }}>
+        <AuthHead
+          tag={
+            <span className="tag">
+              <Icon name="users" />
+              Organization invite
+            </span>
+          }
+          title={`Join ${invite.teamName}`}
+        >
+          You&apos;ve been invited to work in this organization on Ensemblis.
+        </AuthHead>
+        <div className="au-invite">
           <Avatar name={invite.teamName} size="lg" />
-          <div style={{ minWidth: 0 }}>
-            <h1 style={{ ...titleStyle, margin: 0, overflowWrap: "anywhere" }}>
-              Join {invite.teamName}
-            </h1>
-            <div className="small muted">
+          <div>
+            <span className="au-invite-name">{invite.teamName}</span>
+            <span className="au-invite-meta">
               Owner {invite.ownerName} · {plural(invite.memberCount, "member")}
-            </div>
+            </span>
           </div>
         </div>
-        <ul className="small muted" style={{ margin: "18px 0 0", paddingLeft: 18, display: "grid", gap: 6 }}>
-          <li>You work from the organization&apos;s Company Context, objectives and AI Team.</li>
-          <li>Executions are paid from the organization wallet and follow its approval policy — {invite.ownerName} manages both.</li>
-          <li>You can leave any time.</li>
+        <ul className="au-points">
+          <li>
+            <Icon name="building" />
+            <span>You work from the organization&apos;s Company Context, objectives and AI Team.</span>
+          </li>
+          <li>
+            <Icon name="wallet" />
+            <span>Executions are paid from the organization&apos;s balance and follow its approval policy — {invite.ownerName} manages both.</span>
+          </li>
+          <li>
+            <Icon name="out" />
+            <span>You can leave any time.</span>
+          </li>
         </ul>
 
-        <div style={{ marginTop: 22 }}>
+        <div className="au-cta">
           {loading ? (
-            <Skeleton width={180} height={40} radius={10} />
+            <AuthLoading label="Checking your account…" lines={1} />
           ) : !user ? (
             <>
-              <div className="row wrapflex">
+              <div className="au-cta-row">
                 <Link className="btn p" href={loginUrl(here)}>
                   Log in to join
                 </Link>
                 <Link className="btn" href={signupUrl(here)}>
-                  Create a free account
+                  Create an account
                 </Link>
               </div>
-              <p className="tiny muted" style={{ marginTop: 10 }}>
-                You&apos;ll come straight back here to accept the invite.
-              </p>
+              <p className="au-fine">You&apos;ll come straight back here to accept the invite.</p>
             </>
           ) : user.isGuest ? (
             <>
-              <div className="notice" style={{ marginBottom: 12 }}>
-                <Icon name="info" />
-                <span>You&apos;re using a guest session. Create an account to join an organization — your trial work comes with you.</span>
+              <AuthNotice>You&apos;re in a free trial. Create an account to join an organization. Your trial work comes with you.</AuthNotice>
+              <div className="au-cta-row">
+                <Link className="btn p" href={claimUrl(here)}>
+                  <Icon name="check" />
+                  Save your work and continue
+                </Link>
               </div>
-              <Link className="btn p" href={`${ROUTES.signup}?claim=1&next=${encodeURIComponent(here)}`}>
-                <Icon name="check" />
-                Save your work and continue
-              </Link>
             </>
           ) : user.team ? (
             <>
-              <div className="notice" style={sameTeam ? { background: "var(--ok-soft)", color: "var(--ok)" } : undefined}>
-                <Icon name={sameTeam ? "check" : "info"} />
-                <span>
-                  {sameTeam ? (
-                    <>You&apos;re already a member of {user.team.name}.</>
-                  ) : user.team.role === "OWNER" ? (
-                    <>
-                      You own <b>{user.team.name}</b>. You can be in one organization at a time — remove its members on your Members page before joining{" "}
-                      {invite.teamName}.
-                    </>
-                  ) : (
-                    <>
-                      You&apos;re already in <b>{user.team.name}</b>. You can be in one organization at a time — leave it on your Members page before joining{" "}
-                      {invite.teamName}.
-                    </>
-                  )}
-                </span>
+              <AuthNotice tone={sameTeam ? "ok" : "neutral"} icon={sameTeam ? "check" : "info"}>
+                {sameTeam ? (
+                  <>You&apos;re already a member of {user.team.name}.</>
+                ) : user.team.role === "OWNER" ? (
+                  <>
+                    You own <b>{user.team.name}</b>. You can be in one organization at a time — remove its members on your Members page before joining {invite.teamName}.
+                  </>
+                ) : (
+                  <>
+                    You&apos;re already in <b>{user.team.name}</b>. You can be in one organization at a time — leave it on your Members page before joining {invite.teamName}.
+                  </>
+                )}
+              </AuthNotice>
+              <div className="au-cta-row">
+                <Link className="btn" href={ROUTES.members}>
+                  Go to members
+                </Link>
               </div>
-              <Link className="btn" href={ROUTES.members} style={{ marginTop: 12 }}>
-                Go to members
-              </Link>
             </>
           ) : (
             <>
-              <button type="button" className="btn p lg" onClick={join} disabled={joining} aria-busy={joining}>
-                Join {invite.teamName}
-                <Icon name="arrow" />
+              {joinError && <FormError>{joinError}</FormError>}
+              <button type="button" className="btn p lg au-submit" onClick={join} disabled={joining} aria-busy={joining}>
+                {joining ? "Joining…" : `Join ${invite.teamName}`}
+                {!joining && <Icon name="arrow" />}
               </button>
-              <p className="tiny muted" style={{ marginTop: 10 }}>
-                Signed in as {user.email}.
+              <p className="au-fine">
+                Logged in as <b>{user.email}</b>.
               </p>
             </>
           )}
@@ -209,13 +217,7 @@ export default function JoinPage() {
     );
   }
 
-  return (
-    <div className="narrow" style={{ padding: "40px 24px 64px" }}>
-      <div className="card" style={{ padding: "clamp(22px,4vw,36px)" }}>
-        {body}
-      </div>
-    </div>
-  );
+  return <AuthShell>{body}</AuthShell>;
 }
 
 function safeDecode(s: string): string {
@@ -225,5 +227,3 @@ function safeDecode(s: string): string {
     return s;
   }
 }
-
-const titleStyle: React.CSSProperties = { fontSize: "clamp(26px,3.6vw,36px)", lineHeight: 1.1, margin: "12px 0 8px", fontWeight: 500 };

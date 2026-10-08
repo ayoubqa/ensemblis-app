@@ -4,13 +4,13 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useRef, useState, type FormEvent } from "react";
 import { Icon, useToast } from "@/components";
+import { claimUrl } from "@/components/GuestBanner";
 import { api, ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { useConfig } from "@/lib/config";
-import { errorText } from "@/lib/errors";
 import { firstName } from "@/lib/format";
 import { ROUTES, safeNext, signupUrl } from "@/lib/routes";
-import { AuthShell, EMAIL_RE, Field, FormError, PasswordInput } from "./_components/AuthUI";
+import { AuthHead, AuthLoading, AuthNotice, AuthShell, EMAIL_RE, Field, FormError, PasswordInput, authErrorText, useAutoFocus } from "./_components/AuthUI";
 
 /** The server refuses password sign-in for guest-trial accounts (403). */
 function isGuestAccountError(e: unknown): boolean {
@@ -42,20 +42,25 @@ function LoginForm() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loading, user]);
 
-  useEffect(() => {
-    emailRef.current?.focus();
-  }, []);
+  // A signed-in member is on their way elsewhere (or just logged in): don't flash the form.
+  const leaving = loading || (!!user && !user.isGuest);
+  useAutoFocus(emailRef, !leaving);
 
   const emailErr = !email.trim() ? "Enter your email address" : !EMAIL_RE.test(email.trim()) ? "That doesn't look like an email address" : null;
   const pwErr = !password ? "Enter your password" : null;
   const show = (k: "email" | "password") => submitted || touched[k];
+  const emailShown = show("email") && !!emailErr;
+  const pwShown = show("password") && !!pwErr;
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     setSubmitted(true);
     setError(null);
     setGuestError(null);
-    if (emailErr || pwErr) return;
+    if (emailErr || pwErr) {
+      document.getElementById(emailErr ? "email" : "password")?.focus();
+      return;
+    }
     setBusy(true);
     try {
       const { token, user: u } = await api.login({ email: email.trim(), password });
@@ -66,35 +71,31 @@ function LoginForm() {
     } catch (err) {
       setBusy(false);
       if (isGuestAccountError(err)) {
-        setGuestError(errorText(err));
+        setGuestError(authErrorText(err));
         return;
       }
-      setError(err instanceof ApiError && err.status === 401 ? "That email and password don't match an account." : errorText(err));
+      setError(err instanceof ApiError && err.status === 401 ? "That email and password don't match an account." : authErrorText(err));
     }
   };
 
+  if (leaving) {
+    return (
+      <AuthShell>
+        <AuthLoading label={done.current ? "Logging you in…" : "Loading…"} lines={2} />
+      </AuthShell>
+    );
+  }
+
   return (
     <AuthShell>
-      <h1 className="serif" style={{ fontSize: 30, fontWeight: 600, letterSpacing: "-.03em", lineHeight: 1.1 }}>
-        Welcome back
-      </h1>
-      <p className="muted" style={{ margin: "4px 0 6px" }}>
-        {next && next !== "/" ? "Log in to continue where you left off." : "Log in to your Ensemblis account."}
-      </p>
+      <AuthHead title="Welcome back">{next && next !== "/" ? "Log in to continue where you left off." : "Log in to your Ensemblis account."}</AuthHead>
       {user?.isGuest && (
-        <div className="notice" style={{ marginTop: 12, background: "var(--accent-soft)", color: "var(--ink)" }}>
-          <Icon name="info" />
-          <span>
-            You&apos;re in a free-trial session. Logging in to another account ends it —{" "}
-            <Link href={`${ROUTES.signup}?claim=1`} style={{ color: "var(--accent)", fontWeight: 600, textDecoration: "underline" }}>
-              save your trial results first
-            </Link>
-            .
-          </span>
-        </div>
+        <AuthNotice title="You're in a free trial">
+          Logging in to another account ends it. <Link href={claimUrl()}>Save your trial work first</Link>.
+        </AuthNotice>
       )}
       <form onSubmit={submit} noValidate>
-        <Field id="email" label="Email" error={show("email") ? emailErr : null}>
+        <Field id="email" label="Email" error={emailShown ? emailErr : null}>
           <input
             ref={emailRef}
             id="email"
@@ -102,75 +103,70 @@ function LoginForm() {
             type="email"
             autoComplete="email"
             inputMode="email"
+            required
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             onBlur={() => email.trim() && setTouched((t) => ({ ...t, email: true }))}
-            aria-invalid={show("email") && !!emailErr}
-            aria-describedby={show("email") && emailErr ? "email-err" : undefined}
+            aria-invalid={emailShown}
+            aria-describedby={emailShown ? "email-err" : undefined}
             placeholder="you@company.com"
           />
         </Field>
-        <Field id="password" label="Password" error={show("password") ? pwErr : null}>
+        <Field
+          id="password"
+          label="Password"
+          error={pwShown ? pwErr : null}
+          aside={
+            <Link href={ROUTES.forgotPassword} className="au-link">
+              Forgot password?
+            </Link>
+          }
+        >
           <PasswordInput
             id="password"
             autoComplete="current-password"
+            required
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             onBlur={() => password && setTouched((t) => ({ ...t, password: true }))}
-            aria-invalid={show("password") && !!pwErr}
-            aria-describedby={show("password") && pwErr ? "password-err" : undefined}
+            aria-invalid={pwShown}
+            aria-describedby={pwShown ? "password-err" : undefined}
           />
         </Field>
-        {config.emailEnabled && (
-          <div style={{ textAlign: "right", marginTop: 8 }}>
-            <Link href={ROUTES.forgotPassword} className="small" style={{ color: "var(--accent)", fontWeight: 600 }}>
-              Forgot password?
-            </Link>
-          </div>
-        )}
         {guestError && (
-          <div className="notice" role="alert" style={{ marginTop: 16, background: "var(--accent-soft)", color: "var(--ink)", alignItems: "flex-start" }}>
-            <Icon name="info" />
-            <span>
-              <b style={{ display: "block", marginBottom: 2 }}>That&apos;s a free-trial account</b>
-              {guestError}{" "}
-              <Link href={signupUrl(next)} style={{ color: "var(--accent)", fontWeight: 600, textDecoration: "underline" }}>
-                Sign up free
-              </Link>
-            </span>
-          </div>
+          <AuthNotice title="That's a free-trial account" alert>
+            {guestError} <Link href={signupUrl(next)}>Create an account</Link>
+          </AuthNotice>
         )}
         {error && <FormError>{error}</FormError>}
-        <button type="submit" className="btn p lg" style={{ width: "100%", marginTop: 20 }} disabled={busy} aria-busy={busy}>
+        <button type="submit" className="btn p lg au-submit" disabled={busy} aria-busy={busy}>
           {busy ? "Logging in…" : "Log in"}
           {!busy && <Icon name="arrow" />}
         </button>
       </form>
-      <p className="small muted" style={{ textAlign: "center", marginTop: 20 }}>
-        New to Ensemblis?{" "}
-        <Link href={signupUrl(next)} style={{ color: "var(--accent)", fontWeight: 600 }}>
-          Create an account
-        </Link>
+      <div className="au-alt">
+        <p>
+          New to Ensemblis? <Link href={signupUrl(next)}>Create an account</Link>
+        </p>
         {config.guestTrialEnabled && !user && (
-          <>
-            {" "}
-            or{" "}
-            <Link href={`${ROUTES.home}?trial=1`} style={{ color: "var(--accent)", fontWeight: 600 }}>
-              try it without an account
-            </Link>
-          </>
+          <p>
+            Or <Link href={`${ROUTES.home}?trial=1`}>try it without an account</Link>
+          </p>
         )}
-      </p>
-      <p className="tiny muted" style={{ textAlign: "center", marginTop: 8 }}>
-        Usage-based · nothing runs or is charged without your approval.
-      </p>
+      </div>
     </AuthShell>
   );
 }
 
 export default function LoginPage() {
   return (
-    <Suspense fallback={<AuthShell>{<div className="sk" style={{ height: 220 }} />}</AuthShell>}>
+    <Suspense
+      fallback={
+        <AuthShell>
+          <AuthLoading lines={2} />
+        </AuthShell>
+      }
+    >
       <LoginForm />
     </Suspense>
   );

@@ -11,7 +11,7 @@ import { errorText } from "@/lib/errors";
 import { useConfig } from "@/lib/config";
 import { firstName } from "@/lib/format";
 import { ROUTES, loginUrl, safeNext } from "@/lib/routes";
-import { AuthShell, Divider, EMAIL_RE, Field, FormError, PasswordInput, StrengthMeter } from "../login/_components/AuthUI";
+import { AuthHead, AuthLoading, AuthNotice, AuthShell, EMAIL_RE, Field, FormError, PasswordInput, StrengthMeter, authErrorText, useAutoFocus } from "../login/_components/AuthUI";
 
 type Errors = Partial<Record<"name" | "email" | "password" | "invite" | "terms" | "bot", string>>;
 
@@ -55,9 +55,8 @@ function SignupForm() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loading, user]);
 
-  useEffect(() => {
-    if (!loading) nameRef.current?.focus();
-  }, [loading]);
+  const redirecting = !!user && !user.isGuest && !done.current;
+  useAutoFocus(nameRef, !loading && !redirecting);
 
   const errors: Errors = {
     name: !name.trim() ? "Tell us your name" : undefined,
@@ -73,15 +72,10 @@ function SignupForm() {
     if (e.currentTarget.value.trim()) setTouched((t) => ({ ...t, [k]: true }));
   };
 
-  if (loading) {
+  if (loading || redirecting) {
     return (
-      <AuthShell>
-        <div aria-busy="true" aria-label="Loading">
-          <div className="sk" style={{ height: 30, width: "70%" }} />
-          <div className="sk" style={{ height: 14, width: "90%", marginTop: 12 }} />
-          <div className="sk" style={{ height: 44, marginTop: 24 }} />
-          <div className="sk" style={{ height: 44, marginTop: 14 }} />
-        </div>
+      <AuthShell intro="next" stepsOnMobile>
+        <AuthLoading lines={4} />
       </AuthShell>
     );
   }
@@ -121,7 +115,8 @@ function SignupForm() {
       if (wasClaim) setClaimed(true);
       signIn(token, u);
       toast(wasClaim ? `Your trial work is saved — welcome, ${firstName(u.name)}` : `Welcome to Ensemblis, ${firstName(u.name)}`, { icon: "check" });
-      if (!u.emailVerified) setTimeout(() => toast.info("We sent you a link to verify your email address."), 1400);
+      // Only claim a verification email went out when this deployment actually sends email.
+      if (!u.emailVerified && config.emailEnabled) setTimeout(() => toast.info("We sent you a link to verify your email address."), 1400);
       router.push(safeNext(next, wasClaim ? ROUTES.dashboard : ROUTES.context));
     } catch (err) {
       setBusy(false);
@@ -152,174 +147,183 @@ function SignupForm() {
         } else setFormError(msg);
         return;
       }
-      setFormError(errorText(err));
+      setFormError(authErrorText(err));
     }
   };
 
+  const nameErr = show("name");
+  const emailErr = !!emailTaken || !!show("email");
+  const pwErr = show("password");
+  const inviteErr = inviteError || show("invite");
+  const termsErr = submitted && errors.terms;
+  const pwStrength = !pwErr && password ? "su-password-strength" : undefined;
+
   return (
-    <AuthShell>
-      <div className="reveal">
-        {claim && (
-          <span className="tag ok">
-            <Icon name="check" />
-            Free trial in progress
-          </span>
-        )}
-        <h1 style={{ fontSize: 28, fontWeight: 650, letterSpacing: "-.03em", lineHeight: 1.1, marginTop: claim ? 10 : 0 }}>
-          {claim ? "Save your trial work" : "Create your organization"}
-        </h1>
-        <p className="muted" style={{ margin: "4px 0 4px" }}>
-          {claim
-            ? "Create your account — your trial objective and its results come with you."
-            : "Your AI Team — a Chief of Staff and four executives — is ready as soon as you sign up."}
-        </p>
-        {claimParam && !claim && !lostTrial && (
-          <div className="notice" style={{ marginTop: 12, background: "var(--surface2)", color: "var(--muted)" }}>
-            <Icon name="info" />
-            <span>We couldn&apos;t find a free-trial session in this browser, so this creates a new account.</span>
-          </div>
-        )}
-        <form onSubmit={submit} noValidate>
-          <Field id="su-name" label="Your name" error={show("name")}>
+    <AuthShell intro="next" stepsOnMobile>
+      <AuthHead
+        title={claim ? "Save your trial work" : "Create your organization"}
+        tag={
+          claim ? (
+            <span className="tag ok">
+              <Icon name="check" />
+              Free trial in progress
+            </span>
+          ) : undefined
+        }
+      >
+        {claim
+          ? "Create your account. Your trial objective and everything it produced come with you."
+          : "Your AI Team — a Chief of Staff and four executives — is ready as soon as you sign up."}
+      </AuthHead>
+      {claimParam && !claim && !lostTrial && (
+        <AuthNotice tone="neutral">We couldn&apos;t find a free-trial session in this browser, so this creates a new account.</AuthNotice>
+      )}
+      <form onSubmit={submit} noValidate>
+        <Field id="su-name" label="Your name" error={nameErr}>
+          <input
+            ref={nameRef}
+            id="su-name"
+            className="f"
+            autoComplete="name"
+            required
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            onBlur={blur("name")}
+            aria-invalid={!!nameErr}
+            aria-describedby={nameErr ? "su-name-err" : undefined}
+            maxLength={120}
+          />
+        </Field>
+        <Field id="su-company" label="Company" optional hint="Names your organization and starts your Company Context.">
+          <input
+            id="su-company"
+            className="f"
+            autoComplete="organization"
+            value={company}
+            onChange={(e) => setCompany(e.target.value)}
+            aria-describedby="su-company-hint"
+            maxLength={160}
+          />
+        </Field>
+        <Field
+          id="su-email"
+          label="Work email"
+          error={
+            emailTaken ? (
+              <>
+                {emailTaken} {!claim && <Link href={loginUrl(next)}>Log in instead</Link>}
+              </>
+            ) : (
+              show("email")
+            )
+          }
+        >
+          <input
+            id="su-email"
+            className="f"
+            type="email"
+            autoComplete="email"
+            inputMode="email"
+            required
+            value={email}
+            onChange={(e) => {
+              setEmail(e.target.value);
+              setEmailTaken(null);
+            }}
+            onBlur={blur("email")}
+            aria-invalid={emailErr}
+            aria-describedby={emailErr ? "su-email-err" : undefined}
+            placeholder="you@company.com"
+          />
+        </Field>
+        <Field id="su-password" label="Password" error={pwErr} hint={!password ? "At least 8 characters." : undefined}>
+          <PasswordInput
+            id="su-password"
+            autoComplete="new-password"
+            required
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            onBlur={blur("password")}
+            aria-invalid={!!pwErr}
+            aria-describedby={pwErr ? "su-password-err" : pwStrength ?? "su-password-hint"}
+            minLength={8}
+          />
+          {!pwErr && <StrengthMeter pw={password} id="su-password-strength" />}
+        </Field>
+        {inviteRequired && (
+          <Field id="su-invite" label="Invite code" error={inviteErr} hint="Access is invite-only for now. Your code came with your invitation.">
             <input
-              ref={nameRef}
-              id="su-name"
+              id="su-invite"
               className="f"
-              autoComplete="name"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              onBlur={blur("name")}
-              aria-invalid={!!show("name")}
-              aria-describedby={show("name") ? "su-name-err" : undefined}
-              placeholder="Alex Morgan"
+              autoComplete="off"
+              autoCapitalize="characters"
+              spellCheck={false}
+              required
+              value={invite}
+              onChange={(e) => {
+                setInvite(e.target.value);
+                setInviteError(null);
+              }}
+              onBlur={blur("invite")}
+              aria-invalid={!!inviteErr}
+              aria-describedby={inviteErr ? "su-invite-err" : "su-invite-hint"}
               maxLength={120}
             />
           </Field>
-          <Field id="su-company" label="Company" optional hint="Names your organization and starts your Company Context.">
-            <input id="su-company" className="f" autoComplete="organization" value={company} onChange={(e) => setCompany(e.target.value)} placeholder="Northstar Labs" maxLength={160} />
-          </Field>
-          <Field
-            id="su-email"
-            label="Work email"
-            error={
-              emailTaken ? (
-                <>
-                  {emailTaken}{" "}
-                  {!claim && (
-                    <Link href={loginUrl(next)} style={{ fontWeight: 600, textDecoration: "underline" }}>
-                      Log in instead
-                    </Link>
-                  )}
-                </>
-              ) : (
-                show("email")
-              )
-            }
-          >
-            <input
-              id="su-email"
-              className="f"
-              type="email"
-              autoComplete="email"
-              inputMode="email"
-              value={email}
-              onChange={(e) => {
-                setEmail(e.target.value);
-                setEmailTaken(null);
-              }}
-              onBlur={blur("email")}
-              aria-invalid={!!emailTaken || !!show("email")}
-              aria-describedby={emailTaken || show("email") ? "su-email-err" : undefined}
-              placeholder="you@company.com"
-            />
-          </Field>
-          <Field id="su-password" label="Password" error={show("password")}>
-            <PasswordInput
-              id="su-password"
-              autoComplete="new-password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              onBlur={blur("password")}
-              aria-invalid={!!show("password")}
-              aria-describedby={show("password") ? "su-password-err" : undefined}
-              minLength={8}
-            />
-            {!show("password") && <StrengthMeter pw={password} />}
-          </Field>
-          {inviteRequired && (
-            <Field id="su-invite" label="Invite code" error={inviteError || show("invite")} hint="Access is invite-only for now. Your code came with your invitation.">
-              <input
-                id="su-invite"
-                className="f"
-                autoComplete="off"
-                autoCapitalize="characters"
-                spellCheck={false}
-                value={invite}
-                onChange={(e) => {
-                  setInvite(e.target.value);
-                  setInviteError(null);
-                }}
-                onBlur={blur("invite")}
-                aria-invalid={!!inviteError || !!show("invite")}
-                aria-describedby={inviteError || show("invite") ? "su-invite-err" : "su-invite-hint"}
-                maxLength={120}
-              />
-            </Field>
-          )}
+        )}
 
-          <div style={{ marginTop: 16 }}>
-            <label htmlFor="su-terms" className="small" style={{ display: "flex", gap: 10, alignItems: "flex-start", cursor: "pointer", lineHeight: 1.45 }}>
-              <input
-                id="su-terms"
-                type="checkbox"
-                checked={agreed}
-                onChange={(e) => setAgreed(e.target.checked)}
-                required
-                style={{ width: 18, height: 18, marginTop: 1, flex: "none", accentColor: "var(--accent)" }}
-              />
-              <span>
-                I agree to the{" "}
-                <a href={ROUTES.terms} target="_blank" rel="noopener noreferrer" style={{ color: "var(--accent)", fontWeight: 600, textDecoration: "underline" }}>
-                  Terms<span className="sr-only"> (opens in a new tab)</span>
-                </a>{" "}
-                and{" "}
-                <a href={ROUTES.privacy} target="_blank" rel="noopener noreferrer" style={{ color: "var(--accent)", fontWeight: 600, textDecoration: "underline" }}>
-                  Privacy Policy<span className="sr-only"> (opens in a new tab)</span>
-                </a>
-              </span>
-            </label>
-            {submitted && errors.terms && (
-              <div className="err" role="alert" style={{ paddingLeft: 28 }}>
-                {errors.terms}
-              </div>
+        <label htmlFor="su-terms" className="au-check">
+          <input
+            id="su-terms"
+            type="checkbox"
+            checked={agreed}
+            onChange={(e) => setAgreed(e.target.checked)}
+            required
+            aria-invalid={!!termsErr}
+            aria-describedby={termsErr ? "su-terms-err" : undefined}
+          />
+          <span>
+            I agree to the{" "}
+            <a href={ROUTES.terms} target="_blank" rel="noopener noreferrer">
+              Terms<span className="sr-only"> (opens in a new tab)</span>
+            </a>{" "}
+            and{" "}
+            <a href={ROUTES.privacy} target="_blank" rel="noopener noreferrer">
+              Privacy Policy<span className="sr-only"> (opens in a new tab)</span>
+            </a>
+          </span>
+        </label>
+        {termsErr && (
+          <p className="au-err" id="su-terms-err">
+            <Icon name="alert" size={14} />
+            <span>{errors.terms}</span>
+          </p>
+        )}
+
+        {botCheck && (
+          <>
+            <Turnstile ref={ts} onToken={setTsToken} action="signup" />
+            {submitted && errors.bot && (
+              <p className="au-err" role="alert">
+                <Icon name="alert" size={14} />
+                <span>{errors.bot}</span>
+              </p>
             )}
-          </div>
+          </>
+        )}
 
-          {botCheck && (
-            <>
-              <Turnstile ref={ts} onToken={setTsToken} action="signup" />
-              {submitted && errors.bot && (
-                <div className="err" role="alert">
-                  {errors.bot}
-                </div>
-              )}
-            </>
-          )}
+        {formError && <FormError>{formError}</FormError>}
 
-          {formError && <FormError>{formError}</FormError>}
-
-          <button type="submit" className="btn p lg" style={{ width: "100%", marginTop: 16 }} disabled={busy} aria-busy={busy} data-testid="signup-submit">
-            {busy ? (claim ? "Saving…" : "Creating your organization…") : claim ? "Save my work" : "Create account"}
-            {!busy && <Icon name="arrow" />}
-          </button>
-        </form>
-        <Divider>or</Divider>
-        <p className="small muted" style={{ textAlign: "center" }}>
-          <Link href={loginUrl(next)}>
-            Already have an account? <b style={{ color: "var(--accent)" }}>Log in</b>
-          </Link>
-          {claim && <span className="tiny" style={{ display: "block" }}>Logging in ends this trial session.</span>}
+        <button type="submit" className="btn p lg au-submit" disabled={busy} aria-busy={busy} data-testid="signup-submit">
+          {busy ? (claim ? "Saving…" : "Creating your organization…") : claim ? "Save my work" : "Create organization"}
+          {!busy && <Icon name="arrow" />}
+        </button>
+      </form>
+      <div className="au-alt">
+        <p>
+          Already have an account? <Link href={loginUrl(next)}>Log in</Link>
         </p>
+        {claim && <p className="au-fine">Logging in to another account ends this free trial.</p>}
       </div>
     </AuthShell>
   );
@@ -327,7 +331,13 @@ function SignupForm() {
 
 export default function SignupPage() {
   return (
-    <Suspense fallback={<AuthShell>{<div className="sk" style={{ height: 320 }} />}</AuthShell>}>
+    <Suspense
+      fallback={
+        <AuthShell intro="next" stepsOnMobile>
+          <AuthLoading lines={4} />
+        </AuthShell>
+      }
+    >
       <SignupForm />
     </Suspense>
   );

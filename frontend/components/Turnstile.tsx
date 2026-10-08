@@ -208,34 +208,28 @@ export const Turnstile = forwardRef<TurnstileHandle, TurnstileProps>(function Tu
   if (!siteKey) return null;
 
   return (
-    <div className={className} style={{ marginTop: 16, ...style }}>
+    <div className={className ? `au-ts ${className}` : "au-ts"} style={style}>
       {/* Owned by Turnstile — React never renders children into it. */}
-      <div ref={box} style={{ width: "100%" }} aria-label="Security check" role="group" />
+      <div ref={box} className="au-ts-box" aria-label="Security check" role="group" />
       {status === "loading" && (
-        <div
-          className="row small muted"
-          style={{ gap: 8, minHeight: 65, padding: "0 14px", border: "1px dashed var(--line2)", borderRadius: 10 }}
-          aria-live="polite"
-        >
+        <div className="au-ts-loading" aria-live="polite">
           <span className="spin" aria-hidden="true" />
           Loading a quick security check…
         </div>
       )}
       {status === "error" && (
-        <div className="row small" role="alert" style={{ gap: 8, marginTop: 6, color: "var(--bad)" }}>
+        <div className="au-ts-error" role="alert">
           <Icon name="alert" size={15} />
-          <span className="sp">The security check didn&apos;t complete.</span>
+          <span>The security check didn&apos;t complete.</span>
           <button type="button" className="btn sm" onClick={reset}>
             Try again
           </button>
         </div>
       )}
       {status === "failed" && (
-        <div className="notice" role="alert" style={{ alignItems: "center" }}>
+        <div className="au-ts-failed" role="alert">
           <Icon name="alert" />
-          <span className="sp">
-            Couldn&apos;t load the security check. Check your connection or pause content blockers for this site, then try again.
-          </span>
+          <span>Couldn&apos;t load the security check. Check your connection or pause content blockers for this site, then try again.</span>
           <button type="button" className="btn sm" onClick={() => setAttempt((a) => a + 1)}>
             Retry
           </button>

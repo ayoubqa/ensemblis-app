@@ -2,14 +2,13 @@
 
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Suspense, useEffect, useState, type FormEvent } from "react";
+import { Suspense, useRef, useState, type FormEvent } from "react";
 import { Icon, useToast } from "@/components";
 import { api, ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
-import { errorText } from "@/lib/errors";
 import { firstName } from "@/lib/format";
 import { ROUTES } from "@/lib/routes";
-import { AuthShell, AuthStatus, Field, FormError, PasswordInput, StrengthMeter } from "../login/_components/AuthUI";
+import { AuthHead, AuthLoading, AuthShell, AuthStatus, Field, FormError, PasswordInput, StrengthMeter, authErrorText, useAutoFocus } from "../login/_components/AuthUI";
 
 function InvalidLink({ incomplete }: { incomplete?: boolean }) {
   return (
@@ -29,7 +28,7 @@ function InvalidLink({ incomplete }: { incomplete?: boolean }) {
         </>
       }
     >
-      <p style={{ margin: 0 }}>
+      <p>
         {incomplete
           ? "The link is missing part of its code — it may have been cut off when it was copied. Open it straight from the email, or request a new one."
           : "Reset links work once and expire after an hour, so this one can't be used any more. Request a new link and use the newest email."}
@@ -51,12 +50,12 @@ function ResetForm() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [expired, setExpired] = useState(false);
+  const pwRef = useRef<HTMLInputElement>(null);
+  const valid = !!token && token.length >= 10;
 
-  useEffect(() => {
-    document.getElementById("rp-password")?.focus();
-  }, []);
+  useAutoFocus(pwRef, valid && !expired);
 
-  if (!token || token.length < 10) return <InvalidLink incomplete />;
+  if (!valid) return <InvalidLink incomplete />;
   if (expired) return <InvalidLink />;
 
   const pwErr = password.length < 8 ? (password ? "Use at least 8 characters" : "Choose a new password") : null;
@@ -83,67 +82,64 @@ function ResetForm() {
         setExpired(true);
         return;
       }
-      setError(errorText(err, "Couldn't update your password. Please try again."));
+      setError(authErrorText(err, "Couldn't update your password. Please try again."));
     }
   };
 
+  const match = !showConfirm && confirm.length > 0 && confirm === password;
+  const pwDesc = showPw ? "rp-password-err" : password ? "rp-password-strength" : "rp-password-hint";
+  const confirmDesc = showConfirm ? "rp-confirm-err" : match ? "rp-confirm-match" : undefined;
+
   return (
     <>
-      <span
-        aria-hidden="true"
-        style={{ display: "grid", placeItems: "center", width: 48, height: 48, borderRadius: 14, background: "var(--accent-soft)", color: "var(--accent)", marginBottom: 16 }}
-      >
-        <Icon name="lock" size={22} />
-      </span>
-      <h1 className="serif" style={{ fontSize: 30, fontWeight: 600, letterSpacing: "-.03em", lineHeight: 1.1 }}>
-        Choose a new password
-      </h1>
-      <p className="muted" style={{ margin: "4px 0 6px" }}>
-        Pick something you don&apos;t use anywhere else. You&apos;ll be signed in right after.
-      </p>
+      <AuthHead icon="lock" title="Choose a new password">
+        Pick something you don&apos;t use anywhere else. You&apos;ll be logged in right after.
+      </AuthHead>
       <form onSubmit={submit} noValidate>
-        <Field id="rp-password" label="New password" error={showPw ? pwErr : null}>
+        <Field id="rp-password" label="New password" error={showPw ? pwErr : null} hint={!password ? "At least 8 characters." : undefined}>
           <PasswordInput
+            ref={pwRef}
             id="rp-password"
             autoComplete="new-password"
+            required
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             onBlur={() => password && setTouched((t) => ({ ...t, password: true }))}
             aria-invalid={showPw}
-            aria-describedby={showPw ? "rp-password-err" : undefined}
+            aria-describedby={pwDesc}
             minLength={8}
           />
-          {!showPw && <StrengthMeter pw={password} />}
+          {!showPw && <StrengthMeter pw={password} id="rp-password-strength" />}
         </Field>
         <Field id="rp-confirm" label="Confirm new password" error={showConfirm ? confirmErr : null}>
           <PasswordInput
             id="rp-confirm"
             autoComplete="new-password"
+            required
             value={confirm}
             onChange={(e) => setConfirm(e.target.value)}
             onBlur={() => confirm && setTouched((t) => ({ ...t, confirm: true }))}
             aria-invalid={showConfirm}
-            aria-describedby={showConfirm ? "rp-confirm-err" : undefined}
+            aria-describedby={confirmDesc}
           />
-          {!showConfirm && confirm.length > 0 && confirm === password && (
-            <div className="hint row" style={{ gap: 6, color: "var(--ok)" }}>
-              <Icon name="check" size={13} />
+          {match && (
+            <p className="au-hint ok" id="rp-confirm-match">
+              <Icon name="check" size={14} />
               Passwords match
-            </div>
+            </p>
           )}
         </Field>
         {error && <FormError>{error}</FormError>}
-        <button type="submit" className="btn p lg" style={{ width: "100%", marginTop: 20 }} disabled={busy} aria-busy={busy}>
+        <button type="submit" className="btn p lg au-submit" disabled={busy} aria-busy={busy}>
           {busy ? "Saving…" : "Save new password"}
           {!busy && <Icon name="arrow" />}
         </button>
       </form>
-      <p className="small muted" style={{ textAlign: "center", marginTop: 20 }}>
-        Link not working?{" "}
-        <Link href={ROUTES.forgotPassword} style={{ color: "var(--accent)", fontWeight: 600 }}>
-          Request a new one
-        </Link>
-      </p>
+      <div className="au-alt">
+        <p>
+          Link not working? <Link href={ROUTES.forgotPassword}>Request a new one</Link>
+        </p>
+      </div>
     </>
   );
 }
@@ -151,7 +147,7 @@ function ResetForm() {
 export default function ResetPasswordPage() {
   return (
     <AuthShell>
-      <Suspense fallback={<div className="sk" style={{ height: 260 }} aria-busy="true" />}>
+      <Suspense fallback={<AuthLoading lines={2} />}>
         <ResetForm />
       </Suspense>
     </AuthShell>
