@@ -1,0 +1,68 @@
+name: Real-model smoke
+
+# Manual only: it spends real AI tokens. Runs backend/scripts/real-model-smoke.mjs
+# (scenarios A–D) against the provider configured by repository secrets:
+#   SMOKE_OPENAI_API_KEY (+ optional variables SMOKE_OPENAI_BASE_URL, SMOKE_OPENAI_MODEL)
+#   or SMOKE_ANTHROPIC_API_KEY;  optional SMOKE_TAVILY_API_KEY for real web search.
+on:
+  workflow_dispatch:
+    inputs:
+      provider:
+        description: "AI provider"
+        type: choice
+        options: [openai, anthropic]
+        default: openai
+      scenarios:
+        description: "Scenarios (A,B,C,D)"
+        default: "A,B,C,D"
+      full:
+        description: "Run B and C to completion too (≈3× tokens)"
+        type: boolean
+        default: false
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: ensemblis
+          POSTGRES_PASSWORD: ensemblis
+          POSTGRES_DB: ensemblis_smoke
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U ensemblis" --health-interval 5s --health-timeout 5s --health-retries 10
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci && npm run build
+      - name: Run the real-model smoke test
+        env:
+          AI_PROVIDER: ${{ inputs.provider }}
+          OPENAI_API_KEY: ${{ secrets.SMOKE_OPENAI_API_KEY }}
+          OPENAI_BASE_URL: ${{ vars.SMOKE_OPENAI_BASE_URL || 'https://api.groq.com/openai/v1' }}
+          OPENAI_MODEL: ${{ vars.SMOKE_OPENAI_MODEL || 'openai/gpt-oss-120b' }}
+          OPENAI_FAST_MODEL: ${{ vars.SMOKE_OPENAI_FAST_MODEL || 'openai/gpt-oss-20b' }}
+          OPENAI_REASONING_EFFORT: low
+          OPENAI_MAX_TOKENS: "8192"
+          ANTHROPIC_API_KEY: ${{ secrets.SMOKE_ANTHROPIC_API_KEY }}
+          TAVILY_API_KEY: ${{ secrets.SMOKE_TAVILY_API_KEY }}
+          SMOKE_SCENARIOS: ${{ inputs.scenarios }}
+          SMOKE_FULL: ${{ inputs.full && '1' || '0' }}
+          SMOKE_DATABASE_URL: postgresql://ensemblis:ensemblis@localhost:5432/ensemblis_smoke?schema=public
+        run: npm run smoke:real
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: real-model-smoke-report
+          path: backend/smoke-results
+          retention-days: 30

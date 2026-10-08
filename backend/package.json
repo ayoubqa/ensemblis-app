@@ -19,7 +19,9 @@
     "lint": "eslint src tests",
     "test": "vitest run",
     "test:unit": "vitest run tests/unit",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "check:worker-restart": "node scripts/worker-restart-check.mjs",
+    "smoke:real": "node scripts/real-model-smoke.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.32.1",
