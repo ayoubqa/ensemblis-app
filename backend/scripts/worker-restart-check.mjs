@@ -46,6 +46,13 @@ const check = (ok, msg) => {
   console.log(`${ok ? "PASS" : "FAIL"}  ${msg}`);
 };
 
+// This database is RESET on every run: refuse anything that doesn't look like a throwaway one.
+const dbName = new URL(db).pathname.replace(/^\//, "");
+if (!/restart|test/i.test(dbName)) {
+  console.error(`Refusing to reset "${dbName}": the database name must contain "restart" or "test".`);
+  process.exit(2);
+}
+
 const prisma = require.resolve("prisma/build/index.js");
 const reset = spawnSync(process.execPath, [prisma, "migrate", "reset", "--force", "--skip-seed", "--skip-generate"], { env, stdio: "ignore" });
 if (reset.status !== 0) {

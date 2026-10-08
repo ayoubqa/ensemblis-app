@@ -37,6 +37,13 @@ const env = {
   LOG_LEVEL: process.env.LOG_LEVEL || "warn",
 };
 
+// This database is RESET on every run: refuse anything that doesn't look like a throwaway one.
+const dbName = new URL(db).pathname.replace(/^\//, "");
+if (!/e2e|test/i.test(dbName)) {
+  console.error(`Refusing to reset "${dbName}": the database name must contain "e2e" or "test".`);
+  process.exit(2);
+}
+
 const prisma = require.resolve("prisma/build/index.js");
 const reset = spawnSync(process.execPath, [prisma, "migrate", "reset", "--force", "--skip-seed", "--skip-generate"], { env, stdio: "inherit" });
 if (reset.status !== 0) process.exit(reset.status ?? 1);

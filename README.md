@@ -102,7 +102,19 @@ cd frontend && npm run lint && npm run typecheck && npm test
 
 # end to end — real browser, real API, separate worker, mock AI
 cd backend && npm run build && cd ../frontend && npm run e2e
+
+# worker crash/deploy recovery with real processes (SIGKILL and SIGTERM mid-step)
+cd backend && npm run build && npm run check:worker-restart
+
+# REAL model (spends tokens): planner, executor and verifier on 4 scenarios
+cd backend && AI_PROVIDER=openai OPENAI_API_KEY=… npm run smoke:real
 ```
+
+The mock suites prove the execution architecture; `smoke:real` (also a manual
+GitHub Actions workflow, "Real-model smoke") checks the intelligence: valid
+plans with real capabilities, exceptions instead of invented facts,
+cross-functional staffing, evidence-linked verification and resistance to an
+instruction planted in a company document.
 
 What the suites cover: the full objective lifecycle; step retries, exhausted
 retries → exception → retry without double charge; config errors; crash
@@ -123,6 +135,11 @@ and build; then the Playwright suite.
 ---
 
 ## Deploying
+
+**Production rollout, environment checklist, smoke test and rollback: see
+[DEPLOYMENT.md](DEPLOYMENT.md).** Roll back only to the `v3-rollback-safe`
+branch, never to v3 as it was (its boot-time `prisma db push` fails against the
+v4 schema).
 
 | Piece | Host |
 |---|---|
