@@ -5,7 +5,7 @@
 export const EXAMPLE_OBJECTIVES: { label: string; statement: string; criteria: string[] }[] = [
   {
     label: "European expansion",
-    statement: "Analyze the European market for our product and recommend the three highest-potential markets for expansion next year.",
+    statement: "Analyse the European market for our product and recommend the three highest-potential markets for expansion next year.",
     criteria: ["Recommend 3 markets, ranked with a rationale", "Each recommendation is supported by cited evidence", "Entry risks are stated for each market"],
   },
   {
@@ -30,14 +30,14 @@ export const EXAMPLE_OBJECTIVES: { label: string; statement: string; criteria: s
   },
 ];
 
-/** The outcome loop, in the order Ensemblis runs it (landing page + empty states). */
+/** How an outcome is delivered, in the order Ensemblis runs it (Home, for a new organization). */
 export const LOOP: { key: string; title: string; body: string }[] = [
   { key: "objective", title: "Objective", body: "You describe the business result you need, how success is judged, a deadline and a budget." },
-  { key: "plan", title: "Plan", body: "The Chief of Staff turns it into a short plan and assigns each step to the executive who owns that capability." },
-  { key: "approve", title: "Approve", body: "You review the plan and the cost. Nothing is executed or charged before that — unless you allow it within a budget." },
-  { key: "execute", title: "Execute", body: "Specialists research and analyse with read-only tools. Every source becomes numbered evidence." },
-  { key: "verify", title: "Verify", body: "A verification gate checks claims against the evidence, coverage of each success criterion, completeness and consistency." },
-  { key: "outcome", title: "Outcome", body: "You get the result, the evidence behind it, and whether each success criterion was met." },
+  { key: "plan", title: "Plan", body: "The Chief of Staff frames it with your Company Context and assigns each step to the executive who owns that capability." },
+  { key: "approve", title: "Approval", body: "You review the plan and its estimated cost. Nothing is executed or charged before that — unless you allow it within a budget." },
+  { key: "execute", title: "Execution", body: "Your AI Team's specialists research and analyse with read-only tools. Every source becomes numbered evidence." },
+  { key: "verify", title: "Verification", body: "Claims are checked against the evidence, and each success criterion, completeness and consistency are assessed." },
+  { key: "outcome", title: "Outcome", body: "You get the result, the evidence behind it and whether each success criterion was met. What was learned is proposed for Memory." },
 ];
 
 export const FREQ_PER = { Weekly: "week", Monthly: "month", Quarterly: "quarter" } as const;
