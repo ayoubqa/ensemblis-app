@@ -559,7 +559,7 @@ async function runWithOpenAI(systemPrompt: string, userContent: string, opts: LL
         if (!sink.emitted && attempt < MAX_RETRIES) {
           const wait = backoffMs(attempt, null);
           if (Date.now() + wait < deadline) {
-            console.warn(`[llm] stream interrupted before any output (${errMsg(err)}) — retry ${attempt + 1}/${MAX_RETRIES} in ${wait}ms`);
+            log.warn("llm.retry", { provider: "openai", model, purpose: opts.purpose, executionId: opts.executionId ?? undefined, reason: "stream_interrupted", error: errMsg(err), retry: attempt + 1, of: MAX_RETRIES, waitMs: wait });
             await sleep(wait);
             continue;
           }
@@ -594,7 +594,7 @@ async function runWithOpenAI(systemPrompt: string, userContent: string, opts: LL
     if (RETRYABLE.has(res.status) && attempt < MAX_RETRIES && !sink.emitted && !longQuotaWait) {
       const wait = backoffMs(attempt, res.headers.get("retry-after"));
       if (Date.now() + wait < deadline) {
-        console.warn(`[llm] ${res.status} from AI provider — retry ${attempt + 1}/${MAX_RETRIES} in ${wait}ms`);
+        log.warn("llm.retry", { provider: "openai", model, purpose: opts.purpose, executionId: opts.executionId ?? undefined, reason: `http_${res.status}`, retry: attempt + 1, of: MAX_RETRIES, waitMs: wait });
         await sleep(wait);
         continue;
       }
