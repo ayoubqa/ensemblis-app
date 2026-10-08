@@ -60,6 +60,8 @@ export interface LLMResult {
   model: string;
   tokensIn: number;
   tokensOut: number;
+  /** True when the provider stopped at the output-token limit: the text is cut off. */
+  truncated?: boolean;
 }
 
 export function currentProvider(): Provider {
@@ -76,7 +78,9 @@ export function currentProvider(): Provider {
 // Test hook: replaces every provider with a scripted handler (unit/integration tests).
 // ---------------------------------------------------------------------------
 
-export type LLMHandler = (systemPrompt: string, userContent: string, opts: LLMOptions) => Promise<string> | string;
+/** Test/mock handler: returns the reply text, or { text, truncated } to simulate a reply cut off at the token limit. */
+export type LLMHandler = (systemPrompt: string, userContent: string, opts: LLMOptions) => Promise<string | HandlerReply> | string | HandlerReply;
+export type HandlerReply = { text: string; truncated?: boolean };
 let testHandler: LLMHandler | null = null;
 
 /** Tests only: route every runLLM call through `handler` (null restores the configured provider). */
@@ -310,14 +314,13 @@ async function runWithOllama(systemPrompt: string, userContent: string, opts: LL
           { role: "system", content: systemPrompt },
           { role: "user", content: userContent },
         ],
-        ...(opts.maxTokens || opts.temperature !== undefined
-          ? {
-              options: {
-                ...(opts.maxTokens ? { num_predict: opts.maxTokens } : {}),
-                ...(opts.temperature !== undefined ? { temperature: opts.temperature } : {}),
-              },
-            }
-          : {}),
+        options: {
+          // Ollama's default context window (2–4k tokens) silently truncates our prompts from the start,
+          // dropping the system rules and the objective. llama3.2 supports far more.
+          num_ctx: Number(process.env.OLLAMA_NUM_CTX) || 16384,
+          ...(opts.maxTokens ? { num_predict: opts.maxTokens } : {}),
+          ...(opts.temperature !== undefined ? { temperature: opts.temperature } : {}),
+        },
       }),
     });
   } catch (err) {
@@ -337,11 +340,13 @@ async function runWithOllama(systemPrompt: string, userContent: string, opts: LL
 
   let tokensIn = 0;
   let tokensOut = 0;
+  let truncated = false;
   const parser = new NDJSONParser((line) => {
     let obj: {
       message?: { content?: unknown };
       error?: unknown;
       done?: boolean;
+      done_reason?: unknown;
       prompt_eval_count?: unknown;
       eval_count?: unknown;
     };
@@ -354,6 +359,7 @@ async function runWithOllama(systemPrompt: string, userContent: string, opts: LL
     if (typeof obj.message?.content === "string") sink.add(obj.message.content);
     if (typeof obj.prompt_eval_count === "number") tokensIn = obj.prompt_eval_count;
     if (typeof obj.eval_count === "number") tokensOut = obj.eval_count;
+    if (obj.done_reason === "length") truncated = true;
   });
 
   try {
@@ -365,7 +371,7 @@ async function runWithOllama(systemPrompt: string, userContent: string, opts: LL
   }
 
   if (!sink.text.trim()) throw new Error("Ollama returned an empty response");
-  return { text: sink.text, provider: "ollama", model, tokensIn, tokensOut };
+  return { text: sink.text, provider: "ollama", model, tokensIn, tokensOut, truncated };
 }
 
 // ---------------------------------------------------------------------------
@@ -575,12 +581,17 @@ async function runWithOpenAI(systemPrompt: string, userContent: string, opts: LL
         model,
         tokensIn: state.usage?.in ?? approxTokens(systemPrompt + userContent),
         tokensOut: state.usage?.out ?? approxTokens(sink.text),
+        truncated: state.finish === "length",
       };
     }
 
     const body = (await res.text().catch(() => "")).slice(0, 300);
 
-    if (RETRYABLE.has(res.status) && attempt < MAX_RETRIES && !sink.emitted) {
+    // A 429 whose Retry-After is longer than we'd wait (a per-minute/day quota window) fails now
+    // instead of burning the remaining retries on requests the provider will reject.
+    const hintedWait = parseRetryAfter(res.headers.get("retry-after"));
+    const longQuotaWait = res.status === 429 && hintedWait !== null && hintedWait > MAX_RETRY_WAIT_MS;
+    if (RETRYABLE.has(res.status) && attempt < MAX_RETRIES && !sink.emitted && !longQuotaWait) {
       const wait = backoffMs(attempt, res.headers.get("retry-after"));
       if (Date.now() + wait < deadline) {
         console.warn(`[llm] ${res.status} from AI provider — retry ${attempt + 1}/${MAX_RETRIES} in ${wait}ms`);
@@ -599,7 +610,7 @@ async function runWithOpenAI(systemPrompt: string, userContent: string, opts: LL
       throw new Error("AI rate limit reached: the free AI quota is used up for now — try again later.");
     }
     if (res.status === 413) {
-      throw new Error("This request is too large for the AI model's free-tier limits. Try a shorter brief or a lighter depth.");
+      throw new Error("This request is too large for the AI model's limits (provider request-size cap). Shorten the objective, context notes or documents, or use a model with a higher limit.");
     }
     if (res.status === 404) {
       throw new Error(`The AI provider doesn't recognise the model "${model}" (check OPENAI_MODEL / OPENAI_FAST_MODEL). ${body}`.trim());
@@ -661,6 +672,7 @@ async function runWithAnthropic(systemPrompt: string, userContent: string, opts:
       model,
       tokensIn: message.usage?.input_tokens ?? approxTokens(systemPrompt + userContent),
       tokensOut: message.usage?.output_tokens ?? approxTokens(text),
+      truncated: message.stop_reason === "max_tokens",
     };
   } catch (err) {
     if (timedOut || isAbort(err)) throw timeoutError(ms);
@@ -689,7 +701,9 @@ async function runWithHandler(
   opts: LLMOptions,
   sink: TextSink
 ): Promise<LLMResult> {
-  const text = await handler(systemPrompt, userContent, opts);
+  const reply = await handler(systemPrompt, userContent, opts);
+  const text = typeof reply === "string" ? reply : reply.text;
+  const truncated = typeof reply === "string" ? false : !!reply.truncated;
   if (!text || !text.trim()) throw new Error("The AI model returned an empty response");
   // Stream it in a few chunks so live-output code paths are exercised too.
   // MOCK_AI_DELAY_MS (mock provider only) spreads a step's output over that
@@ -700,7 +714,7 @@ async function runWithHandler(
     sink.add(text.slice(i, i + size));
     if (delay) await new Promise((r) => setTimeout(r, delay / 4));
   }
-  return { text, provider, model: "mock", tokensIn: approxTokens(systemPrompt + userContent), tokensOut: approxTokens(text) };
+  return { text, provider, model: "mock", tokensIn: approxTokens(systemPrompt + userContent), tokensOut: approxTokens(text), truncated };
 }
 
 /**

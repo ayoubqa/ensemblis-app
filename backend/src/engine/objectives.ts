@@ -11,6 +11,7 @@ import { HttpError } from "../lib/http";
 import type { OrgContext } from "../org/organization";
 import { runLLM } from "../ai/llmProvider";
 import { parseStructured } from "../ai/json";
+import { listOf, strList, text } from "../ai/lenient";
 import { clip, collapse } from "../research/text";
 import { createExecution, enqueueTick } from "./lifecycle";
 import { block } from "./prompts";
@@ -157,9 +158,9 @@ export async function replaceCriteria(org: OrgContext, objectiveId: string, list
 // ---------------------------------------------------------------- suggestions
 
 const suggestSchema = z.object({
-  title: z.string().min(3).max(140),
-  criteria: z.array(z.object({ description: z.string().min(3).max(300), kind: z.enum(["qualitative", "quantitative"]).catch("qualitative") })).max(5).default([]),
-  questions: z.array(z.string().min(5).max(200)).max(3).default([]),
+  title: text(140, 3),
+  criteria: listOf(z.object({ description: text(300, 3), kind: z.preprocess((v) => (typeof v === "string" ? v.trim().toLowerCase() : v), z.enum(["qualitative", "quantitative"])).catch("qualitative") }), 5).default([]),
+  questions: strList(3, 200).default([]),
 });
 
 export interface Suggestion {

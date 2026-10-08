@@ -55,6 +55,11 @@ export function extractNumbers(text: string): string[] {
   return [...out];
 }
 
+const DURATION_UNITS = "(?:second|minute|hour|day|week|month|quarter|year)s?";
+function isDuration(text: string, n: string): boolean {
+  return new RegExp(`(?<![\\d.])${n}(?:[\\s-]+${DURATION_UNITS}\\b)`, "i").test(text.replace(/(\d)[ ,](?=\d{3}\b)/g, "$1"));
+}
+
 function stripMarkdown(s: string): string {
   return s
     .replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1")
@@ -83,10 +88,13 @@ export function extractClaims(md: string, max = 30): Claim[] {
     const text = stripMarkdown(u);
     if (text.length < 20) continue;
     const citations = parseCitations(text);
-    const numbers = extractNumbers(text);
-    const isEstimate = /\b(estimate[ds]?|est\.|approximately|roughly|assum(e|ed|ption))\b/i.test(text);
-    if (!citations.length && !numbers.length) continue;
-    claims.push({ text: text.replace(CITE_RE, "").replace(/\s+/g, " ").trim(), citations, numbers, isEstimate });
+    // Durations ("within 30 days", "a 12-month pilot") are plan details, not figures to source.
+    const figures = extractNumbers(text).filter((n) => !isDuration(text, n));
+    // A year in an uncited sentence is a date in a plan ("by 2027"); in a cited claim it is checked against the evidence.
+    const uncitedFigures = figures.filter((n) => !/^(19|20)\d{2}$/.test(n));
+    const isEstimate = /\b(estimate[ds]?|est\.|approximately|roughly|assum(e|ed|ption)|unverified|unconfirmed)\b/i.test(text);
+    if (!citations.length && !uncitedFigures.length) continue;
+    claims.push({ text: text.replace(CITE_RE, "").replace(/\s+/g, " ").trim(), citations, numbers: citations.length ? figures : uncitedFigures, isEstimate });
     if (claims.length >= max) break;
   }
   return claims;

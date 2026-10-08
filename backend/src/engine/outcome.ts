@@ -19,6 +19,14 @@ export interface CriterionMeasurement {
   method: "model-assessed" | "deterministic" | "not-assessed";
 }
 
+const UPPER_BOUND = /\b(under|below|less than|fewer than|at most|no more than|max(imum)?|within|cap(ped)?|up to|lower than|not exceed(ing)?|or less)\b/i;
+const RANK: Record<CriterionResult, number> = { MET: 3, PARTIALLY_MET: 2, NOT_MET: 1, UNKNOWN: 0 };
+/** The more conservative of two results (UNKNOWN from the model doesn't override a count). */
+function worse(counted: CriterionResult, judged: CriterionResult): CriterionResult {
+  if (judged === "UNKNOWN") return counted;
+  return RANK[judged] < RANK[counted] ? judged : counted;
+}
+
 export function measureCriterion(c: Pick<SuccessCriterion, "id" | "description" | "targetValue" | "unit">, a: CriterionAssessment | undefined): CriterionMeasurement {
   if (!a) {
     return {
@@ -30,9 +38,13 @@ export function measureCriterion(c: Pick<SuccessCriterion, "id" | "description" 
       method: "not-assessed",
     };
   }
-  if (c.targetValue != null && a.measuredValue != null) {
+  // The deterministic count only applies to "at least N" targets ("three markets", "10 leads"). For a
+  // cap ("CAC under €50", "within 30 days") a bigger number is worse, so the verifier's own status stands.
+  if (c.targetValue != null && a.measuredValue != null && !UPPER_BOUND.test(c.description)) {
     const ratio = c.targetValue === 0 ? (a.measuredValue === 0 ? 1 : 0) : a.measuredValue / c.targetValue;
-    const result: CriterionResult = ratio >= 1 ? "MET" : ratio >= 0.5 ? "PARTIALLY_MET" : "NOT_MET";
+    const counted: CriterionResult = ratio >= 1 ? "MET" : ratio >= 0.5 ? "PARTIALLY_MET" : "NOT_MET";
+    // Never better than the verifier's judgement: three markets listed but two unsupported is not MET.
+    const result = worse(counted, a.status);
     return {
       criterionId: c.id,
       result,

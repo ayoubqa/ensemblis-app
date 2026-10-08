@@ -54,6 +54,8 @@ const stepSchema = z.object({
   dependsOn: strList(8, 20).default([]),
 });
 
+const isBlocking = (q: unknown) => !!q && typeof q === "object" && /^(true|yes)$/i.test(String((q as { blocking?: unknown }).blocking));
+
 // Tolerant on purpose (see ai/lenient.ts): long text is trimmed, numbers may be
 // strings, a malformed step or criterion is dropped instead of discarding the
 // plan. The registry check in normalizePlan is what keeps the plan honest.
@@ -62,7 +64,13 @@ export const planSchema = z.object({
   objective: text(800, 5),
   successCriteria: listOf(criterionSchema, 6).default([]),
   assumptions: strList(8, 300).default([]),
-  missingInformation: listOf(z.object({ question: text(300, 5), whyItMatters: text(300).default(""), blocking: bool().default(false) }), 3).default([]),
+  // At most 3 questions are kept; blocking ones first, so a long list never loses the question that matters.
+  missingInformation: z
+    .preprocess(
+      (v) => (Array.isArray(v) ? [...v].sort((a, b) => Number(isBlocking(b)) - Number(isBlocking(a))) : v),
+      listOf(z.object({ question: text(300, 5), whyItMatters: text(300).default(""), blocking: bool().default(false) }), 3)
+    )
+    .default([]),
   steps: listOf(stepSchema, 20).pipe(z.array(stepSchema).min(1)),
   estimatedManualHours: num().pipe(z.number().min(0).max(2000)).nullable().optional().catch(null),
   risks: strList(6, 300).default([]),
@@ -385,7 +393,7 @@ function plannerPrompt(input: PlannerInput): { system: string; user: string } {
     '- Step ids are "s1", "s2", … in order. dependsOn lists earlier step ids only.',
     "- Each step: a specific title, the purpose (what this step must establish for THIS objective), inputs, outputs and what the verifier should check.",
     "- If the user gave success criteria, do not replace them (return successCriteria: []). Otherwise propose 2–4 measurable criteria; use kind \"quantitative\" with targetValue/unit when the objective implies a number (e.g. \"three markets\" → 3, \"markets\").",
-    "- missingInformation: only information that is absent from the objective AND the company context and would materially change the result. Mark blocking=true only if the result would be meaningless without it.",
+    "- missingInformation: at most 3 items, only information that is absent from the objective AND the company context and would materially change the result. Mark blocking=true only if the result would be meaningless without it.",
     "- estimatedManualHours: honest estimate of how long a competent analyst would need.",
     'JSON shape: {"title": str, "objective": str, "successCriteria": [{"description": str, "kind": "qualitative"|"quantitative", "targetValue": number|null, "unit": str|null}], "assumptions": [str], "missingInformation": [{"question": str, "whyItMatters": str, "blocking": bool}], "steps": [{"id": str, "title": str, "executive": str, "capability": str, "purpose": str, "inputs": [str], "outputs": [str], "verification": [str], "dependsOn": [str]}], "estimatedManualHours": number, "risks": [str]}',
   ].join("\n");

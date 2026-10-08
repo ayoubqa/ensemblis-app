@@ -10,6 +10,10 @@ import { setLLMHandlerForTests } from "../../src/ai/llmProvider";
 import { runStructured } from "../../src/ai/structured";
 import { normalizePlan, planObjective, planSchema, resolveCapability, type PlannerInput } from "../../src/engine/planner";
 import { assessResult } from "../../src/engine/verification/assessor";
+import { extractClaims } from "../../src/engine/verification/checks";
+import { measureCriterion } from "../../src/engine/outcome";
+import { isConfigError } from "../../src/engine/executor";
+import { suggestForStatement } from "../../src/engine/objectives";
 import { z } from "zod";
 
 afterEach(() => setLLMHandlerForTests(null));
@@ -190,7 +194,7 @@ describe("verifier assessment tolerance", () => {
           { index: 2, status: "Partially met", measurement: "risks listed for two of three markets" },
         ],
         consistencyIssues: [],
-        humanJudgment: ["Confirm the budget assumption"],
+        humanJudgment: ["Confirm the budget assumption", "b", "c", "d", "e", "f", "g"],
       })}`
     );
     const a = await assessResult(args);
@@ -199,11 +203,63 @@ describe("verifier assessment tolerance", () => {
     expect(a!.criteria.map((c) => c.status)).toEqual(["MET", "PARTIALLY_MET"]);
     expect(a!.criteria[0].measuredValue).toBe(3);
     expect(a!.alignmentRationale.length).toBeLessThanOrEqual(600);
+    expect(a!.humanJudgment).toHaveLength(6);
   });
 
   it("an invalid status is dropped, never turned into MET", async () => {
     setLLMHandlerForTests(async () => JSON.stringify({ objectiveAlignment: { score: 70 }, criteria: [{ index: 1, status: "probably" }, { index: 2, status: "NOT_MET" }] }));
     const a = await assessResult(args);
     expect(a!.criteria).toEqual([expect.objectContaining({ index: 2, status: "NOT_MET" })]);
+  });
+});
+
+describe("planner questions", () => {
+  it("keeps a blocking question even when the model lists more than three", () => {
+    const qs = [1, 2, 3].map((i) => ({ question: `Nice-to-know question number ${i}?`, blocking: false }));
+    const r = parseStructured(JSON.stringify({ ...PLAN, missingInformation: [...qs, { question: "Which product are we expanding?", blocking: "true" }] }), planSchema);
+    expect(r.ok && r.data.missingInformation.map((q) => q.blocking)).toEqual([true, false, false]);
+  });
+});
+
+describe("outcome measurement direction", () => {
+  const base = { id: "c1", unit: "€" };
+  it("a cap ('under €50') uses the verifier's judgement, not 'at least N'", () => {
+    const c = { ...base, description: "Customer acquisition cost under €50", targetValue: 50 };
+    expect(measureCriterion(c, { index: 1, status: "MET", measuredValue: 38, measurement: "CAC €38", explanation: "" }).result).toBe("MET");
+    expect(measureCriterion(c, { index: 1, status: "NOT_MET", measuredValue: 120, measurement: "CAC €120", explanation: "" }).result).toBe("NOT_MET");
+  });
+  it("a count never upgrades the verifier's verdict", () => {
+    const c = { ...base, description: "Recommend 3 markets", targetValue: 3, unit: "markets" };
+    expect(measureCriterion(c, { index: 1, status: "PARTIALLY_MET", measuredValue: 3, measurement: "3 markets, 2 unsupported", explanation: "" }).result).toBe("PARTIALLY_MET");
+    expect(measureCriterion(c, { index: 1, status: "UNKNOWN", measuredValue: 3, measurement: "3 markets", explanation: "" }).result).toBe("MET");
+  });
+});
+
+describe("uncited figures", () => {
+  it("plan dates and durations are not flagged; a real uncited figure is", () => {
+    const md = ["## Next steps", "- Within 30 days, run a pilot with two customers.", "- By March 2027, decide on the second market.", "- Plan a 12-month rollout (unverified).", "- The market grew 18% in 2025."].join("\n");
+    const claims = extractClaims(md);
+    expect(claims.map((c) => c.numbers)).toEqual([["18"]]);
+  });
+  it("'unverified' counts as a label", () => {
+    expect(extractClaims("- Revenue could reach 4.2 million in year one (unverified).")[0].isEstimate).toBe(true);
+  });
+});
+
+describe("provider limits", () => {
+  it("a request too large for the model is a configuration problem, not something to retry", () => {
+    expect(isConfigError("This request is too large for the AI model's limits (provider request-size cap).")).toBe(true);
+  });
+});
+
+describe("criteria suggestions from a real model", () => {
+  it("keeps the answer despite case and length slips", async () => {
+    setLLMHandlerForTests(async () =>
+      JSON.stringify({ title: "Expansion", criteria: [{ description: "Recommend three markets, ranked", kind: "Quantitative" }, { description: "x" }], questions: ["Q".repeat(400)] })
+    );
+    const s = await suggestForStatement("Recommend the three best European markets for our product.", "");
+    expect(s.source).toBe("model");
+    expect(s.criteria.map((c) => c.description)).toEqual(["Recommend three markets, ranked"]);
+    expect(s.questions[0]).toHaveLength(200);
   });
 });

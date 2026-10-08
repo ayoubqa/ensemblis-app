@@ -8,22 +8,23 @@
 import { z } from "zod";
 import { runLLM } from "../ai/llmProvider";
 import { parseStructured } from "../ai/json";
+import { listOf, looseEnum, text } from "../ai/lenient";
 import { recordLearnedMemories, type ProposedMemory } from "../memory/service";
 import { clip } from "../research/text";
 import { block, TRUST_RULES } from "./prompts";
 
+// One bad item (wrong case, too long) drops only that item. Memory text is never cut short —
+// a truncated statement could be remembered as something it doesn't say.
 const schema = z.object({
-  memories: z
-    .array(
-      z.object({
-        kind: z.enum(["PREFERENCE", "DECISION", "LESSON", "CONSTRAINT", "FACT"]),
-        content: z.string().min(12).max(400),
-        rationale: z.string().max(300).default(""),
-        sensitivity: z.enum(["low", "high"]).catch("high"),
-      })
-    )
-    .max(5)
-    .default([]),
+  memories: listOf(
+    z.object({
+      kind: looseEnum<"PREFERENCE" | "DECISION" | "LESSON" | "CONSTRAINT" | "FACT">(["PREFERENCE", "DECISION", "LESSON", "CONSTRAINT", "FACT"]),
+      content: z.string().trim().min(12).max(400),
+      rationale: text(300).default(""),
+      sensitivity: z.preprocess((v) => (typeof v === "string" ? v.trim().toLowerCase() : v), z.enum(["low", "high"])).catch("high"),
+    }),
+    5
+  ).default([]),
 });
 
 export async function learnFromExecution(args: {

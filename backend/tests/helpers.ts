@@ -45,11 +45,11 @@ export async function fillContext(auth: Record<string, string>) {
     .expect(200);
 }
 
-import { setLLMHandlerForTests, type LLMOptions } from "../src/ai/llmProvider";
+import { setLLMHandlerForTests, type HandlerReply, type LLMOptions } from "../src/ai/llmProvider";
 import { mockLLM } from "../src/ai/mockProvider";
 
 /** Scripts the model: `override` may answer a call (return a string / throw) or return undefined to fall back to the mock. */
-export function scriptLLM(override: (system: string, user: string, opts: LLMOptions) => string | undefined | Promise<string | undefined>) {
+export function scriptLLM(override: (system: string, user: string, opts: LLMOptions) => string | HandlerReply | undefined | Promise<string | HandlerReply | undefined>) {
   setLLMHandlerForTests(async (system, user, opts) => {
     const r = await override(system, user, opts);
     return r ?? mockLLM(system, user, opts);

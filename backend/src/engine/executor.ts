@@ -37,7 +37,8 @@ export class StepError extends Error {
 
 /** Errors no retry can fix (operator configuration). */
 export function isConfigError(message: string): boolean {
-  return /isn't configured|rejected the server's API key|doesn't recognise the model|AI_PROVIDER/i.test(message);
+  // "too large for the AI model": the same prompt is rejected every time (provider request-size limit).
+  return /isn't configured|rejected the server's API key|doesn't recognise the model|AI_PROVIDER|too large for the AI model/i.test(message);
 }
 
 export interface StepRunInput {
@@ -314,6 +315,14 @@ export async function runStep(input: StepRunInput): Promise<StepRunOutput> {
     await partial.done();
   }
 
+  if (result.truncated) {
+    // A report cut off mid-sentence must not be stored as a completed step (later steps would build on it).
+    throw new StepError(
+      `${cap.specialist}'s output was cut off at the AI model's output-token limit. (Owner: raise OPENAI_MAX_TOKENS, or keep OPENAI_REASONING_EFFORT=low for reasoning models.)`,
+      true,
+      "model"
+    );
+  }
   const allowed = allowedLinkDomains(`${input.objective.statement} ${input.objective.contextNotes} ${ctx.website}`, evidence);
   const raw = cap.kind === "synthesis" ? stripPreamble(result.text.trim()) : result.text;
   const output = cleanOutput(raw, evidence.length, allowed);

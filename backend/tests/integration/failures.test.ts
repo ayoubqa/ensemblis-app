@@ -83,6 +83,33 @@ describe("step failures and recovery paths", () => {
     expect((await api().get("/api/exceptions").set(auth).expect(200)).body.exceptions).toHaveLength(0);
   });
 
+  it("a step reply cut off at the token limit is never stored as completed", async () => {
+    const { auth } = await createUser({ credits: 5000 });
+    await fillContext(auth);
+    let truncate = true;
+    scriptLLM((system, _user, opts) => {
+      if (truncate && opts.purpose === "step" && /Market Research Analyst/.test(system)) return { text: "## Findings\n- Germany leads the European market with", truncated: true };
+      return undefined;
+    });
+    const { executionId, objectiveId } = await defineObjective(auth);
+    await runWorker();
+    await approvePending(auth);
+    await runWorker();
+    let ex = await getExecution(auth, executionId);
+    expect(ex.status).toBe("BLOCKED");
+    const research = ex.steps.find((s: { capability: string }) => s.capability === "market_research");
+    expect(research.status).toBe("FAILED");
+    expect(research.output ?? "").not.toMatch(/leads the European market with$/);
+    const { exceptions } = (await api().get(`/api/exceptions?status=OPEN`).set(auth).expect(200)).body;
+    expect(exceptions[0].whatHappened).toMatch(/cut off at the AI model's output-token limit/);
+    truncate = false;
+    await api().post(`/api/exceptions/${exceptions[0].id}/resolve`).set(auth).send({ action: "retry" }).expect(200);
+    await runWorker();
+    ex = await getExecution(auth, executionId);
+    expect(ex.status).toBe("COMPLETED");
+    expect(objectiveId).toBeTruthy();
+  });
+
   it("a configuration error blocks immediately (no pointless retries)", async () => {
     const { auth } = await createUser();
     await fillContext(auth);
