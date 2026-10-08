@@ -109,6 +109,11 @@ jobs:
       - name: Run E2E (production-like — NODE_ENV=production, OpenAI-compatible provider against a local Groq-format stub)
         working-directory: frontend
         run: npm run e2e:prod-like
+      - name: Worker crash and deploy recovery (real processes, SIGKILL and SIGTERM mid-step)
+        working-directory: backend
+        env:
+          RESTART_DATABASE_URL: postgresql://ensemblis:ensemblis@localhost:5432/ensemblis_restart?schema=public
+        run: npm run check:worker-restart
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
