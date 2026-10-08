@@ -36,17 +36,8 @@ video {
 }
 
 /* ======================= PROTOTYPE CSS (verbatim) ======================= */
-:root{
-  --bg:#F4F5F2;--surface:#FFFFFF;--surface2:#F9FAF8;--ink:#12181B;--muted:#5A6567;--line:#E1E4DF;--line2:#CDD2CC;
-  --accent:#0B5D57;--accent-ink:#FFFFFF;--accent-soft:#E2EFEC;--ok:#1E7F4F;--ok-soft:#E3F2E9;--warn:#A86A12;--warn-soft:#F8EEDC;--bad:#B4382E;--bad-soft:#F8E4E1;
-  --avl:91%;--avc:28%;--shadow:0 12px 40px rgba(18,24,27,.08);
-  --serif:'Instrument Serif','Iowan Old Style',Georgia,serif;--sans:'Hanken Grotesk',system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;
-  box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);
-}
-@media (prefers-color-scheme:dark){
-  :root:not([data-theme="light"]){--bg:#0D1112;--surface:#141A1B;--surface2:#101617;--ink:#E8EDEC;--muted:#8F9B9C;--line:#242E2F;--line2:#33403F;--accent:#4FC3B4;--accent-ink:#06211E;--accent-soft:#12302D;--ok:#5CCB92;--ok-soft:#12291D;--warn:#E0A64C;--warn-soft:#2D2311;--bad:#F08578;--bad-soft:#341815;--avl:20%;--avc:78%;--shadow:0 12px 40px rgba(0,0,0,.4)}
-}
-:root[data-theme="dark"]{--bg:#0D1112;--surface:#141A1B;--surface2:#101617;--ink:#E8EDEC;--muted:#8F9B9C;--line:#242E2F;--line2:#33403F;--accent:#4FC3B4;--accent-ink:#06211E;--accent-soft:#12302D;--ok:#5CCB92;--ok-soft:#12291D;--warn:#E0A64C;--warn-soft:#2D2311;--bad:#F08578;--bad-soft:#341815;--avl:20%;--avc:78%;--shadow:0 12px 40px rgba(0,0,0,.4)}
+/* Tokens live in app/styles/tokens.css (the single source of brand colour and type). */
+:root{box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
 html{scroll-padding-top:calc(72px + env(safe-area-inset-top,0px))}
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:var(--sans);background:var(--bg);color:var(--ink);font-size:15px;line-height:1.5;-webkit-font-smoothing:antialiased;min-height:100vh}
@@ -226,10 +217,6 @@ footer.ft{border-top:1px solid var(--line);padding:32px 0 48px;margin-top:40px;f
 @media (prefers-reduced-motion:reduce){*{animation-duration:.01ms!important;transition-duration:.01ms!important}}
 
 /* ===== Ensemblis brand (v4: dark navy, electric blue) ===== */
-:root{--bg:#F4F6FB;--surface:#FFFFFF;--surface2:#F7F9FD;--ink:#0A0F1E;--muted:#55607A;--line:#E1E6F0;--line2:#C9D2E3;--accent:#1F5BFF;--accent-ink:#FFFFFF;--accent-soft:#E7EEFF;--cyan:#0E9FD8;--avl:92%;--avc:30%;--shadow:0 14px 44px rgba(10,15,30,.08);--serif:'Sora','Manrope',system-ui,sans-serif;--sans:'Manrope',system-ui,-apple-system,'Segoe UI',Roboto,sans-serif}
-@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#05080F;--surface:#0B1220;--surface2:#080E1A;--ink:#E8EDF7;--muted:#8D99B3;--line:#17213A;--line2:#25324F;--accent:#3D7BFF;--accent-ink:#FFFFFF;--accent-soft:#0E1C3B;--cyan:#38BDF8;--ok:#4CC38A;--ok-soft:#0F241A;--warn:#E3A84F;--warn-soft:#2A200F;--bad:#F07F72;--bad-soft:#321713;--avl:22%;--avc:78%;--shadow:0 12px 40px rgba(0,0,0,.5);}}
-:root[data-theme="dark"]{--bg:#05080F;--surface:#0B1220;--surface2:#080E1A;--ink:#E8EDF7;--muted:#8D99B3;--line:#17213A;--line2:#25324F;--accent:#3D7BFF;--accent-ink:#FFFFFF;--accent-soft:#0E1C3B;--cyan:#38BDF8;--ok:#4CC38A;--ok-soft:#0F241A;--warn:#E3A84F;--warn-soft:#2A200F;--bad:#F07F72;--bad-soft:#321713;--avl:22%;--avc:78%;--shadow:0 12px 40px rgba(0,0,0,.5);}
-.dk{--bg:#05080F;--surface:#0B1220;--surface2:#080E1A;--ink:#E8EDF7;--muted:#8D99B3;--line:#17213A;--line2:#25324F;--accent:#3D7BFF;--accent-ink:#FFFFFF;--accent-soft:#0E1C3B;--cyan:#38BDF8;--ok:#4CC38A;--ok-soft:#0F241A;--warn:#E3A84F;--warn-soft:#2A200F;--bad:#F07F72;--bad-soft:#321713;--avl:22%;--avc:78%;--shadow:0 12px 40px rgba(0,0,0,.5);background:var(--bg);color:var(--ink)}
 .logo{gap:10px;font-size:20px}.logo .wm,.wm{font-family:var(--serif);font-weight:600;letter-spacing:-.035em;font-size:20px}
 .pulse{background:var(--cyan);animation:pl2 1.6s infinite}
 @keyframes pl2{0%{box-shadow:0 0 0 0 color-mix(in srgb,var(--cyan) 50%,transparent)}100%{box-shadow:0 0 0 9px transparent}}
@@ -379,42 +366,7 @@ details.det[open] summary::after{content:'–'}
 
 /* ========================= APP ADDITIONS ========================= */
 
-/* --- Theme fixes: native controls, scrollbars and selection follow the theme --- */
-:root {
-  color-scheme: light;
-}
-:root[data-theme="dark"],
-.dk {
-  color-scheme: dark;
-}
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
-    color-scheme: dark;
-  }
-}
-/* Light theme: the brand block keeps the early teal-era status colours; tune
-   them so text on the *-soft backgrounds clears WCAG AA (4.5:1). */
-:root {
-  --ok: #1a7346;
-  --warn: #8f5a0b;
-  --bad: #b0342a;
-  --star: #f5a623;
-}
-/* Dark theme: lift line contrast a touch so cards/dividers stay visible on
-   the deep navy, and make sure muted copy stays readable (>= 6:1). */
-:root[data-theme="dark"],
-.dk {
-  --muted: #98a1bb;
-  --line: #222b4b;
-  --star: #f7b955;
-}
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
-    --muted: #98a1bb;
-    --line: #222b4b;
-    --star: #f7b955;
-  }
-}
+/* Theme tokens (incl. color-scheme) live in app/styles/tokens.css. */
 ::selection {
   background: color-mix(in srgb, var(--accent) 28%, transparent);
 }

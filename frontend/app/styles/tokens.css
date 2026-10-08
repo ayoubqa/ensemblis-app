@@ -1,0 +1,187 @@
+/* =====================================================================
+   Ensemblis design tokens — the single source of brand colour and type.
+   ---------------------------------------------------------------------
+   Official palette (Ensemblis Brand + Creative Web Pack v1.0):
+     Ink #07111F · Navy #0B1730 · Electric Blue #1677FF · Bright Blue #2B8CFF
+     White · Slate 50 #F6F8FB · 100 #EAF0F7 · 300 #B7C3D1 · 500 #6B7A8C · 700 #34445A
+     Success #16A36A · Warning #D99000 · Danger #D94A4A
+   Values marked "derived" are tints/shades of the palette used only where an
+   official colour fails WCAG AA for that use (e.g. white text on #1677FF is
+   4.1:1, so filled buttons use the slightly deeper #0F6BF0 at 4.8:1).
+
+   Themes: dark navy is the default (<html data-theme="dark">, set before
+   first paint by lib/theme.tsx). `.dk` forces the dark palette on a section
+   and `.lt` forces the light one, whatever the visitor's theme — marketing
+   pages alternate them on purpose (navy for the story, light for reading).
+   Component code uses the semantic names (--bg, --surface, --ink, --muted,
+   --line, --accent…), never raw hex.
+   ===================================================================== */
+
+:root {
+  /* ---- brand primitives (official) ---- */
+  --ens-ink: #07111f;
+  --ens-navy: #0b1730;
+  --ens-blue: #1677ff;
+  --ens-blue-bright: #2b8cff;
+  --ens-white: #ffffff;
+  --ens-slate-50: #f6f8fb;
+  --ens-slate-100: #eaf0f7;
+  --ens-slate-300: #b7c3d1;
+  --ens-slate-500: #6b7a8c;
+  --ens-slate-700: #34445a;
+  --ens-success: #16a36a;
+  --ens-warning: #d99000;
+  --ens-danger: #d94a4a;
+
+  /* ---- derived (accessibility / depth) ---- */
+  --ens-blue-aa: #0f6bf0; /* filled controls with white text: 4.8:1 */
+  --ens-blue-text: #0b63e6; /* blue text on light surfaces: 5.3:1 */
+  --ens-navy-raised: #10203d;
+  --ens-navy-deep: #050c17;
+  /* The ribbon gradient of the official mark, for rare highlights (never on the mark itself). */
+  --ens-gradient: linear-gradient(135deg, #a9d6ff 0%, #2b8cff 48%, #0057ff 100%);
+  --ens-glow: radial-gradient(60% 60% at 50% 40%, rgba(43, 140, 255, 0.22), rgba(43, 140, 255, 0) 70%);
+
+  /* ---- type ---- */
+  --font-sans: var(--font-inter, "Inter"), system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --sans: var(--font-sans);
+  /* Display = Inter, tighter. (`--serif` is the historical name the components use for display type.) */
+  --display: var(--font-sans);
+  --serif: var(--display);
+  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --fs-display: clamp(40px, 6.4vw, 72px);
+  --fs-h1: clamp(34px, 4.6vw, 52px);
+  --fs-h2: clamp(30px, 3.8vw, 46px);
+  --fs-h3: 20px;
+  --fs-lead: clamp(17px, 1.6vw, 19px);
+  --tracking-display: -0.035em;
+  --tracking-heading: -0.025em;
+  --tracking-eyebrow: 0.14em;
+
+  /* ---- shape & motion ---- */
+  --radius-sm: 8px;
+  --radius: 12px;
+  --radius-lg: 18px;
+  --radius-xl: 24px;
+  --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
+  --dur: 0.18s;
+
+  /* ---- semantic: DARK (default) ---- */
+  color-scheme: dark;
+  --bg: var(--ens-ink);
+  --surface: var(--ens-navy);
+  --surface2: #091425; /* derived: between ink and navy */
+  --surface3: var(--ens-navy-raised);
+  --ink: var(--ens-slate-50);
+  --ink-strong: var(--ens-white);
+  --muted: #a3b1c2; /* derived slate: 8.7:1 on ink */
+  --subtle: #8fa0b4; /* derived slate: 7:1 on ink */
+  --line: #16243d;
+  --line2: #233552;
+  --field-line: #536785; /* form-field boundaries (3:1) */
+  --accent: var(--ens-blue-bright);
+  --accent-fill: var(--ens-blue-aa);
+  --accent-ink: var(--ens-white);
+  --accent-soft: #0e2447;
+  --accent-line: color-mix(in srgb, var(--ens-blue) 55%, transparent);
+  --cyan: var(--ens-blue-bright); /* legacy name: live/flow signals */
+  --ok: var(--ens-success);
+  --ok-soft: #0b2a22;
+  --warn: var(--ens-warning);
+  --warn-soft: #2a2110;
+  --bad: #ec6b6b; /* derived lighter danger: 5.8:1 on navy (official #D94A4A for fills) */
+  --bad-soft: #2f1418;
+  --star: #f7b955;
+  --avl: 22%;
+  --avc: 78%;
+  --shadow: 0 1px 0 rgba(255, 255, 255, 0.03) inset, 0 18px 50px rgba(0, 0, 0, 0.45);
+  --shadow-sm: 0 6px 18px rgba(0, 0, 0, 0.35);
+  --focus: var(--ens-blue-bright);
+}
+
+/* ---- semantic: LIGHT ---- */
+:root[data-theme="light"],
+.lt {
+  color-scheme: light;
+  --bg: var(--ens-slate-50);
+  --surface: var(--ens-white);
+  --surface2: #f3f6fa; /* derived */
+  --surface3: var(--ens-slate-100);
+  --ink: var(--ens-ink);
+  --ink-strong: var(--ens-ink);
+  --muted: #4f5f73; /* derived slate: 6.5:1 on white */
+  --subtle: #5b6b7e;
+  --line: #e1e8f0;
+  --line2: #c9d3df;
+  --field-line: #8796aa;
+  --accent: var(--ens-blue-text);
+  --accent-fill: var(--ens-blue-aa);
+  --accent-ink: var(--ens-white);
+  --accent-soft: #e8f1ff;
+  --accent-line: color-mix(in srgb, var(--ens-blue) 45%, transparent);
+  --cyan: var(--ens-blue);
+  --ok: #0a7347;
+  --ok-soft: #e3f4ec;
+  --warn: #8f5a0b;
+  --warn-soft: #fbf0dc;
+  --bad: #b5383b;
+  --bad-soft: #fbe7e7;
+  --star: #f5a623;
+  --avl: 92%;
+  --avc: 30%;
+  --shadow: 0 1px 2px rgba(7, 17, 31, 0.04), 0 14px 40px rgba(7, 17, 31, 0.08);
+  --shadow-sm: 0 4px 14px rgba(7, 17, 31, 0.07);
+  --focus: var(--ens-blue);
+}
+
+/* ---- forced DARK scope (navy sections, the app header) ---- */
+:root[data-theme="dark"],
+.dk {
+  color-scheme: dark;
+  --bg: var(--ens-ink);
+  --surface: var(--ens-navy);
+  --surface2: #091425;
+  --surface3: var(--ens-navy-raised);
+  --ink: var(--ens-slate-50);
+  --ink-strong: var(--ens-white);
+  --muted: #a3b1c2;
+  --subtle: #8fa0b4;
+  --line: #16243d;
+  --line2: #233552;
+  --field-line: #536785;
+  --accent: var(--ens-blue-bright);
+  --accent-fill: var(--ens-blue-aa);
+  --accent-ink: var(--ens-white);
+  --accent-soft: #0e2447;
+  --accent-line: color-mix(in srgb, var(--ens-blue) 55%, transparent);
+  --cyan: var(--ens-blue-bright);
+  --ok: var(--ens-success);
+  --ok-soft: #0b2a22;
+  --warn: var(--ens-warning);
+  --warn-soft: #2a2110;
+  --bad: #ec6b6b;
+  --bad-soft: #2f1418;
+  --star: #f7b955;
+  --avl: 22%;
+  --avc: 78%;
+  --shadow: 0 1px 0 rgba(255, 255, 255, 0.03) inset, 0 18px 50px rgba(0, 0, 0, 0.45);
+  --shadow-sm: 0 6px 18px rgba(0, 0, 0, 0.35);
+  --focus: var(--ens-blue-bright);
+}
+.dk,
+.lt {
+  background: var(--bg);
+  color: var(--ink);
+}
+
+/* Reduced motion: honoured everywhere (brand.css rule). */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

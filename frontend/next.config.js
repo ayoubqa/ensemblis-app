@@ -1,3 +1,6 @@
+const indexing = require("./lib/indexing.json");
+const NOINDEX_PREFIXES = [...indexing.privatePrefixes, ...indexing.noindexOnly];
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
@@ -15,6 +18,11 @@ const nextConfig = {
   },
   async headers() {
     return [
+      // Account pages, token pages and shared result links are never indexed (see lib/indexing.json).
+      ...NOINDEX_PREFIXES.flatMap((p) => [p, `${p}/:path*`]).map((source) => ({
+        source,
+        headers: [{ key: "X-Robots-Tag", value: "noindex, nofollow" }],
+      })),
       {
         source: "/:path*",
         headers: [

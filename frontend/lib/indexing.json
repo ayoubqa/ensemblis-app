@@ -1,0 +1,15 @@
+{
+  "_comment": "Which URLs search engines may index. publicPages = indexable + sitemap. privatePrefixes = signed-in or one-time-token pages: noindex header (next.config.js) and disallowed in robots.txt. noindexOnly = reachable by link, never indexed (shared results).",
+  "publicPages": [
+    { "path": "/", "changeFrequency": "weekly", "priority": 1 },
+    { "path": "/how-it-works", "changeFrequency": "monthly", "priority": 0.8 },
+    { "path": "/privacy", "changeFrequency": "yearly", "priority": 0.2 },
+    { "path": "/terms", "changeFrequency": "yearly", "priority": 0.2 }
+  ],
+  "privatePrefixes": [
+    "/dashboard", "/objectives", "/new", "/approvals", "/exceptions", "/usage", "/billing", "/context", "/ai-team",
+    "/routines", "/workflows", "/reports", "/settings", "/team", "/join", "/admin", "/tasks",
+    "/login", "/signup", "/forgot-password", "/reset-password", "/verify-email"
+  ],
+  "noindexOnly": ["/r"]
+}
