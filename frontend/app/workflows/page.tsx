@@ -1,12 +1,7 @@
-"use client";
-
-import { useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { redirect } from "next/navigation";
 import { ROUTES } from "@/lib/routes";
 
-/** Workflows became recurring objectives. */
+/** Workflows became recurring objectives (server redirect: no blank page, works without JavaScript). */
 export default function WorkflowsRedirect() {
-  const router = useRouter();
-  useEffect(() => router.replace(ROUTES.routines), [router]);
-  return null;
+  redirect(ROUTES.routines);
 }

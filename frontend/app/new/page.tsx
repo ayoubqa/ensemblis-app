@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
+import { ROUTES } from "@/lib/routes";
 
-/** The old "new task" entry point now defines an outcome. */
+/** The old entry point now defines an outcome. */
 export default function NewRedirect() {
-  redirect("/objectives/new");
+  redirect(ROUTES.newObjective);
 }

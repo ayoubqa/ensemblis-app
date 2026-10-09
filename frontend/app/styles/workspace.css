@@ -1,7 +1,7 @@
 /* =====================================================================
    Workspace — Home (the Chief of Staff), Objectives, Define an outcome,
    Reports and Recurring objectives. Selectors are prefixed `ws-`; the few
-   shared classes restyled here (.attn, .tabs, .meter) are scoped under a
+   shared classes adjusted here (.tabs) are scoped under a
    `ws-` parent so other areas are unaffected. Colours come from tokens.css.
    ===================================================================== */
 
@@ -249,22 +249,6 @@ a.ws-kpi:hover {
   display: flex;
   flex-direction: column;
   gap: 12px;
-}
-.ws-attn .attn {
-  padding: 20px 22px;
-  border-radius: var(--radius-lg);
-  background: color-mix(in srgb, var(--warn-soft) 40%, var(--surface));
-  border-color: color-mix(in srgb, var(--warn) 38%, var(--line));
-}
-.ws-attn .attn.bad {
-  background: color-mix(in srgb, var(--bad-soft) 40%, var(--surface));
-  border-color: color-mix(in srgb, var(--bad) 38%, var(--line));
-}
-.ws-attn .attn h3 {
-  font-size: 16.5px;
-  letter-spacing: -0.01em;
-  line-height: 1.35;
-  margin: 10px 0 6px;
 }
 
 /* ------------------------------------------------------------------ Home: main + side */
@@ -656,16 +640,6 @@ a.ws-kpi:hover {
   }
   .ws-kpi em {
     font-size: 12px;
-  }
-  .ws-attn .attn {
-    padding: 16px;
-  }
-  .ws-attn .attn dl {
-    grid-template-columns: minmax(0, 1fr);
-    gap: 2px 0;
-  }
-  .ws-attn .attn dd + dt {
-    margin-top: 8px;
   }
   .ws-live-row,
   .ws-out-row {
@@ -1068,14 +1042,22 @@ a.ws-kpi:hover {
   }
   .ws-define-side {
     position: static;
+  }
+  .ws-next ol {
     display: grid;
-    grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
-    align-items: start;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0 24px;
+  }
+  .ws-next li:not(:last-child)::after {
+    display: none;
   }
 }
 @media (max-width: 760px) {
-  .ws-define-side {
+  .ws-next ol {
     grid-template-columns: minmax(0, 1fr);
+  }
+  .ws-next li:not(:last-child)::after {
+    display: block;
   }
   .ws-choice,
   .ws-fields {
@@ -1613,10 +1595,6 @@ a.ws-rep:hover .ws-rep-open .i {
   }
   .ws-facts > div {
     padding: 0 14px;
-  }
-  .ws-facts > div:nth-child(3) {
-    padding-left: 0;
-    border-left: 0;
   }
   .ws-facts {
     display: grid;

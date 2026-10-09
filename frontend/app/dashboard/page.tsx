@@ -61,11 +61,13 @@ function ChiefOfStaff() {
   }, []);
   // An overview, not a ticker: refresh every 30s while visible.
   usePolling(load, 30_000);
+  // After an approval or exception is handled on this page.
+  const refresh = useCallback(() => void load().catch(() => undefined), [load]);
 
   if (!b) {
     return failed ? (
       <div className="wrap ws-page">
-        <EmptyState icon="alert" title="Your overview couldn't be loaded" action={{ label: "Try again", onClick: () => void load().catch(() => undefined), icon: "redo" }}>
+        <EmptyState icon="alert" title="Your overview couldn't be loaded" action={{ label: "Try again", onClick: refresh, icon: "redo" }}>
           The Chief of Staff is unreachable right now. Your objectives and executions are unaffected.
         </EmptyState>
       </div>
@@ -91,7 +93,7 @@ function ChiefOfStaff() {
   const activity = groupActivity(b.team.activity);
 
   const summary = fresh
-    ? "Your AI Team is ready. Describe a business outcome and the Chief of Staff will plan it, assign the work and bring you a verified result."
+    ? "Your AI Team is ready for its first objective. The Chief of Staff plans it, assigns the work and brings you a verified result."
     : [
         attention ? `${plural(attention, "item")} ${attention === 1 ? "needs" : "need"} your decision.` : "Nothing needs you right now.",
         b.objectives.running ? `${plural(b.objectives.running, "objective")} ${b.objectives.running === 1 ? "is" : "are"} being worked on.` : null,
@@ -149,8 +151,10 @@ function ChiefOfStaff() {
                 <h2 id="ws-attn-h">
                   <span className="ws-attn-dot" aria-hidden="true" />
                   Needs your decision
-                  <span className="ws-count" aria-label={`${attention} items`}>
+                  <span className="ws-count">
+                    <span className="sr-only">: </span>
                     {attention}
+                    <span className="sr-only"> {attention === 1 ? "item" : "items"}</span>
                   </span>
                 </h2>
                 <div className="ws-sec-links">
@@ -168,10 +172,10 @@ function ChiefOfStaff() {
               </div>
               <div className="ws-attn-list">
                 {b.attention.approvals.map((a) => (
-                  <ApprovalCard key={a.id} approval={a} onDone={load} showObjective />
+                  <ApprovalCard key={a.id} approval={a} onDone={refresh} showObjective />
                 ))}
                 {b.attention.exceptions.map((x) => (
-                  <ExceptionCard key={x.id} exception={x} onDone={load} showObjective />
+                  <ExceptionCard key={x.id} exception={x} onDone={refresh} showObjective />
                 ))}
               </div>
               {attention > shownApprovals + shownExceptions && (
