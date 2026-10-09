@@ -75,8 +75,12 @@ guest-trial settings. v3-only variables left on the API (`FOLLOWUP_COST_CENTS`,
 `DEV_TEST_RUNS_PER_DAY`) are ignored and can be deleted.
 
 Vercel (frontend): `NEXT_PUBLIC_API_URL` (the API's `https://…onrender.com`
-URL, no trailing slash) and `NEXT_PUBLIC_CONTACT_EMAIL`. `NEXT_PUBLIC_*` values
-are baked in at build time: redeploy the frontend after changing them.
+URL, no trailing slash) and `NEXT_PUBLIC_CONTACT_EMAIL`. Optional:
+`NEXT_PUBLIC_SITE_URL` (the public origin, e.g. `https://ensemblis.app`, no
+trailing slash) for canonical URLs, `sitemap.xml`, `robots.txt` and Open Graph
+links — when unset, the build uses Vercel's `VERCEL_PROJECT_PRODUCTION_URL`
+(the project's production domain). `NEXT_PUBLIC_*` values are baked in at build
+time: redeploy the frontend after changing them.
 
 `AI_PROVIDER=mock` cannot run in production: the API and worker refuse to
 start with it when `NODE_ENV=production` **or** on Render (`RENDER` is set) —
@@ -152,6 +156,10 @@ but pages can error until both are live — deploy at a quiet time.
 8. Share → open the `/r/<token>` link in a private window → then stop sharing.
 9. A second test account cannot open the first account's objective URL.
 10. `/health` shows `queue.deadLast24h: 0` and a small `oldestQueuedSeconds`.
+11. Public pages: `/robots.txt` and `/sitemap.xml` list the production origin
+    (only `/`, `/how-it-works`, `/privacy`, `/terms` are indexable); the page
+    source of `/` has a canonical link and an `og:image`; a signed-in page such
+    as `/dashboard` answers with `X-Robots-Tag: noindex, nofollow`.
 
 Real-model check before inviting users (spends tokens, ≈ one objective):
 
