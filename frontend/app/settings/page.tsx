@@ -1,12 +1,12 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Avatar, Icon, Modal, RequireAuth, Tag, ThemeSwitch, useToast } from "@/components";
+import { Avatar, Icon, Modal, PageHead, RequireAuth, Tag, ThemeSwitch, useToast } from "@/components";
 import { api, setToken, type Autonomy, type Organization, type User } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
-import { useConfig } from "@/lib/config";
+import { CONTACT_EMAIL, useConfig } from "@/lib/config";
 import { toastApiError } from "@/lib/errors";
 import { eur, longDate } from "@/lib/format";
 import { ROUTES } from "@/lib/routes";
@@ -48,24 +48,21 @@ function Settings() {
   if (!user) return null;
   if (user.isGuest) return <GuestSettings user={user} />;
   return (
-    <div className="wrap" style={{ paddingBottom: 40 }}>
-      <div className="pagehead">
-        <h1>Settings</h1>
-        <p>Your profile, password, organization policy, appearance and email.</p>
-      </div>
-      <nav aria-label="Settings sections" className="row wrapflex" style={{ gap: 6, marginBottom: 18 }}>
-        {SECTIONS.map(([id, label]) => (
-          <a key={id} href={`#${id}`} className="chip">
-            {label}
-          </a>
-        ))}
-      </nav>
-      <div className="grid g2" style={{ alignItems: "start" }}>
-        <div className="stack">
+    <div className="wrap op-page">
+      <PageHead eyebrow="Account" title="Settings" sub="Your profile, password, organization policy, appearance and email." />
+      <div className="op-set">
+        <nav aria-label="Settings sections" className="op-set-nav">
+          <ul>
+            {SECTIONS.map(([id, label]) => (
+              <li key={id}>
+                <a href={`#${id}`}>{label}</a>
+              </li>
+            ))}
+          </ul>
+        </nav>
+        <div className="op-set-main">
           <ProfileCard user={user} />
           <PasswordCard />
-        </div>
-        <div className="stack">
           <OrganizationCard />
           <AppearanceCard />
           <NotificationsCard user={user} />
@@ -78,6 +75,18 @@ function Settings() {
 }
 
 const anchor = { scrollMarginTop: 90 } as const;
+
+function CardHead({ id, title, sub, lead }: { id: string; title: string; sub?: React.ReactNode; lead?: React.ReactNode }) {
+  return (
+    <div className="op-card-h">
+      {lead}
+      <div style={{ minWidth: 0 }}>
+        <h2 id={id}>{title}</h2>
+        {sub && <p>{sub}</p>}
+      </div>
+    </div>
+  );
+}
 
 // ------------------------------------------------------------- profile
 function ProfileCard({ user }: { user: User }) {
@@ -119,17 +128,10 @@ function ProfileCard({ user }: { user: User }) {
   const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => setForm((f) => ({ ...f, [k]: e.target.value }));
 
   return (
-    <form className="card" id="profile" style={anchor} onSubmit={save} aria-labelledby="h-profile">
-      <div className="row" style={{ gap: 12 }}>
-        <Avatar name={form.name || user.name} round size="md" />
-        <div className="sp">
-          <h3 id="h-profile" style={{ margin: 0 }}>
-            Profile
-          </h3>
-          <div className="tiny muted">How you appear across Ensemblis.</div>
-        </div>
-      </div>
-      <div className="stack" style={{ marginTop: 14 }}>
+    <form className="op-panel op-card" id="profile" onSubmit={save} aria-labelledby="h-profile">
+      <CardHead id="h-profile" title="Profile" sub="How you appear across Ensemblis." lead={<Avatar name={form.name || user.name} round size="md" />} />
+      <div className="op-fieldset">
+        <div className="op-two">
         <div>
           <label className="l" htmlFor="pf-name">
             Full name
@@ -143,6 +145,8 @@ function ProfileCard({ user }: { user: User }) {
           </label>
           <input id="pf-role" className="f" value={form.role} onChange={set("role")} placeholder="e.g. Head of Strategy" autoComplete="organization-title" maxLength={120} />
         </div>
+        </div>
+        <div className="op-two">
         <div>
           <label className="l" htmlFor="pf-company">
             Company
@@ -155,9 +159,10 @@ function ProfileCard({ user }: { user: User }) {
           </label>
           <input id="pf-email" className="f" value={user.email} readOnly aria-describedby="pf-email-hint" style={{ color: "var(--muted)" }} />
           <div className="hint" id="pf-email-hint">
-            Your sign-in email. Contact support to change it.
+            Your sign-in email. {CONTACT_EMAIL ? `Write to ${CONTACT_EMAIL} to change it.` : "The operator of this deployment can change it."}
           </div>
           <EmailVerification user={user} />
+        </div>
         </div>
       </div>
       {err && (
@@ -165,7 +170,7 @@ function ProfileCard({ user }: { user: User }) {
           {err}
         </div>
       )}
-      <div className="row" style={{ marginTop: 16 }}>
+      <div className="op-actions">
         <button type="submit" className="btn p sm" disabled={!dirty || !!nameErr || saving} aria-busy={saving}>
           Save changes
         </button>
@@ -174,7 +179,7 @@ function ProfileCard({ user }: { user: User }) {
             Discard
           </button>
         )}
-        {!dirty && <span className="tiny muted">All changes saved</span>}
+        {!dirty && <span className="op-meta">All changes saved</span>}
       </div>
     </form>
   );
@@ -225,9 +230,9 @@ function PasswordCard() {
 
   const type = show ? "text" : "password";
   return (
-    <form className="card" id="security" style={anchor} onSubmit={submit} aria-labelledby="h-pw" noValidate>
-      <h3 id="h-pw">Change password</h3>
-      <div className="stack" style={{ marginTop: 12 }}>
+    <form className="op-panel op-card" id="security" onSubmit={submit} aria-labelledby="h-pw" noValidate>
+      <CardHead id="h-pw" title="Password" sub="Changing it signs you out on every other device." />
+      <div className="op-fieldset">
         <div>
           <label className="l" htmlFor="pw-cur">
             Current password
@@ -268,9 +273,11 @@ function PasswordCard() {
           {err.msg}
         </div>
       )}
-      <button type="submit" className="btn sm p" style={{ marginTop: 14 }} disabled={busy || !cur || !next || !confirm} aria-busy={busy}>
-        Update password
-      </button>
+      <div className="op-actions">
+        <button type="submit" className="btn sm p" disabled={busy || !cur || !next || !confirm} aria-busy={busy}>
+          Update password
+        </button>
+      </div>
     </form>
   );
 }
@@ -278,11 +285,8 @@ function PasswordCard() {
 // ------------------------------------------------------------- appearance
 function AppearanceCard() {
   return (
-    <section className="card" id="appearance" style={anchor} aria-labelledby="h-app">
-      <h3 id="h-app">Appearance</h3>
-      <p className="small muted" style={{ margin: "4px 0 12px" }}>
-        Choose a theme. System follows your device setting.
-      </p>
+    <section className="op-panel op-card" id="appearance" aria-labelledby="h-app">
+      <CardHead id="h-app" title="Appearance" sub="Choose a theme. System follows your device setting." />
       <ThemeSwitch />
     </section>
   );
@@ -314,11 +318,9 @@ function NotificationsCard({ user }: { user: User }) {
   };
 
   return (
-    <section className="card" id="notifications" style={anchor} aria-labelledby="h-notif">
-      <h3 id="h-notif" style={{ margin: 0 }}>
-        Email notifications
-      </h3>
-      <div className={S.toggleRow} style={{ marginTop: 4 }}>
+    <section className="op-panel op-card" id="notifications" aria-labelledby="h-notif">
+      <CardHead id="h-notif" title="Email notifications" />
+      <div className={S.toggleRow} style={{ paddingTop: 0 }}>
         <span>
           <span className="small" id="nt-done-label" style={{ fontWeight: 600, display: "block" }}>
             Email me when an objective finishes or needs me
@@ -346,9 +348,7 @@ function NotificationsCard({ user }: { user: User }) {
           </span>
         </div>
       )}
-      <p className="tiny muted" style={{ marginTop: 12 }}>
-        Approvals and exceptions always appear in the header, the briefing and their own centers.
-      </p>
+      <p className="op-note">Approvals and exceptions always appear in the header, on Home and in the Approval and Exception centers.</p>
     </section>
   );
 }
@@ -357,15 +357,15 @@ function NotificationsCard({ user }: { user: User }) {
 function AccountCard({ user }: { user: User }) {
   const teamWallet = user.walletOwner === "team";
   return (
-    <section className="card" id="account" style={anchor} aria-labelledby="h-acct">
-      <h3 id="h-acct">Account</h3>
-      <div style={{ marginTop: 8 }}>
-        <div className="kv">
-          <span className="muted">Member since</span>
+    <section className="op-panel op-card" id="account" aria-labelledby="h-acct">
+      <CardHead id="h-acct" title="Account" />
+      <div>
+        <div className="op-kv">
+          <span>Member since</span>
           <b>{longDate(user.createdAt)}</b>
         </div>
-        <div className="kv" id="team" style={anchor}>
-          <span className="muted">Organization members</span>
+        <div className="op-kv" id="team" style={anchor}>
+          <span>Organization members</span>
           <Link href={ROUTES.members} className="row" style={{ gap: 8, color: "var(--ink)", minWidth: 0 }}>
             {user.team ? (
               <>
@@ -380,19 +380,19 @@ function AccountCard({ user }: { user: User }) {
             <Icon name="chev" size={14} />
           </Link>
         </div>
-        <div className="kv">
-          <span className="muted">
+        <div className="op-kv">
+          <span>
             Balance
-            {teamWallet && <span className="tiny"> · organization wallet</span>}
+            {teamWallet && <span className="op-meta"> · organization balance</span>}
           </span>
           <b>{eur(user.credits)}</b>
         </div>
-        <div className="kv" style={{ borderBottom: 0 }}>
-          <span className="muted">Plan</span>
+        <div className="op-kv">
+          <span>Plan</span>
           <b>Usage-based</b>
         </div>
       </div>
-      <div className="row wrapflex" style={{ marginTop: 12 }}>
+      <div className="op-actions">
         <Link className="btn sm" href={ROUTES.usage}>
           <Icon name="wallet" />
           Usage & balance
@@ -443,15 +443,64 @@ function EmailVerification({ user }: { user: User }) {
 }
 
 // ------------------------------------------------------------- organization policy
+const AUTONOMY: { id: Autonomy; title: string; sub: string }[] = [
+  { id: "REVIEW_PLAN", title: "Review the plan first", sub: "Every plan waits in Approvals before any work starts." },
+  { id: "AUTO_WITHIN_BUDGET", title: "Execute automatically within budget", sub: "Plans under the approval threshold start on their own." },
+];
+
+/** Radio cards with the radio-group keyboard pattern (one tab stop, arrow keys move and select). */
+function AutonomyChoice({ value, onChange, disabled }: { value: Autonomy; onChange: (a: Autonomy) => void; disabled?: boolean }) {
+  const refs = useRef<(HTMLButtonElement | null)[]>([]);
+  const onKey = (e: KeyboardEvent<HTMLDivElement>) => {
+    const i = AUTONOMY.findIndex((a) => a.id === value);
+    let n = -1;
+    if (e.key === "ArrowRight" || e.key === "ArrowDown") n = (i + 1) % AUTONOMY.length;
+    else if (e.key === "ArrowLeft" || e.key === "ArrowUp") n = (i - 1 + AUTONOMY.length) % AUTONOMY.length;
+    if (n < 0) return;
+    e.preventDefault();
+    onChange(AUTONOMY[n].id);
+    refs.current[n]?.focus();
+  };
+  return (
+    <div>
+      <span className="l" id="org-autonomy-l">
+        Default autonomy for new objectives
+      </span>
+      <div className="op-radios" role="radiogroup" aria-labelledby="org-autonomy-l" onKeyDown={onKey}>
+        {AUTONOMY.map((a, i) => (
+          <button
+            key={a.id}
+            ref={(el) => {
+              refs.current[i] = el;
+            }}
+            type="button"
+            role="radio"
+            aria-checked={value === a.id}
+            tabIndex={value === a.id ? 0 : -1}
+            className="op-radio"
+            disabled={disabled}
+            onClick={() => onChange(a.id)}
+          >
+            <b>{a.title}</b>
+            <span>{a.sub}</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function OrganizationCard() {
   const toast = useToast();
   const [org, setOrg] = useState<Organization | null>(null);
+  const [failed, setFailed] = useState(false);
   const [name, setName] = useState("");
   const [autonomy, setAutonomy] = useState<Autonomy>("REVIEW_PLAN");
   const [threshold, setThreshold] = useState(20);
   const [saving, setSaving] = useState(false);
 
-  useEffect(() => {
+  const load = () => {
+    setFailed(false);
     api
       .getOrg()
       .then(({ organization: o }) => {
@@ -460,14 +509,25 @@ function OrganizationCard() {
         setAutonomy(o.defaultAutonomy);
         setThreshold(Math.round(o.approvalThresholdCents / 100));
       })
-      .catch(() => undefined);
-  }, []);
+      .catch(() => setFailed(true));
+  };
+  useEffect(load, []);
 
   if (!org) {
     return (
-      <section className="card" id="organization" style={anchor}>
-        <h3>Organization</h3>
-        <div className="sk" style={{ height: 80, marginTop: 10 }} />
+      <section className="op-panel op-card" id="organization" aria-labelledby="h-org" aria-busy={!failed}>
+        <CardHead id="h-org" title="Organization" sub="How much the AI Team may do without asking." />
+        {failed ? (
+          <div className="op-inline">
+            <span className="small muted">The organization policy couldn&apos;t be loaded.</span>
+            <button type="button" className="btn sm" onClick={load}>
+              <Icon name="redo" />
+              Try again
+            </button>
+          </div>
+        ) : (
+          <p className="op-meta">Loading the organization policy…</p>
+        )}
       </section>
     );
   }
@@ -491,49 +551,40 @@ function OrganizationCard() {
   };
 
   return (
-    <form className="card" id="organization" style={anchor} onSubmit={save} aria-labelledby="h-org">
-      <h3 id="h-org">Organization</h3>
-      <p className="small muted" style={{ margin: "4px 0 12px" }}>
-        How much the AI Team may do without asking. {owner ? "" : "Only the organization owner can change this."}
-      </p>
-      <fieldset disabled={!owner} style={{ border: 0, padding: 0, margin: 0 }} className="stack">
+    <form className="op-panel op-card" id="organization" onSubmit={save} aria-labelledby="h-org">
+      <CardHead id="h-org" title="Organization" sub={`How much the AI Team may do without asking.${owner ? "" : " Only the organization owner can change this."}`} />
+      <fieldset disabled={!owner} className="op-fieldset">
         <div>
           <label className="l" htmlFor="org-name">
             Name
           </label>
           <input id="org-name" className="f" value={name} onChange={(e) => setName(e.target.value)} maxLength={120} />
         </div>
-        <div>
-          <label className="l">Default autonomy for new objectives</label>
-          <div className="seg" role="radiogroup" aria-label="Default autonomy">
-            <button type="button" role="radio" aria-checked={autonomy === "REVIEW_PLAN"} className={autonomy === "REVIEW_PLAN" ? "on" : ""} onClick={() => setAutonomy("REVIEW_PLAN")}>
-              Review the plan first
-            </button>
-            <button type="button" role="radio" aria-checked={autonomy === "AUTO_WITHIN_BUDGET"} className={autonomy === "AUTO_WITHIN_BUDGET" ? "on" : ""} onClick={() => setAutonomy("AUTO_WITHIN_BUDGET")}>
-              Run automatically within budget
-            </button>
-          </div>
-        </div>
+        <AutonomyChoice value={autonomy} onChange={setAutonomy} disabled={!owner} />
         <div>
           <label className="l" htmlFor="org-threshold">
             Approval threshold
           </label>
-          <div className="row" style={{ gap: 8, maxWidth: 200 }}>
-            <span className="muted">€</span>
-            <input id="org-threshold" className="f" type="number" min={0} max={500} step={1} value={threshold} onChange={(e) => setThreshold(Number(e.target.value || 0))} />
+          <div className="op-money">
+            <span className="muted" aria-hidden="true">
+              €
+            </span>
+            <input id="org-threshold" className="f" type="number" min={0} max={500} step={1} value={threshold} aria-describedby="org-threshold-hint" onChange={(e) => setThreshold(Number(e.target.value || 0))} />
           </div>
-          <p className="hint">Any execution estimated above this needs explicit approval, whatever the objective&apos;s autonomy. €0 means every execution asks.</p>
+          <p className="hint" id="org-threshold-hint">
+            In euros. Any execution estimated above this needs explicit approval, whatever the objective&apos;s autonomy. €0 means every execution asks.
+          </p>
         </div>
       </fieldset>
       {owner && (
-        <div className="row" style={{ marginTop: 14 }}>
+        <div className="op-actions">
           <button type="submit" className="btn p sm" disabled={!dirty || saving || name.trim().length < 2} aria-busy={saving}>
             Save policy
           </button>
-          {!dirty && <span className="tiny muted">All changes saved</span>}
+          {!dirty && <span className="op-meta">All changes saved</span>}
         </div>
       )}
-      <p className="tiny muted" style={{ marginTop: 12 }}>
+      <p className="op-note">
         Whatever the policy, the AI Team only reads, researches, analyses and drafts. It never sends, publishes, changes external systems or spends money outside an approved execution.
       </p>
     </form>
@@ -557,20 +608,17 @@ function GuestSettings({ user }: { user: User }) {
   };
 
   return (
-    <div className="wrap" style={{ paddingBottom: 40 }}>
-      <div className="pagehead">
-        <h1>Settings</h1>
-        <p>You&apos;re on a free trial. Create a free account to get a profile, a password and email updates.</p>
-      </div>
+    <div className="wrap op-page">
+      <PageHead eyebrow="Account" title="Settings" sub="You're on a free trial. Create a free account to get a profile, a password and email updates." />
       <div className="grid g2" style={{ alignItems: "start" }}>
         <div className="stack">
-          <section className={`card ${S.guestCta}`} id="profile" style={anchor} aria-labelledby="h-guest">
+          <section className={`op-panel op-card ${S.guestCta}`} id="profile" aria-labelledby="h-guest">
             <span className={S.guestIco} aria-hidden="true">
-              <Icon name="spark" size={20} />
+              <Icon name="user" size={20} />
             </span>
-            <h3 id="h-guest" style={{ fontSize: 24, fontWeight: 600, letterSpacing: "-.02em", lineHeight: 1.15 }}>
+            <h2 id="h-guest" style={{ fontSize: 24, fontWeight: 700, letterSpacing: "-.02em", lineHeight: 1.15 }}>
               Create a free account
-            </h3>
+            </h2>
             <p className="small muted" style={{ marginTop: 6 }}>
               It takes a minute, and nothing from your trial is lost.
             </p>
@@ -595,29 +643,27 @@ function GuestSettings({ user }: { user: User }) {
         </div>
         <div className="stack">
           <AppearanceCard />
-          <section className="card" id="account" style={anchor} aria-labelledby="h-trial">
-            <h3 id="h-trial">Free trial</h3>
-            <div style={{ marginTop: 8 }}>
-              <div className="kv">
-                <span className="muted">Trial credits left</span>
+          <section className="op-panel op-card" id="account" aria-labelledby="h-trial">
+            <CardHead id="h-trial" title="Free trial" />
+            <div>
+              <div className="op-kv">
+                <span>Trial balance left</span>
                 <b>{eur(user.credits)}</b>
               </div>
-              <div className="kv">
-                <span className="muted">Started</span>
+              <div className="op-kv">
+                <span>Started</span>
                 <b>{longDate(user.createdAt)}</b>
               </div>
-              <div className="kv" style={{ borderBottom: 0 }}>
-                <span className="muted">Results kept</span>
+              <div className="op-kv">
+                <span>Results kept</span>
                 <b>7 days unless you save them</b>
               </div>
             </div>
           </section>
-          <section className="card" id="danger" style={anchor} aria-labelledby="h-end">
-            <h3 id="h-end">End trial session</h3>
-            <div className="lane" style={{ borderBottom: 0 }}>
-              <div className="sp">
-                <div className="tiny muted">Signs this browser out of the trial. You won&apos;t be able to get back to your trial results afterwards.</div>
-              </div>
+          <section className="op-panel op-card" id="danger" aria-labelledby="h-end">
+            <CardHead id="h-end" title="End trial session" />
+            <div className="op-danger-row">
+              <p style={{ marginTop: 0 }}>Signs this browser out of the trial. You won&apos;t be able to get back to your trial results afterwards.</p>
               <button type="button" className="btn sm" onClick={() => setConfirmEnd(true)}>
                 <Icon name="out" />
                 End session
@@ -660,22 +706,22 @@ function DangerCard() {
   };
 
   return (
-    <section className="card" id="danger" style={{ ...anchor, borderColor: "color-mix(in srgb,var(--bad) 35%,var(--line))" }} aria-labelledby="h-danger">
-      <h3 id="h-danger">Danger zone</h3>
-      <div className="lane">
-        <div className="sp">
-          <b className="small">Sign out everywhere</b>
-          <div className="tiny muted">Ends your session on this device and clears your sign-in.</div>
+    <section className="op-panel op-card op-danger" id="danger" aria-labelledby="h-danger">
+      <CardHead id="h-danger" title="Danger zone" />
+      <div className="op-danger-row">
+        <div>
+          <b>Sign out of this device</b>
+          <p>Ends your session in this browser. To sign out other devices too, change your password above.</p>
         </div>
         <button type="button" className="btn sm" onClick={() => setConfirmOut(true)}>
           <Icon name="out" />
           Sign out
         </button>
       </div>
-      <div className="lane" style={{ borderBottom: 0 }}>
-        <div className="sp">
-          <b className="small">Delete account</b>
-          <div className="tiny muted">Permanently remove your account, objectives and reports.</div>
+      <div className="op-danger-row">
+        <div>
+          <b>Delete account</b>
+          <p>Permanently remove your account, objectives and reports.</p>
         </div>
         <button type="button" className="btn bad sm" onClick={() => setDel(true)}>
           <Icon name="trash" />
@@ -685,7 +731,7 @@ function DangerCard() {
 
       <Modal open={confirmOut} onClose={() => setConfirmOut(false)} title="Sign out?">
         <p className="muted small" style={{ margin: "6px 0 16px" }}>
-          You&apos;ll need your email and password to get back in. Objectives in progress keep running while you&apos;re away.
+          You&apos;ll need your email and password to get back in. Executions in progress continue while you&apos;re away.
         </p>
         <div className="row">
           <button type="button" className="btn" onClick={() => setConfirmOut(false)} data-autofocus>
@@ -699,7 +745,10 @@ function DangerCard() {
 
       <Modal open={del} onClose={() => setDel(false)} title="Delete your account">
         <p className="muted small" style={{ margin: "6px 0 12px" }}>
-          Self-service account deletion isn&apos;t available yet. To delete your account and all its data, contact support and we&apos;ll take care of it — usually within two business days.
+          Self-service account deletion isn&apos;t available yet.{" "}
+          {CONTACT_EMAIL
+            ? `To delete your account and all its data, write to ${CONTACT_EMAIL} from your sign-in address.`
+            : "To delete your account and all its data, ask the operator of this Ensemblis deployment."}
         </p>
         <div className="notice" style={{ marginBottom: 16, background: "var(--surface2)", color: "var(--muted)" }}>
           <Icon name="info" />
@@ -709,10 +758,12 @@ function DangerCard() {
           <button type="button" className="btn" onClick={() => setDel(false)} data-autofocus>
             Close
           </button>
-          <a className="btn bad sp" href="mailto:support@ensemblis.ai?subject=Delete%20my%20Ensemblis%20account">
-            <Icon name="mail" />
-            Contact support
-          </a>
+          {CONTACT_EMAIL && (
+            <a className="btn bad sp" href={`mailto:${CONTACT_EMAIL}?subject=Delete%20my%20Ensemblis%20account`}>
+              <Icon name="mail" />
+              Email {CONTACT_EMAIL}
+            </a>
+          )}
         </div>
       </Modal>
     </section>

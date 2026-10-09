@@ -27,8 +27,8 @@ function readPending(): PendingCheckout | null {
 type State = "waiting" | "done" | "slow" | "cancelled" | null;
 
 /**
- * Handles the return from Stripe Checkout (/billing?checkout=success|cancelled).
- * Credits arrive by webhook, so on success it polls billing + me for up to ~20s
+ * Handles the return from Stripe Checkout (/usage?checkout=success|cancelled;
+ * older links via /billing redirect here). Funds arrive by webhook, so on success it polls billing + me for up to ~20s
  * until the new PURCHASE shows up. Must be rendered inside <Suspense>.
  */
 export function CheckoutBanner({ onBilling }: { onBilling: (b: Billing) => void }) {
@@ -90,7 +90,7 @@ export function CheckoutBanner({ onBilling }: { onBilling: (b: Billing) => void 
     return (
       <div className="notice" role="status" style={{ marginBottom: 18, background: "var(--surface2)", color: "var(--ink)", boxShadow: "inset 0 0 0 1px var(--line)", alignItems: "center" }}>
         <Icon name="info" />
-        <span className="sp">Checkout cancelled — no payment was taken. You can pick a pack again whenever you&apos;re ready.</span>
+        <span className="sp">Checkout cancelled — no payment was taken. You can add funds again whenever you&apos;re ready.</span>
         <button type="button" className="btn sm ghost" onClick={() => setState(null)} aria-label="Dismiss">
           <Icon name="x" />
         </button>

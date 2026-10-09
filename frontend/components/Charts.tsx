@@ -31,10 +31,10 @@ export function LineChart({ values, height = 180, min = 0, label = "Chart", xLab
     <div>
       <svg viewBox={`0 0 ${w} ${h}`} style={{ width: "100%", height: "auto", display: "block" }} role="img" aria-label={label}>
         {[0, 1, 2, 3].map((i) => (
-          <line key={i} x1="0" x2={w} y1={p + (i * (h - 2 * p)) / 3} y2={p + (i * (h - 2 * p)) / 3} stroke="var(--line)" strokeWidth="1" />
+          <line key={i} x1="0" x2={w} y1={p + (i * (h - 2 * p)) / 3} y2={p + (i * (h - 2 * p)) / 3} stroke="var(--line)" strokeWidth="1" vectorEffect="non-scaling-stroke" />
         ))}
-        <polygon points={`${X(0)},${h - p} ${pts} ${X(last)},${h - p}`} fill="var(--accent)" opacity=".09" />
-        <polyline points={pts} fill="none" stroke="var(--accent)" strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" />
+        <polygon points={`${X(0)},${h - p} ${pts} ${X(last)},${h - p}`} fill="var(--accent)" opacity=".1" />
+        <polyline points={pts} fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke" />
         {format &&
           v.map((x, i) => (
             <circle key={i} cx={X(i)} cy={Y(x)} r="10" fill="transparent">
@@ -44,7 +44,7 @@ export function LineChart({ values, height = 180, min = 0, label = "Chart", xLab
         <circle cx={X(last)} cy={Y(v[last])} r="4.5" fill="var(--accent)" />
       </svg>
       {xLabels && xLabels.length > 1 && (
-        <div className="row between tiny muted" style={{ marginTop: 6 }}>
+        <div className="row between tiny muted" style={{ marginTop: 6, fontVariantNumeric: "tabular-nums" }} aria-hidden="true">
           <span>{xLabels[0]}</span>
           {xLabels.length > 2 && <span>{xLabels[Math.floor((xLabels.length - 1) / 2)]}</span>}
           <span>{xLabels[xLabels.length - 1]}</span>

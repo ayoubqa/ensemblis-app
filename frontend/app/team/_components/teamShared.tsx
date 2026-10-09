@@ -47,37 +47,30 @@ export function inviteUrl(token: string): string {
 /** Explainer tiles: what organization membership means. */
 export function TeamExplainer({ compact }: { compact?: boolean }) {
   const items: [IconName, string, string][] = [
-    ["wallet", "One organization wallet", "Executions are paid from the owner's balance. Members never need their own."],
-    ["list", "Shared objectives & context", "Everyone works from the same Company Context, memory, objectives and AI Team."],
-    ["lock", "Owner stays in control", "The owner sets the approval policy, invites with expiring links and can remove people any time."],
+    ["wallet", "One organization balance", "Executions are paid from the owner's balance. Members never need their own."],
+    ["list", "Shared objectives & context", "Everyone works from the same Company Context, Memory, objectives and AI Team."],
+    ["lock", "The owner stays in control", "The owner sets the approval policy, invites with expiring links and can remove people at any time."],
   ];
   return (
-    <div className="grid g3" style={{ gap: 10, margin: compact ? "12px 0" : "20px 0" }}>
+    <ul className={compact ? "op-explain compact" : "op-explain"}>
       {items.map(([ic, t, d]) => (
-        <div key={t} className="mini">
-          <span style={{ color: "var(--accent)" }}>
-            <Icon name={ic} />
-          </span>
-          <b style={{ display: "block", marginTop: 6 }}>{t}</b>
-          <div className="tiny muted">{d}</div>
-        </div>
+        <li key={t}>
+          <Icon name={ic} />
+          <b>{t}</b>
+          <p>{d}</p>
+        </li>
       ))}
-    </div>
+    </ul>
   );
 }
 
+/** Section heading (h2) with an optional description and a right-hand action. */
 export function SectionHead({ id, title, sub, right }: { id: string; title: string; sub?: ReactNode; right?: ReactNode }) {
   return (
-    <div className="row between wrapflex" style={{ gap: 10, margin: "28px 0 10px" }}>
+    <div className="op-sec-head" style={{ marginTop: 40 }}>
       <div>
-        <h3 id={id} style={{ margin: 0 }}>
-          {title}
-        </h3>
-        {sub && (
-          <p className="small muted" style={{ margin: "2px 0 0" }}>
-            {sub}
-          </p>
-        )}
+        <h2 id={id}>{title}</h2>
+        {sub && <p className="op-sec-sub">{sub}</p>}
       </div>
       {right}
     </div>

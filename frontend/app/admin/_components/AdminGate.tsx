@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { EmptyState, PageSkeleton } from "@/components";
+import { Icon, PageSkeleton } from "@/components";
 import { useAuth } from "@/lib/auth-context";
 import { ROUTES } from "@/lib/routes";
 import { OwnerDashboard } from "./OwnerDashboard";
@@ -16,17 +16,23 @@ export function AdminGate() {
   if (loading) return <PageSkeleton cards={4} />;
   if (!user?.isAdmin)
     return (
-      <div className="narrow" style={{ padding: "56px 0" }}>
-        <EmptyState icon="lock" title="Operations console">
-          This page is for the people who operate this deployment.{" "}
-          {user && !user.emailVerified ? (
-            <>
-              Operators must have a verified email — <Link href={`${ROUTES.settings}#profile`}>verify yours in Settings</Link>.
-            </>
-          ) : (
-            <Link href={ROUTES.dashboard}>Back to your briefing</Link>
-          )}
-        </EmptyState>
+      <div className="wrap op-page">
+        <div className="op-panel op-gate">
+          <span className="op-ico" aria-hidden="true">
+            <Icon name="lock" />
+          </span>
+          <h1>Operations console</h1>
+          <p>
+            This page is for the people who operate this Ensemblis deployment.{" "}
+            {user && !user.emailVerified ? (
+              <>
+                Operators must have a verified email — <Link href={`${ROUTES.settings}#profile`}>verify yours in Settings</Link>.
+              </>
+            ) : (
+              <Link href={ROUTES.dashboard}>Back to Home</Link>
+            )}
+          </p>
+        </div>
       </div>
     );
   return <OwnerDashboard />;

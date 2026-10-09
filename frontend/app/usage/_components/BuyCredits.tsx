@@ -18,17 +18,16 @@ export interface PendingCheckout {
   known: string[]; // PURCHASE transaction ids that existed before checkout
 }
 
-export function bonusPercent(p: CreditPack): number {
-  if (!p.priceCents || p.credits <= p.priceCents) return 0;
-  return Math.round(((p.credits - p.priceCents) / p.priceCents) * 100);
-}
-
-/** Stripe Checkout funding packs. Only rendered when config.paymentsEnabled. */
-export function BuyCredits({ packs, transactions, teamName }: { packs: CreditPack[]; transactions: Transaction[] | null; teamName?: string | null }) {
+/**
+ * Add funds through Stripe Checkout. Only rendered when config.paymentsEnabled.
+ * Each option states two facts from the server config: what you pay and what
+ * is added to the balance. No tiers, badges or upsell.
+ */
+export function AddFunds({ packs, transactions, orgName }: { packs: CreditPack[]; transactions: Transaction[] | null; orgName?: string | null }) {
   const toast = useToast();
   const [busy, setBusy] = useState<string | null>(null);
 
-  const buy = async (p: CreditPack) => {
+  const pay = async (p: CreditPack) => {
     setBusy(p.id);
     try {
       const { url } = await api.createCheckout(p.id);
@@ -48,90 +47,49 @@ export function BuyCredits({ packs, transactions, teamName }: { packs: CreditPac
   };
 
   if (!packs.length) return null;
+  const options = [...packs].sort((a, b) => a.priceCents - b.priceCents);
 
   return (
-    <section id="buy" className="card" style={{ marginTop: 16, scrollMarginTop: 90 }} aria-labelledby="h-buy">
-      <div className="row between wrapflex" style={{ gap: 10 }}>
-        <div>
-          <h3 id="h-buy" style={{ margin: 0 }}>
-            Add funds
-          </h3>
-          <p className="small muted" style={{ margin: "4px 0 0" }}>
-            Your balance pays for executions (charged when one starts, refunded for work that fails or never runs).{teamName ? ` Funds go into the ${teamName} organization balance.` : ""}
-          </p>
-        </div>
+    <div className="op-panel op-pad">
+      <div className="op-inline" style={{ justifyContent: "space-between" }}>
+        <p className="op-sec-sub" style={{ marginTop: 0 }}>
+          Choose an amount.{orgName ? ` Funds go into the ${orgName} organization balance.` : ""}
+        </p>
         <span className="tag gray">
           <Icon name="lock" />
           Secure checkout
         </span>
       </div>
-
-      <div className="grid g3" style={{ marginTop: 16, alignItems: "stretch" }}>
-        {packs.map((p) => {
-          const bonus = bonusPercent(p);
-          return (
-            <div
-              key={p.id}
-              className="card tight"
-              style={{
-                display: "flex",
-                flexDirection: "column",
-                gap: 6,
-                position: "relative",
-                ...(p.popular ? { borderColor: "var(--accent)", boxShadow: "0 0 0 1px var(--accent)" } : {}),
-              }}
-            >
-              <div className="row between" style={{ gap: 8 }}>
-                <b>{p.label}</b>
-                {p.popular && (
-                  <span className="tag">
-                    <Icon name="star" />
-                    Popular
-                  </span>
-                )}
-              </div>
-              <div style={{ fontSize: 30, fontWeight: 600, letterSpacing: "-.02em", lineHeight: 1.1 }}>{eur(p.priceCents)}</div>
-              <div className="small">
-                <b>{eur(p.credits)}</b> <span className="muted">added to your balance</span>
-              </div>
-              <div style={{ minHeight: 24 }}>
-                {bonus > 0 ? (
-                  <span className="tag ok">+{bonus}% bonus</span>
-                ) : (
-                  <span className="tiny muted">Balance matches what you pay</span>
-                )}
-              </div>
+      <ul className="op-funds" aria-label="Amounts you can add">
+        {options.map((p) => (
+          <li key={p.id}>
+            <div className="op-fund">
+              <span className="op-kpi-l">Added to your balance</span>
+              <span className="op-fund-v">{eur(p.credits, { decimals: p.credits % 100 !== 0 })}</span>
+              <span className="op-meta">
+                You pay {eur(p.priceCents, { decimals: p.priceCents % 100 !== 0 })}
+              </span>
               <button
                 type="button"
-                className={p.popular ? "btn p block" : "btn block"}
-                style={{ marginTop: "auto" }}
-                onClick={() => buy(p)}
+                className="btn block"
+                onClick={() => pay(p)}
                 disabled={!!busy}
                 aria-busy={busy === p.id}
-                aria-label={`Buy the ${p.label} pack: ${eur(p.credits)} added to your balance for ${eur(p.priceCents)}`}
+                aria-label={`Add ${eur(p.credits)} to your balance for ${eur(p.priceCents)}`}
               >
-                Buy for {eur(p.priceCents)}
+                Pay {eur(p.priceCents)}
               </button>
             </div>
-          );
-        })}
-      </div>
-
-      <p className="tiny muted row" style={{ marginTop: 14, gap: 8, alignItems: "flex-start" }}>
-        <Icon name="shield" size={14} style={{ flex: "none", marginTop: 1 }} />
+          </li>
+        ))}
+      </ul>
+      <p className="op-secure">
+        <Icon name="shield" />
         <span>
-          Payments are processed by Stripe. You&apos;ll finish on Stripe&apos;s secure checkout page — Ensemblis never sees or stores your card
-          details. Funds are added as soon as Stripe confirms the payment. See our{" "}
-          <Link href={ROUTES.terms} style={{ color: "var(--accent)" }}>
-            Terms
-          </Link>{" "}
-          and{" "}
-          <Link href={ROUTES.privacy} style={{ color: "var(--accent)" }}>
-            Privacy Policy
-          </Link>
-          .
+          Payments are processed by Stripe. You finish on Stripe&apos;s secure checkout page — Ensemblis never sees or stores your card details. Funds are
+          added as soon as Stripe confirms the payment. See our <Link href={ROUTES.terms}>Terms</Link> and <Link href={ROUTES.privacy}>Privacy Policy</Link>.
         </span>
       </p>
-    </section>
+    </div>
   );
 }

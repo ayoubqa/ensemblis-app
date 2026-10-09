@@ -1,10 +1,10 @@
 import type { Metadata } from "next";
+import { privateMetadata } from "@/lib/site";
 import { AdminGate } from "./_components/AdminGate";
 
 export const metadata: Metadata = {
-  title: "Operations console",
+  ...privateMetadata("Operations console"),
   description: "Operations console for this Ensemblis deployment (operators only).",
-  robots: { index: false },
 };
 
 export default function AdminPage() {

@@ -5,11 +5,11 @@ import { useCallback, useEffect, useState } from "react";
 import { api, type Billing, type Transaction } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { useConfig } from "@/lib/config";
-import { dateTime, eur, eurSigned } from "@/lib/format";
+import { toastApiError } from "@/lib/errors";
+import { dateTime, eur, eurSigned, num, plural } from "@/lib/format";
 import { ROUTES } from "@/lib/routes";
 import { EmptyState, Icon, PageHead, PageSkeleton, RequireAuth, Tag, useToast } from "@/components";
-import { Section } from "@/components/ops";
-import { BuyCredits } from "./_components/BuyCredits";
+import { AddFunds } from "./_components/BuyCredits";
 import { CheckoutBanner } from "./_components/CheckoutBanner";
 
 export default function UsagePage() {
@@ -20,21 +20,56 @@ export default function UsagePage() {
   );
 }
 
+// "Execution" and "Refund" are asserted by the end-to-end tests.
 const TYPE_LABEL: Record<Transaction["type"], string> = { TASK_CHARGE: "Execution", REFUND: "Refund", TOP_UP: "Demo funds", PURCHASE: "Payment" };
+const TYPE_TONE: Record<Transaction["type"], "gray" | "ok" | "accent"> = { TASK_CHARGE: "gray", REFUND: "ok", TOP_UP: "accent", PURCHASE: "accent" };
+
+/** Ledger descriptions are stored by the server; show them without repeating the type or legacy wording. */
+function describe(t: Transaction): string {
+  const d = t.description.trim();
+  let m = /^Execution:\s*(.+)$/i.exec(d);
+  if (m && t.type === "TASK_CHARGE") return m[1];
+  m = /^Refund:\s*(.+)$/i.exec(d);
+  if (m && t.type === "REFUND") return m[1];
+  m = /^Demo credit top-up\s*\((.+)\)$/i.exec(d);
+  if (m) return `Demo funds added (${m[1]})`;
+  m = /^Purchased .* credit pack\s*\((.+)\)$/i.exec(d);
+  if (m) return `Card payment (${m[1]})`;
+  return d;
+}
 
 function Usage() {
   const { user, setUser } = useAuth();
   const { config } = useConfig();
   const toast = useToast();
   const [b, setB] = useState<Billing | null>(null);
+  const [failed, setFailed] = useState<string | null>(null);
   const [more, setMore] = useState(false);
-  const load = useCallback(async () => setB(await api.billing()), []);
+  const load = useCallback(async () => {
+    setFailed(null);
+    try {
+      setB(await api.billing());
+    } catch (e) {
+      setFailed((e as Error).message);
+    }
+  }, []);
   useEffect(() => {
-    load().catch((e) => toast.error((e as Error).message));
-  }, [load, toast]);
+    load();
+  }, [load]);
 
+  if (!b && failed)
+    return (
+      <div className="wrap op-page">
+        <PageHead eyebrow="Usage" title="Usage & spending" />
+        <EmptyState icon="alert" title="Usage couldn't be loaded" action={{ label: "Try again", onClick: () => void load() }}>
+          {failed}
+        </EmptyState>
+      </div>
+    );
   if (!b || !user) return <PageSkeleton cards={3} />;
   const owner = b.walletOwner === "self";
+  const canPay = owner && !user.isGuest && config.paymentsEnabled && config.creditPacks.length > 0;
+  const canDemo = owner && !user.isGuest && !config.paymentsEnabled && config.topupEnabled;
 
   const loadMore = async () => {
     if (!b.nextCursor) return;
@@ -42,6 +77,8 @@ function Usage() {
     try {
       const r = await api.moreTransactions(b.nextCursor);
       setB({ ...b, transactions: [...b.transactions, ...r.transactions], nextCursor: r.nextCursor });
+    } catch (e) {
+      toastApiError(toast, e, "Couldn't load older transactions");
     } finally {
       setMore(false);
     }
@@ -58,100 +95,149 @@ function Usage() {
     }
   };
 
+  const objectives = b.usage.byObjective;
+  const objectiveTotal = objectives.reduce((n, o) => n + o.spendCents, 0);
+
   return (
-    <div className="wrap" style={{ maxWidth: 1080, paddingBottom: 48 }}>
+    <div className="wrap op-page">
       <PageHead
-        eyebrow="USAGE"
+        eyebrow="Usage"
         title="Usage & spending"
-        sub="Every execution shows its estimated cost before you approve it. It is charged when it starts and refunded automatically for work that fails or never runs."
+        sub="Every execution shows its estimated cost before you approve it. It is charged when it starts and refunded automatically for work that fails or never starts."
       />
       <CheckoutBanner onBilling={setB} />
-      <div className="kpis">
-        <div className="kpi">
-          <b data-testid="balance">{eur(b.balanceCents, { decimals: true })}</b>
-          <span>{owner ? "Balance" : "Organization balance"}</span>
-          <em>{owner ? "Available for executions" : "Managed by your organization owner"}</em>
+
+      <div className="op-glance" aria-label="Balance and spending">
+        <div className="op-kpi is-accent">
+          <span className="op-kpi-l">
+            <Icon name="wallet" />
+            {owner ? "Balance" : "Organization balance"}
+          </span>
+          <b className="op-kpi-v" data-testid="balance">
+            {eur(b.balanceCents, { decimals: true })}
+          </b>
+          <span className="op-kpi-m">{owner ? "Available for executions" : "Managed by your organization owner"}</span>
+          {(canPay || canDemo) && (
+            <span className="op-kpi-a">
+              <a href="#funds" className="op-link">
+                Add funds <Icon name="arrow" />
+              </a>
+            </span>
+          )}
         </div>
-        <div className="kpi">
-          <b>{eur(b.usage.monthExecutionSpendCents, { decimals: true })}</b>
-          <span>Execution spend this month</span>
-          <em>net of refunds</em>
+        <div className="op-kpi">
+          <span className="op-kpi-l">Spend this month</span>
+          <span className="op-kpi-v">{eur(b.usage.monthExecutionSpendCents, { decimals: true })}</span>
+          <span className="op-kpi-m">on executions, net of refunds</span>
         </div>
-        <div className="kpi">
-          <b>{b.usage.monthExecutions}</b>
-          <span>Executions this month</span>
-          <em>avg {eur(b.usage.avgExecutionCostCents, { decimals: true })} each</em>
+        <div className="op-kpi">
+          <span className="op-kpi-l">Executions this month</span>
+          <span className="op-kpi-v">{num(b.usage.monthExecutions)}</span>
+          <span className="op-kpi-m">{b.usage.monthExecutions ? `${eur(b.usage.avgExecutionCostCents, { decimals: true })} on average` : "None started yet"}</span>
         </div>
-        <div className="kpi">
-          <b>{eur(b.lifetimeSpendCents, { decimals: true })}</b>
-          <span>Total spend</span>
-          <em>incl. earlier reports</em>
+        <div className="op-kpi">
+          <span className="op-kpi-l">Total spend</span>
+          <span className="op-kpi-v">{eur(b.lifetimeSpendCents, { decimals: true })}</span>
+          <span className="op-kpi-m">all time, including earlier reports</span>
         </div>
       </div>
 
-      <Section title="Spend by objective — this month" count={b.usage.byObjective.length}>
-        {b.usage.byObjective.length ? (
-          <div className="olist">
-            {b.usage.byObjective.map((o) => (
-              <Link key={o.objectiveId} href={ROUTES.objective(o.objectiveId)} className="orow" style={{ gridTemplateColumns: "minmax(0,1fr) 120px 110px" }}>
-                <div className="t">{o.title}</div>
-                <span className="small muted">
-                  {o.executions} execution{o.executions === 1 ? "" : "s"}
-                </span>
-                <b style={{ textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{eur(o.spendCents, { decimals: true })}</b>
-              </Link>
-            ))}
+      <section className="op-sec" aria-labelledby="h-spend">
+        <div className="op-sec-head">
+          <div>
+            <h2 id="h-spend">
+              Spend by objective <span className="op-count">{num(objectives.length)}</span>
+            </h2>
+            <p className="op-sec-sub">This month, net of refunds. Select an objective to see its plan, evidence and outcome.</p>
           </div>
+        </div>
+        {objectives.length ? (
+          <ul className="op-panel op-spend">
+            {objectives.map((o) => {
+              const share = objectiveTotal ? Math.round((o.spendCents / objectiveTotal) * 100) : 0;
+              return (
+                <li key={o.objectiveId}>
+                  <div style={{ minWidth: 0 }}>
+                    <Link href={ROUTES.objective(o.objectiveId)} className="t" title={o.title}>
+                      {o.title}
+                    </Link>
+                    <span className="op-meta">
+                      {plural(o.executions, "execution")} · {share}% of this month&apos;s spend
+                    </span>
+                  </div>
+                  <span className="op-amt">{eur(o.spendCents, { decimals: true })}</span>
+                  <span className="op-bar" role="presentation">
+                    <i style={{ width: `${share}%` }} />
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
         ) : (
-          <p className="small muted">No execution spend this month.</p>
+          <div className="op-panel op-quiet">
+            <Icon name="chart" />
+            No execution spend this month.
+          </div>
         )}
-      </Section>
+      </section>
 
-      {owner && !user.isGuest && config.paymentsEnabled && (
-        <Section title="Add funds">
-          <BuyCredits packs={config.creditPacks} transactions={b.transactions} teamName={user.team?.name ?? null} />
-        </Section>
-      )}
-      {owner && !user.isGuest && !config.paymentsEnabled && config.topupEnabled && (
-        <Section title="Demo funds">
-          <div className="card tight">
-            <p className="small">Card payments aren&apos;t set up on this server. You can add demo funds (no real money) up to {eur(config.topupMaxCents)} in total.</p>
-            <div className="row wrapflex" style={{ marginTop: 10 }}>
-              {[1000, 2000].map((c) => (
-                <button key={c} type="button" className="btn sm" onClick={() => topUp(c)}>
-                  Add {eur(c)} demo funds
-                </button>
-              ))}
+      {(canPay || canDemo) && (
+        <section id="funds" className="op-sec" aria-labelledby="h-funds">
+          <div className="op-sec-head">
+            <div>
+              <h2 id="h-funds">Add funds</h2>
+              <p className="op-sec-sub">Your balance pays for executions: charged when one starts, refunded for work that fails or never starts.</p>
             </div>
           </div>
-        </Section>
+          {canPay ? (
+            <AddFunds packs={config.creditPacks} transactions={b.transactions} orgName={user.team?.name ?? null} />
+          ) : (
+            <div className="op-panel op-pad">
+              <p className="small">Card payments aren&apos;t set up on this server. You can add demo funds (no real money) up to {eur(config.topupMaxCents)} in total.</p>
+              <div className="op-inline" style={{ marginTop: 12 }}>
+                {[1000, 2000].map((c) => (
+                  <button key={c} type="button" className="btn sm" onClick={() => topUp(c)}>
+                    <Icon name="plus" />
+                    Add {eur(c)} demo funds
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </section>
       )}
 
-      <Section title="Transactions">
+      <section className="op-sec" aria-labelledby="h-tx">
+        <div className="op-sec-head">
+          <div>
+            <h2 id="h-tx">Transactions</h2>
+            <p className="op-sec-sub">Every charge, refund and payment on this balance, newest first.</p>
+          </div>
+        </div>
         {b.transactions.length ? (
-          <div className="tw">
+          <div className="tw op-tx">
             <table>
               <thead>
                 <tr>
-                  <th>Date</th>
-                  <th>Type</th>
-                  <th>Description</th>
-                  <th>By</th>
-                  <th style={{ textAlign: "right" }}>Amount</th>
+                  <th scope="col">Date</th>
+                  <th scope="col">Type</th>
+                  <th scope="col">Description</th>
+                  <th scope="col">By</th>
+                  <th scope="col" className="op-tx-amt">
+                    Amount
+                  </th>
                 </tr>
               </thead>
               <tbody>
                 {b.transactions.map((t) => (
                   <tr key={t.id}>
-                    <td className="small">{dateTime(t.createdAt)}</td>
-                    <td>
-                      <Tag variant={t.type === "REFUND" ? "ok" : t.type === "TASK_CHARGE" ? "gray" : "accent"}>{TYPE_LABEL[t.type]}</Tag>
+                    <td className="op-tx-date">{dateTime(t.createdAt)}</td>
+                    <td className="op-tx-type">
+                      <Tag variant={TYPE_TONE[t.type]}>{TYPE_LABEL[t.type]}</Tag>
                     </td>
-                    <td className="small" style={{ whiteSpace: "normal" }}>
-                      {t.description}
-                    </td>
-                    <td className="small muted">{t.actor?.name ?? "Ensemblis"}</td>
-                    <td style={{ textAlign: "right", fontVariantNumeric: "tabular-nums", color: t.amountCents > 0 ? "var(--ok)" : undefined }}>{eurSigned(t.amountCents)}</td>
+                    <td className="op-tx-desc">{describe(t)}</td>
+                    <td className="op-tx-by">{t.actor?.name ?? "Ensemblis"}</td>
+                    <td className={t.amountCents > 0 ? "op-tx-amt is-in" : "op-tx-amt"}>{eurSigned(t.amountCents)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -163,13 +249,13 @@ function Usage() {
           </EmptyState>
         )}
         {b.nextCursor && (
-          <div style={{ textAlign: "center", marginTop: 12 }}>
+          <div style={{ textAlign: "center", marginTop: 14 }}>
             <button type="button" className="btn sm" onClick={loadMore} aria-busy={more} disabled={more}>
               <Icon name="down" /> Older transactions
             </button>
           </div>
         )}
-      </Section>
+      </section>
     </div>
   );
 }
