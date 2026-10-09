@@ -340,12 +340,17 @@ export function Header() {
             </>
           ) : (
             <>
-              <Link href={ROUTES.login} className="btn ghost sm sh-login">
-                Log in
-              </Link>
-              <Link href={ROUTES.signup} className="btn p sm">
-                Get started
-              </Link>
+              {/* The page already offers the action it is for: no "Log in" on /login, no "Get started" on /signup. */}
+              {!starts(pathname, ROUTES.login) && (
+                <Link href={ROUTES.login} className="btn ghost sm sh-login">
+                  Log in
+                </Link>
+              )}
+              {!starts(pathname, ROUTES.signup) && (
+                <Link href={ROUTES.signup} className="btn p sm">
+                  Get started
+                </Link>
+              )}
             </>
           )}
         </div>

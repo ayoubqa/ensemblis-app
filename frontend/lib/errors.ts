@@ -1,7 +1,7 @@
 import { ApiError } from "./api";
 import type { ToastFn } from "@/components/Toast";
 
-/** 429 (rate / daily limit) or 403 (not allowed on this demo, e.g. top-ups off, invite needed). */
+/** 429 (rate / daily limit) or 403 (not allowed here, e.g. top-ups off, invite needed). */
 export function isLimitError(e: unknown): e is ApiError {
   return e instanceof ApiError && (e.status === 429 || e.status === 403);
 }
@@ -10,8 +10,8 @@ export function isLimitError(e: unknown): e is ApiError {
 export function errorText(e: unknown, fallback = "Something went wrong"): string {
   if (e instanceof ApiError) {
     if (e.message && !/^Request failed \(\d+\)$/.test(e.message)) return e.message;
-    if (e.status === 429) return "You've hit this demo's usage limit. Please try again later.";
-    if (e.status === 403) return "That isn't available on this demo.";
+    if (e.status === 429) return "Too many requests or a usage limit was reached. Please try again later.";
+    if (e.status === 403) return "That isn't available right now.";
   }
   return e instanceof Error && e.message ? e.message : fallback;
 }
