@@ -1,122 +1,87 @@
 "use client";
 
-import { useState } from "react";
-import type { Execution, ExecutionStep } from "@/lib/api";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { Execution, ExecutionStep, TaskSource } from "@/lib/api";
 import { Icon, StepStatusTag, Tag } from "@/components";
-import { ReportMarkdown } from "@/components/report";
+import { CiteProvider, ReportMarkdown } from "@/components/report";
 import { ExecBadge, evidenceToSources } from "@/components/ops";
 import { duration, eur, relativeTime } from "@/lib/format";
+import { EvidenceChips, evidenceId, focusEvidence } from "./Evidence";
 
-function StepCard({ step, execution, partial }: { step: ExecutionStep; execution: Execution; partial?: string }) {
-  const [open, setOpen] = useState(false);
-  const live = step.status === "RUNNING";
-  const text = live ? partial ?? step.partialOutput : null;
-  const secs = step.startedAt && step.completedAt ? Math.round((new Date(step.completedAt).getTime() - new Date(step.startedAt).getTime()) / 1000) : null;
+/** The Chief of Staff at work before a plan exists. */
+function Planning() {
   return (
-    <li className={`st-${step.status}`} data-testid="plan-step" data-status={step.status}>
-      <div className="tl-dot" aria-hidden="true">
-        {step.status === "COMPLETED" ? <Icon name="check" /> : step.status === "FAILED" ? <Icon name="x" /> : step.order + 1}
+    <div className="cs-card cs-planning">
+      <ExecBadge executive="chief_of_staff" size={36} />
+      <div>
+        <p className="cs-planning-t">The Chief of Staff is planning</p>
+        <p className="cs-planning-s">Reading your company context and memory, choosing capabilities and pricing the plan.</p>
       </div>
-      <div className="tl-card">
-        <div className="tl-top">
-          <div style={{ minWidth: 0 }}>
-            <div className="tl-title">
-              {step.title}
-              {step.kind === "revision" && (
-                <Tag variant="warn" className="ml-2">
-                  Revision
-                </Tag>
-              )}
-            </div>
-            <div className="tl-who">
-              <b>{step.executiveTitle}</b> → {step.agent} · {step.capabilityName} <span className="mono">v{step.capabilityVersion}</span>
-            </div>
-          </div>
-          <StepStatusTag status={step.status} />
-        </div>
-        <p className="small muted" style={{ marginTop: 6 }}>
-          {step.purpose}
-        </p>
-        {step.summary && step.status === "COMPLETED" && <p className="tl-sum">{step.summary}</p>}
-        {live && (
-          <div className="livebox" aria-live="polite" aria-label={`${step.agent} is writing`}>
-            {text ? text.slice(-2500) : `${step.agent} is gathering evidence…`}
-          </div>
-        )}
-        {step.status === "FAILED" && step.error && (
-          <p className="small" style={{ color: "var(--bad)", marginTop: 8 }}>
-            {step.error}
-          </p>
-        )}
-        {step.status === "PENDING" && step.retryAt && <p className="tiny muted" style={{ marginTop: 6 }}>Retry scheduled {relativeTime(step.retryAt)}.</p>}
-        <div className="tl-meta">
-          {step.evidenceNs.length > 0 && (
-            <span>
-              <Icon name="link" size={12} /> Evidence {step.evidenceNs.map((n) => `[${n}]`).join(" ")}
-            </span>
-          )}
-          {step.attempts > 1 && <span>{step.attempts} attempts</span>}
-          {secs !== null && <span>{duration(secs)}</span>}
-          {step.tokensIn + step.tokensOut > 0 && <span>{(step.tokensIn + step.tokensOut).toLocaleString()} tokens</span>}
-          {step.costCents > 0 && <span>{eur(step.costCents, { decimals: true })}</span>}
-          {step.output && (
-            <button type="button" className="linkbtn" onClick={() => setOpen((o) => !o)} aria-expanded={open}>
-              {open ? "Hide work" : "Show work"}
-            </button>
-          )}
-        </div>
-        {open && step.output && (
-          <div className="prose max-w-none" style={{ marginTop: 10, borderTop: "1px solid var(--line)", paddingTop: 10 }}>
-            <ReportMarkdown sources={evidenceToSources(execution.evidence)}>{step.output}</ReportMarkdown>
-          </div>
-        )}
-      </div>
-    </li>
+      <span className="cs-dots" aria-hidden="true">
+        <i />
+        <i />
+        <i />
+      </span>
+    </div>
   );
 }
 
-export function PlanPanel({ execution, partials }: { execution: Execution; partials: Record<string, string> }) {
+/** The Chief of Staff's plan: deliverable, team, estimate, assumptions and risks. */
+export function PlanSummary({ execution }: { execution: Execution }) {
   const plan = execution.plan;
-  if (!plan && execution.status === "PLANNING") {
+  if (!plan) {
+    if (execution.status === "PLANNING") return <Planning />;
     return (
-      <div className="card tight row" style={{ gap: 12 }}>
-        <ExecBadge executive="chief_of_staff" />
-        <div>
-          <b>The Chief of Staff is planning</b>
-          <div className="small muted">Reading your company context and memory, choosing capabilities and pricing the plan.</div>
-        </div>
-        <span className="spin" aria-hidden="true" style={{ marginLeft: "auto" }} />
+      <div className="cs-empty">
+        <Icon name="list" size={16} />
+        <p>No plan was made for this attempt.</p>
       </div>
     );
   }
+  const work = execution.steps.filter((s) => s.kind === "work");
+  const execs = Array.from(new Set(work.map((s) => s.executiveTitle)));
+  const missing = plan.missingInformation ?? [];
   return (
-    <div>
-      {plan && (
-        <div className="card tight" style={{ marginBottom: 14 }}>
-          <div className="row between wrapflex" style={{ gap: 8 }}>
-            <div className="row" style={{ gap: 10 }}>
-              <ExecBadge executive="chief_of_staff" />
-              <div>
-                <b>Chief of Staff&apos;s plan</b>
-                <div className="tiny muted">
-                  {execution.steps.filter((s) => s.kind === "work").length} steps · estimated {eur(plan.estimatedCostCents, { decimals: true })}
-                  {plan.estimatedManualHours ? ` · ≈${plan.estimatedManualHours}h of analyst time (planner estimate)` : ""}
-                </div>
-              </div>
-            </div>
-            {plan.source === "fallback" ? (
-              <Tag variant="warn" title={plan.notes.join(" ")}>
-                Standard playbook
-              </Tag>
-            ) : (
-              <Tag variant="gray">{plan.version}</Tag>
-            )}
-          </div>
-          {plan.objective && <p className="small" style={{ marginTop: 10 }}>{plan.objective}</p>}
+    <div className="cs-card cs-plan">
+      <div className="cs-plan-top">
+        <ExecBadge executive="chief_of_staff" size={36} />
+        <div className="cs-plan-tt">
+          <span className="cs-kicker">Chief of Staff&apos;s plan</span>
+          <h3>{plan.title || "Plan"}</h3>
+        </div>
+        {plan.source === "fallback" && <Tag variant="warn">Standard playbook</Tag>}
+      </div>
+      {plan.objective && (
+        <p className="cs-plan-deliv">
+          <span>Deliverable</span>
+          {plan.objective}
+        </p>
+      )}
+      <dl className="cs-plan-facts">
+        <div>
+          <dt>Steps</dt>
+          <dd>{work.length}</dd>
+        </div>
+        <div>
+          <dt>Executives</dt>
+          <dd>{execs.join(", ") || "—"}</dd>
+        </div>
+        <div>
+          <dt>Estimated cost</dt>
+          <dd>
+            {eur(plan.estimatedCostCents, { decimals: true })} <small>estimate</small>
+          </dd>
+        </div>
+      </dl>
+      {plan.notes.length > 0 && <p className="cs-plan-notes">{plan.notes.join(" ")}</p>}
+      {(plan.assumptions.length > 0 || plan.risks.length > 0 || missing.length > 0) && (
+        <div className="cs-plan-more">
           {plan.assumptions.length > 0 && (
-            <details className="det" style={{ marginTop: 10 }}>
-              <summary className="small">Assumptions ({plan.assumptions.length})</summary>
-              <ul className="small" style={{ paddingLeft: 18, marginTop: 6 }}>
+            <details className="cs-disc">
+              <summary>
+                Assumptions <span className="cs-count">{plan.assumptions.length}</span>
+              </summary>
+              <ul>
                 {plan.assumptions.map((a) => (
                   <li key={a}>{a}</li>
                 ))}
@@ -124,39 +89,187 @@ export function PlanPanel({ execution, partials }: { execution: Execution; parti
             </details>
           )}
           {plan.risks.length > 0 && (
-            <details className="det" style={{ marginTop: 6 }}>
-              <summary className="small">Risks ({plan.risks.length})</summary>
-              <ul className="small" style={{ paddingLeft: 18, marginTop: 6 }}>
+            <details className="cs-disc">
+              <summary>
+                Risks <span className="cs-count">{plan.risks.length}</span>
+              </summary>
+              <ul>
                 {plan.risks.map((a) => (
                   <li key={a}>{a}</li>
                 ))}
               </ul>
             </details>
           )}
-          {plan.notes.length > 0 && <p className="tiny muted" style={{ marginTop: 8 }}>{plan.notes.join(" ")}</p>}
+          {missing.length > 0 && (
+            <details className="cs-disc">
+              <summary>
+                Open questions <span className="cs-count">{missing.length}</span>
+              </summary>
+              <ul>
+                {missing.map((m) => (
+                  <li key={m.question}>
+                    {m.question}
+                    {m.whyItMatters && <span className="cs-disc-why"> — {m.whyItMatters}</span>}
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
         </div>
       )}
-      <ol className="timeline" aria-label="Plan steps">
-        {execution.steps.map((s) => (
-          <StepCard key={s.id} step={s} execution={execution} partial={partials[s.id]} />
-        ))}
-        <li className={execution.verification ? (execution.verification.status === "FAIL" ? "st-FAILED" : "st-COMPLETED") : execution.status === "VERIFYING" ? "st-RUNNING" : "st-PENDING"}>
-          <div className="tl-dot" aria-hidden="true">
-            <Icon name="shield" />
+    </div>
+  );
+}
+
+/** Streamed text of the running step, kept scrolled to the latest line. Not a live region: it changes too often to announce. */
+function LiveOutput({ agent, text }: { agent: string; text: string | null }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [text]);
+  return (
+    <div className="cs-live">
+      <div className="cs-live-h">
+        <span className="pulse" aria-hidden="true" />
+        {text ? "Writing" : "Gathering evidence"}
+      </div>
+      <div ref={ref} className="cs-live-b" role="region" aria-label={`${agent}'s live output`} tabIndex={0}>
+        {text ? text.slice(-2500) : `${agent} is gathering evidence…`}
+        <span className="cs-caret" aria-hidden="true" />
+      </div>
+    </div>
+  );
+}
+
+function StepNode({ step }: { step: ExecutionStep }) {
+  return (
+    <span className="cs-tl-node" aria-hidden="true">
+      {step.status === "COMPLETED" ? <Icon name="check" size={14} /> : step.status === "FAILED" ? <Icon name="x" size={14} /> : step.order + 1}
+    </span>
+  );
+}
+
+function StepItem({ step, partial, sources, charged }: { step: ExecutionStep; partial?: string; sources: TaskSource[]; charged: boolean }) {
+  const [open, setOpen] = useState(false);
+  const live = step.status === "RUNNING";
+  const text = live ? partial ?? step.partialOutput : null;
+  const secs = step.startedAt && step.completedAt ? Math.round((new Date(step.completedAt).getTime() - new Date(step.startedAt).getTime()) / 1000) : null;
+  const tokens = step.tokensIn + step.tokensOut;
+  const audit = [`Capability ${step.capabilityName} v${step.capabilityVersion}`, step.model ? `model ${step.model}` : null, tokens > 0 ? `${tokens.toLocaleString()} tokens` : null]
+    .filter(Boolean)
+    .join(" · ");
+  return (
+    <li className={`cs-tl-i st-${step.status}`} data-testid="plan-step" data-status={step.status}>
+      <StepNode step={step} />
+      <div className="cs-tl-card">
+        <div className="cs-tl-top">
+          <div className="cs-tl-main">
+            <h3 className="cs-tl-title">
+              {step.title}
+              {step.kind === "revision" && (
+                <Tag variant="warn" className="ml-2">
+                  Revision
+                </Tag>
+              )}
+            </h3>
+            <p className="cs-tl-who">
+              <ExecBadge executive={step.executive} size={20} />
+              <b>{step.executiveTitle}</b>
+              <Icon name="arrow" size={12} />
+              <span>{step.agent}</span>
+              <span className="cs-cap">{step.capabilityName}</span>
+            </p>
           </div>
-          <div className="tl-card">
-            <div className="tl-top">
-              <div>
-                <div className="tl-title">Verification gate</div>
-                <div className="tl-who">
-                  <b>Chief of Staff</b> → evidence, success criteria, completeness, consistency
-                </div>
+          <StepStatusTag status={step.status} />
+        </div>
+        <p className="cs-tl-purpose">{step.purpose}</p>
+        {step.summary && step.status === "COMPLETED" && <p className="cs-tl-sum">{step.summary}</p>}
+        {live && <LiveOutput agent={step.agent} text={text} />}
+        {step.status === "FAILED" && step.error && (
+          <p className="cs-tl-err">
+            <Icon name="alert" size={14} />
+            {step.error}
+          </p>
+        )}
+        {step.status === "PENDING" && step.retryAt && <p className="cs-tl-retry">Retry scheduled {relativeTime(step.retryAt)}.</p>}
+        <div className="cs-tl-meta">
+          <EvidenceChips ns={step.evidenceNs} />
+          {step.attempts > 1 && <span>{step.attempts} attempts</span>}
+          {secs !== null && (
+            <span>
+              <Icon name="clock" size={12} /> {duration(secs)}
+            </span>
+          )}
+          {step.costCents > 0 && (
+            <span>
+              {eur(step.costCents, { decimals: true })}
+              {!charged && <small className="cs-est">estimate</small>}
+            </span>
+          )}
+          {step.output && (
+            <button type="button" className="cs-linkbtn" onClick={() => setOpen((o) => !o)} aria-expanded={open}>
+              {open ? "Hide work" : "Show work"}
+              <Icon name={open ? "up" : "down"} size={12} />
+            </button>
+          )}
+        </div>
+        {open && step.output && (
+          <div className="cs-tl-work">
+            <ReportMarkdown small sources={sources}>
+              {step.output}
+            </ReportMarkdown>
+            <p className="cs-audit">{audit}</p>
+          </div>
+        )}
+      </div>
+    </li>
+  );
+}
+
+/** Steps executed by the AI Team, ending in the verification gate. */
+export function ExecutionTimeline({ execution, partials }: { execution: Execution; partials: Record<string, string> }) {
+  const sources = useMemo(() => evidenceToSources(execution.evidence), [execution.evidence]);
+  const jump = useCallback((n: number) => focusEvidence(n), []);
+  if (!execution.steps.length) {
+    return (
+      <div className="cs-empty">
+        <Icon name="list" size={16} />
+        <p>{execution.status === "PLANNING" ? "Steps appear here once the Chief of Staff has planned the work." : "No steps were executed in this attempt."}</p>
+      </div>
+    );
+  }
+  const v = execution.verification;
+  const gate = v ? (v.status === "FAIL" ? "FAILED" : "COMPLETED") : execution.status === "VERIFYING" ? "RUNNING" : "PENDING";
+  return (
+    <CiteProvider sources={sources} jump={jump} prefix="ev" targetId={evidenceId}>
+      <ol className="cs-tl" aria-label="Execution steps">
+        {execution.steps.map((s) => (
+          <StepItem key={s.id} step={s} partial={partials[s.id]} sources={sources} charged={execution.costCents > 0} />
+        ))}
+        <li className={`cs-tl-i cs-tl-gate st-${gate}`}>
+          <span className="cs-tl-node" aria-hidden="true">
+            <Icon name="shield" size={15} />
+          </span>
+          <div className="cs-tl-card">
+            <div className="cs-tl-top">
+              <div className="cs-tl-main">
+                <h3 className="cs-tl-title">Verification gate</h3>
+                <p className="cs-tl-who">Evidence · success criteria · completeness · consistency</p>
               </div>
-              {execution.status === "VERIFYING" ? <StepStatusTag status="RUNNING" /> : execution.verification ? <StepStatusTag status={execution.verification.status === "FAIL" ? "FAILED" : "COMPLETED"} /> : <StepStatusTag status="PENDING" />}
+              <StepStatusTag status={gate} />
             </div>
+            {v && (
+              <p className="cs-tl-sum">
+                Score {v.score}/100 — {v.summary}{" "}
+                <a href="#verification" className="cs-inline-link">
+                  See the checks
+                </a>
+              </p>
+            )}
           </div>
         </li>
       </ol>
-    </div>
+    </CiteProvider>
   );
 }

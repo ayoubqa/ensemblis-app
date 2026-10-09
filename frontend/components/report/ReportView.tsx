@@ -68,7 +68,13 @@ export interface ReportViewProps {
   /** Replaces the AI disclaimer line; pass `false` to hide it. */
   disclaimer?: ReactNode | false;
   /** Extra TOC entries after Sources (e.g. "How this was produced"). */
-  tocExtra?: { id: string; label: string }[];
+  tocExtra?: { id: string; label: string; count?: number | null }[];
+  /** Show the numbered Sources panel under the report (default true). */
+  sourcesPanel?: boolean;
+  /** When the panel is hidden: the DOM id a citation [n] jumps to (e.g. the console's evidence list). */
+  sourceTargetId?: (n: number) => string;
+  /** Footnote of the Sources panel; `false` hides it. */
+  sourcesNote?: ReactNode | false;
   /** Rendered above the report card (version switcher, materials…). */
   before?: ReactNode;
   /** Rendered after the Sources panel, in the same column. */
@@ -79,21 +85,35 @@ export interface ReportViewProps {
 }
 
 /**
- * The premium report reader: sticky contents, sections, citation chips with
+ * The report reader: sticky contents, editorial sections, citation chips with
  * source popovers, and a numbered Sources panel. Used by the objective console,
- * the public share page and the examples gallery.
+ * the public shared page and earlier reports.
  */
-export function ReportView({ markdown, sources, idPrefix = "r", disclaimer, tocExtra = [], before, children, emptyText, className }: ReportViewProps) {
+export function ReportView({
+  markdown,
+  sources,
+  idPrefix = "r",
+  disclaimer,
+  tocExtra = [],
+  sourcesPanel = true,
+  sourceTargetId,
+  sourcesNote,
+  before,
+  children,
+  emptyText,
+  className,
+}: ReportViewProps) {
   const { sections } = useMemo(() => splitReport(markdown, idPrefix), [markdown, idPrefix]);
   const list = useMemo(() => sortSources(sources), [sources]);
   const sourcesId = `${idPrefix}-sources`;
+  const external = !sourcesPanel && !!sourceTargetId;
   const toc = useMemo(
     () => [
       ...sections.filter((x) => x.title).map((x) => ({ id: x.id, label: x.title as string, count: null as number | null })),
-      ...(list.length ? [{ id: sourcesId, label: "Sources", count: list.length }] : []),
-      ...tocExtra.map((x) => ({ ...x, count: null })),
+      ...(list.length && sourcesPanel ? [{ id: sourcesId, label: "Sources", count: list.length as number | null }] : []),
+      ...tocExtra.map((x) => ({ ...x, count: x.count ?? null })),
     ],
-    [sections, list.length, sourcesId, tocExtra]
+    [sections, list.length, sourcesId, tocExtra, sourcesPanel]
   );
   const sectionEntries = sections.filter((x) => x.title).length;
   const tocKey = toc.map((x) => x.id).join("|");
@@ -135,39 +155,45 @@ export function ReportView({ markdown, sources, idPrefix = "r", disclaimer, tocE
     (n: number) => {
       const index = list.findIndex((x) => x.n === n);
       if (index < 0) return;
-      if (index >= 8 && list.length > 10) setAllSources(true);
+      if (!external && index >= 8 && list.length > 10) setAllSources(true);
       requestAnimationFrame(() =>
         requestAnimationFrame(() => {
-          const el = document.getElementById(sourceDomId(idPrefix, n));
+          const el = document.getElementById(external && sourceTargetId ? sourceTargetId(n) : sourceDomId(idPrefix, n));
           if (!el) return;
           el.scrollIntoView({ behavior: reduce() ? "auto" : "smooth", block: "center" });
           el.focus({ preventScroll: true });
+          if (flashTimer.current) clearTimeout(flashTimer.current);
+          if (external) {
+            // The target lives outside this component: flash it with a class.
+            el.classList.remove(s.flash);
+            void el.offsetWidth;
+            el.classList.add(s.flash);
+            flashTimer.current = setTimeout(() => el.classList.remove(s.flash), 1900);
+            return;
+          }
           setFlash(null);
           requestAnimationFrame(() => setFlash(n));
-          if (flashTimer.current) clearTimeout(flashTimer.current);
           flashTimer.current = setTimeout(() => setFlash(null), 1900);
         })
       );
     },
-    [list, idPrefix]
+    [list, idPrefix, external, sourceTargetId]
   );
 
   const note =
     disclaimer === false ? null : (
-      <p className={`small muted ${s.note}`} role="note">
-        <Icon name="info" size={15} style={{ flex: "none", marginTop: 2, color: "var(--warn)" }} />
+      <p className={s.note} role="note">
+        <Icon name="info" size={15} style={{ flex: "none", marginTop: 2 }} />
         <span>{disclaimer ?? AI_NOTE}</span>
       </p>
     );
 
   return (
-    <CiteProvider sources={list} jump={jumpToSource} prefix={idPrefix}>
-      <div className={["report", className].filter(Boolean).join(" ")} style={toc.length ? undefined : { gridTemplateColumns: "minmax(0,1fr)" }}>
+    <CiteProvider sources={list} jump={jumpToSource} prefix={idPrefix} targetId={external ? sourceTargetId : undefined}>
+      <div className={["report", "cs-rv", className].filter(Boolean).join(" ")} style={toc.length ? undefined : { gridTemplateColumns: "minmax(0,1fr)" }}>
         {toc.length > 0 && (
           <aside className="toc" aria-label="Report contents">
-            <div className="tiny muted" style={{ fontWeight: 600, marginBottom: 8, paddingLeft: 14 }}>
-              Contents
-            </div>
+            <div className="cs-rv-tochead">Contents</div>
             <nav>
               {toc.map((x, i) => (
                 <a
@@ -210,14 +236,17 @@ export function ReportView({ markdown, sources, idPrefix = "r", disclaimer, tocE
               ))
             )}
           </article>
-          <SourcesPanel
-            id={sourcesId}
-            sources={list}
-            idPrefix={idPrefix}
-            flash={flash}
-            expanded={allSources}
-            onExpand={() => setAllSources(true)}
-          />
+          {sourcesPanel && (
+            <SourcesPanel
+              id={sourcesId}
+              sources={list}
+              idPrefix={idPrefix}
+              flash={flash}
+              expanded={allSources}
+              onExpand={() => setAllSources(true)}
+              note={sourcesNote}
+            />
+          )}
           {children}
         </div>
       </div>

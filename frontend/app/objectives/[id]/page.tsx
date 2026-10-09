@@ -2,20 +2,23 @@
 
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
-import { api, type Execution, type Objective } from "@/lib/api";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { api, type Approval, type Execution, type MemoryItem, type Objective } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { useConfig } from "@/lib/config";
-import { EmptyState, Flow, Icon, OutcomeTag, PageSkeleton, ProgressBar, RequireAuth, StatusTag, Tag, VerificationTag, useToast } from "@/components";
-import { ExportMenu, ReportView } from "@/components/report";
-import { ApprovalCard, EventFeed, ExceptionCard, ExecBadge, Section, evidenceToSources } from "@/components/ops";
+import { EmptyState, Icon, OutcomeTag, PageSkeleton, RequireAuth, StatusTag, Tag, VerificationTag, useToast } from "@/components";
+import { ExportMenu, ReportView, copyText } from "@/components/report";
+import { ApprovalCard, EventFeed, ExceptionCard, evidenceToSources } from "@/components/ops";
 import { eur, longDate, relativeTime } from "@/lib/format";
 import { ROUTES } from "@/lib/routes";
 import { useObjectiveLive } from "./_components/useObjectiveLive";
-import { PlanPanel } from "./_components/Plan";
+import { ExecutionTimeline, PlanSummary } from "./_components/Plan";
 import { VerificationPanel } from "./_components/Verification";
-import { EvidencePanel } from "./_components/Evidence";
+import { EvidencePanel, evidenceId } from "./_components/Evidence";
 import { OutcomePanel } from "./_components/Outcome";
+import { LifecycleStepper, lifecycle, type StageKey } from "./_components/Lifecycle";
+import { Stage } from "./_components/Stage";
+import { NowCard } from "./_components/Now";
 
 export default function ObjectivePage() {
   return (
@@ -23,24 +26,6 @@ export default function ObjectivePage() {
       <ObjectiveConsole />
     </RequireAuth>
   );
-}
-
-function flowStep(ex: Execution | null): number {
-  if (!ex) return 0;
-  switch (ex.status) {
-    case "PLANNING":
-      return 1;
-    case "PLANNED":
-    case "WAITING_FOR_APPROVAL":
-      return 2;
-    case "RUNNING":
-    case "BLOCKED":
-      return ex.costCents > 0 ? 3 : 2;
-    case "VERIFYING":
-      return 4;
-    default:
-      return 5;
-  }
 }
 
 function ObjectiveConsole() {
@@ -54,6 +39,8 @@ function ObjectiveConsole() {
 
   const ex = detail?.execution ?? null;
   const objective = detail?.objective ?? null;
+  const evidence = ex?.evidence;
+  const sources = useMemo(() => evidenceToSources(evidence ?? []), [evidence]);
 
   useEffect(() => {
     if (!objective) return;
@@ -71,11 +58,28 @@ function ObjectiveConsole() {
   }, [settledKey, refresh]);
 
   if (!detail) {
-    if (error && (error.status === 404 || error.status === 400)) {
+    if (error && (error.status === 404 || error.status === 400 || error.status === 403)) {
       return (
         <div className="narrow" style={{ padding: "56px 0" }}>
           <EmptyState icon="list" title="Objective not found" action={{ label: "Go to Objectives", href: ROUTES.objectives }}>
             It doesn&apos;t exist or belongs to another organization.
+          </EmptyState>
+        </div>
+      );
+    }
+    if (error) {
+      return (
+        <div className="narrow" style={{ padding: "56px 0" }}>
+          <EmptyState
+            icon="alert"
+            title="Couldn't load this objective"
+            action={
+              <button type="button" className="btn p" onClick={() => void reload()}>
+                Try again
+              </button>
+            }
+          >
+            {error.message || "Something went wrong."} We&apos;ll keep retrying in the background.
           </EmptyState>
         </div>
       );
@@ -87,16 +91,21 @@ function ObjectiveConsole() {
   const pendingApproval = ex?.approvals.find((a) => a.status === "PENDING") ?? null;
   const openException = ex?.exceptions.find((x) => x.status === "OPEN") ?? null;
   const terminal = !!ex && ["COMPLETED", "FAILED", "CANCELLED"].includes(ex.status);
-  const cancellable = !!ex && !terminal;
+  // While an open exception offers "Cancel execution" itself, keep a single button with that name.
+  const cancellable = !!ex && !terminal && !openException?.actions.includes("cancel");
+  const stages = lifecycle(o, ex, openException);
+  const st = Object.fromEntries(stages.map((s) => [s.key, s])) as Record<StageKey, (typeof stages)[number]>;
+  const present = new Set<StageKey>(ex ? ["objective", "plan", "approval", "execution", "verification", "evidence", "outcome"] : ["objective", "plan"]);
+  const verified = ex?.status === "COMPLETED" && (ex.verificationStatus === "PASS" || ex.verificationStatus === "PASS_WITH_WARNINGS");
 
   const act = async (what: "cancel" | "again" | "plan") => {
-    if (what === "cancel" && !window.confirm("Cancel this execution? Work that hasn't run is refunded.")) return;
+    if (what === "cancel" && !window.confirm("Cancel this execution? Work that hasn't been executed is refunded.")) return;
     setBusy(what);
     try {
       if (what === "cancel") await api.cancelExecution(ex!.id);
       if (what === "again") await api.runAgain(o.id);
       if (what === "plan") await api.planObjective(o.id);
-      toast(what === "cancel" ? "Execution cancelled" : "The Chief of Staff is planning");
+      toast(what === "cancel" ? "Execution cancelled" : what === "again" ? "The Chief of Staff is planning a new attempt" : "The Chief of Staff is planning");
       await reload();
       refresh().catch(() => undefined);
     } catch (e) {
@@ -107,264 +116,370 @@ function ObjectiveConsole() {
   };
 
   return (
-    <div className="wrap" style={{ maxWidth: 1240 }} data-testid="objective-console">
-      <div className="ohead">
-        <div className="row wrapflex" style={{ gap: 8 }}>
-          <Link href={ROUTES.objectives} className="small muted">
-            ← Objectives
+    <div className="wrap cs" data-testid="objective-console">
+      {/* ---------------------------------------------------------------- header */}
+      <div className="ohead cs-head">
+        <div className="cs-crumbs">
+          <Link href={ROUTES.objectives}>
+            <Icon name="back" size={14} />
+            Objectives
           </Link>
-          <span className="tiny muted">·</span>
-          <span className="eyebrow" style={{ margin: 0 }}>
-            OBJECTIVE{ex && ex.attempt > 1 ? ` · ATTEMPT ${ex.attempt}` : ""}
+          <span aria-hidden="true">/</span>
+          <span className="cs-crumb-here">
+            Objective{ex && ex.attempt > 1 ? ` · attempt ${ex.attempt}` : ""}
           </span>
         </div>
-        <div className="row between wrapflex" style={{ alignItems: "flex-start", marginTop: 8, gap: 16 }}>
-          <h1>{o.title}</h1>
-          <div className="row wrapflex" style={{ gap: 8 }}>
+        <div className="cs-head-row">
+          <div className="cs-head-main">
+            <h1>{o.title}</h1>
+            <div className="cs-status" data-testid="execution-status" data-status={ex?.status ?? o.status} data-verification={ex?.verificationStatus ?? ""}>
+              <StatusTag status={ex?.status ?? o.status} />
+              {ex?.verificationStatus && <VerificationTag status={ex.verificationStatus} score={ex.verificationScore} />}
+              {ex?.outcomeStatus && <OutcomeTag outcome={ex.outcomeStatus} />}
+              {config.mockAI && <Tag variant="warn">Mock AI — test output</Tag>}
+            </div>
+          </div>
+          <div className="cs-actions">
+            {ex?.status === "COMPLETED" && <ShareControls execution={ex} onChange={reload} />}
             {cancellable && (
               <button type="button" className="btn sm" onClick={() => act("cancel")} aria-busy={busy === "cancel"} disabled={!!busy}>
+                <Icon name="x" />
                 Cancel execution
               </button>
             )}
             {terminal && (
               <button type="button" className="btn sm" onClick={() => act("again")} aria-busy={busy === "again"} disabled={!!busy}>
                 <Icon name="redo" />
-                Run again
+                New attempt
               </button>
             )}
             {o.status === "DRAFT" && (
               <button type="button" className="btn p sm" onClick={() => act("plan")} aria-busy={busy === "plan"} disabled={!!busy}>
+                <Icon name="compass" />
                 Send to the Chief of Staff
               </button>
             )}
           </div>
         </div>
-        <div className="row wrapflex" style={{ gap: 8, marginTop: 12 }} data-testid="execution-status" data-status={ex?.status ?? o.status} data-verification={ex?.verificationStatus ?? ""}>
-          <StatusTag status={ex?.status ?? o.status} />
-          {ex?.verificationStatus && <VerificationTag status={ex.verificationStatus} score={ex.verificationScore} />}
-          {ex?.outcomeStatus && <OutcomeTag outcome={ex.outcomeStatus} />}
-          {config.mockAI && (
-            <Tag variant="warn" title="This server runs the mock AI provider: plans and outputs are placeholders for development and testing, not real analysis.">
-              Mock AI — test output
-            </Tag>
-          )}
-        </div>
-        <div className="meta">
-          <span>
-            Deadline <b>{o.deadline ? longDate(o.deadline) : "none"}</b>
-          </span>
-          <span>
-            Budget <b>{eur(o.budgetCents)}</b>
-          </span>
+        {config.mockAI && <p className="cs-mock">Mock AI: this server uses the mock AI provider, so plans and outputs are placeholders for development and testing, not real analysis.</p>}
+        <dl className="cs-facts">
+          <div>
+            <dt>Budget</dt>
+            <dd>{eur(o.budgetCents)}</dd>
+          </div>
           {ex && (
-            <span>
-              {ex.costCents ? "Charged" : "Estimated"} <b>{eur(ex.costCents || ex.estimatedCostCents, { decimals: true })}</b>
-              {ex.refundedCents > 0 && <> · refunded {eur(ex.refundedCents, { decimals: true })}</>}
-            </span>
-          )}
-          <span>
-            Autonomy <b>{o.autonomy === "REVIEW_PLAN" ? "review the plan first" : "run within budget"}</b>
-          </span>
-          <span>
-            Defined {relativeTime(o.createdAt)}
-            {o.createdBy ? ` by ${o.createdBy.name}` : ""}
-          </span>
-        </div>
-        <Flow step={flowStep(ex)} />
-      </div>
-
-      {pendingApproval && (
-        <div style={{ marginTop: 8 }}>
-          <ApprovalCard approval={pendingApproval} onDone={reload} />
-        </div>
-      )}
-      {openException && (
-        <div style={{ marginTop: 8 }}>
-          <ExceptionCard exception={openException} onDone={reload} />
-        </div>
-      )}
-      {ex?.status === "FAILED" && (
-        <div className="attn bad" style={{ marginTop: 8 }}>
-          <h3>This execution failed</h3>
-          <p className="small">{ex.errorMessage}</p>
-          <p className="small muted" style={{ marginTop: 6 }}>
-            {ex.refundedCents > 0 ? `${eur(ex.refundedCents, { decimals: true })} was refunded. ` : ""}Completed work and the event log are kept below.
-          </p>
-        </div>
-      )}
-
-      <div className="console" style={{ marginTop: 18 }}>
-        <div style={{ minWidth: 0 }}>
-          <Section title="Objective">
-            <div className="card tight">
-              <p className="stmt" style={{ marginTop: 0 }}>
-                {o.statement}
-              </p>
-              {o.contextNotes && (
-                <details className="det" style={{ marginTop: 10 }}>
-                  <summary className="small">Context for this objective</summary>
-                  <p className="small" style={{ whiteSpace: "pre-wrap", marginTop: 6 }}>
-                    {o.contextNotes}
-                  </p>
-                </details>
+            <div>
+              {ex.costCents ? (
+                <>
+                  <dt>Charged</dt>
+                  <dd>
+                    {eur(ex.costCents, { decimals: true })}
+                    {ex.refundedCents > 0 && <small>{eur(ex.refundedCents, { decimals: true })} refunded</small>}
+                  </dd>
+                </>
+              ) : (
+                <>
+                  <dt>Estimate</dt>
+                  <dd>
+                    {eur(ex.estimatedCostCents, { decimals: true })}
+                    <small>Chief of Staff estimate</small>
+                  </dd>
+                </>
               )}
             </div>
-          </Section>
+          )}
+          <div>
+            <dt>Deadline</dt>
+            <dd>{o.deadline ? longDate(o.deadline) : "None set"}</dd>
+          </div>
+          <div>
+            <dt>Autonomy</dt>
+            <dd>{o.autonomy === "REVIEW_PLAN" ? "Review the plan first" : "Proceed within budget"}</dd>
+          </div>
+          <div>
+            <dt>Defined</dt>
+            <dd>
+              {relativeTime(o.createdAt)}
+              {o.createdBy && <small>by {o.createdBy.name}</small>}
+            </dd>
+          </div>
+        </dl>
+      </div>
 
-          <SuccessCriteria objective={o} execution={ex} onSaved={reload} />
+      <LifecycleStepper stages={stages} present={present} />
+
+      {/* ---------------------------------------------------------------- needs you */}
+      {(pendingApproval || openException) && (
+        <section className="cs-attn" id="cs-attention" aria-labelledby="cs-attn-h">
+          <h2 id="cs-attn-h" className="cs-attn-h">
+            <span className="cs-attn-dot" aria-hidden="true" />
+            Needs your decision
+          </h2>
+          <div className="cs-attn-list">
+            {pendingApproval && <ApprovalCard approval={pendingApproval} onDone={reload} />}
+            {openException && <ExceptionCard exception={openException} onDone={reload} />}
+          </div>
+        </section>
+      )}
+      {ex?.status === "FAILED" && (
+        <div className="cs-alert" role="status">
+          <Icon name="alert" size={18} />
+          <div>
+            <h2>This execution failed</h2>
+            {ex.errorMessage && <p>{ex.errorMessage}</p>}
+            <p className="cs-alert-sub">
+              {ex.refundedCents > 0 ? `${eur(ex.refundedCents, { decimals: true })} was refunded. ` : ""}Completed work and the event log are kept below.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* ---------------------------------------------------------------- story */}
+      <div className="cs-grid">
+        <div className="cs-main">
+          <Stage id="cs-objective" n={1} state={st.objective.state} title="Objective" meta={o.createdBy ? `Defined by ${o.createdBy.name}` : undefined}>
+            <div className="cs-card cs-obj">
+              <p className="cs-stmt">{o.statement}</p>
+              {o.contextNotes && (
+                <details className="cs-disc">
+                  <summary>Context for this objective</summary>
+                  <p className="cs-ctx">{o.contextNotes}</p>
+                </details>
+              )}
+              <SuccessCriteria objective={o} execution={ex} onSaved={reload} />
+            </div>
+          </Stage>
+
+          <Stage id="cs-plan" n={2} state={st.plan.state} title="Plan" meta={st.plan.note || undefined}>
+            {ex ? (
+              <PlanSummary execution={ex} />
+            ) : (
+              <div className="cs-empty">
+                <Icon name="compass" size={16} />
+                <p>Not planned yet. The Chief of Staff turns the objective into steps, assigns the AI Team and prices the work before anything is charged.</p>
+              </div>
+            )}
+          </Stage>
 
           {ex && (
-            <Section title="Plan & execution" count={`${ex.progress.done}/${ex.progress.total}`}>
-              <PlanPanel execution={ex} partials={partials} />
-            </Section>
+            <Stage id="cs-approval" n={3} state={st.approval.state} title="Approval" meta={st.approval.note || undefined}>
+              <ApprovalRecord objective={o} execution={ex} pending={pendingApproval} blocked={!!openException} />
+            </Stage>
           )}
 
-          {ex && (ex.verification || ex.status === "VERIFYING") && (
-            <Section title="Verification" id="verification">
+          {ex && (
+            <Stage id="cs-execution" n={4} state={st.execution.state} title="Execution" meta={st.execution.note || undefined}>
+              <ExecutionTimeline execution={ex} partials={partials} />
+            </Stage>
+          )}
+
+          {ex && (
+            <Stage id="verification" n={5} state={st.verification.state} title="Verification" meta={st.verification.note || undefined}>
               <VerificationPanel execution={ex} />
-            </Section>
+            </Stage>
           )}
 
           {ex?.result && (
-            <Section
-              title="Result"
+            <Stage
               id="result"
+              icon="report"
+              title="Report"
+              meta={ex.status === "COMPLETED" ? (verified ? "Verified deliverable" : "Deliverable") : "Draft"}
               right={
-                <div className="row" style={{ gap: 8 }}>
-                  {ex.status === "COMPLETED" && <ShareButton execution={ex} onChange={reload} />}
-                  <ExportMenu title={o.title} markdown={ex.result} sources={evidenceToSources(ex.evidence)} meta={{ date: ex.completedAt, label: "Ensemblis outcome" }} />
-                </div>
+                <ExportMenu
+                  title={o.title}
+                  markdown={ex.result}
+                  sources={sources}
+                  meta={{
+                    date: ex.completedAt,
+                    label: ex.status === "COMPLETED" ? "Ensemblis report" : "Draft — not yet verified",
+                  }}
+                />
               }
             >
               {ex.status !== "COMPLETED" && (
-                <div className="banner-info" style={{ marginBottom: 12 }}>
+                <div className="cs-draft">
                   <Icon name="info" size={15} />
-                  <span className="small">Draft result — it becomes final only after it passes verification (or you accept it).</span>
+                  <span>Draft result — it becomes final only after it passes verification (or you accept it).</span>
                 </div>
               )}
-              <ReportView markdown={ex.result} sources={evidenceToSources(ex.evidence)} idPrefix="res" />
-            </Section>
+              <div className="cs-report">
+                <ReportView
+                  markdown={ex.result}
+                  sources={sources}
+                  idPrefix="res"
+                  sourcesPanel={false}
+                  sourceTargetId={evidenceId}
+                  tocExtra={sources.length ? [{ id: "evidence", label: "Evidence", count: sources.length }] : []}
+                />
+              </div>
+            </Stage>
           )}
 
           {ex && (
-            <Section title="Evidence" count={ex.evidence.length} id="evidence">
+            <Stage id="evidence" n={6} state={st.evidence.state} title="Evidence" meta={ex.evidence.length ? `${ex.evidence.length} numbered, cited as [n]` : undefined}>
               <EvidencePanel execution={ex} />
-            </Section>
+            </Stage>
           )}
 
-          {ex?.status === "COMPLETED" && (
-            <Section title="Outcome" id="outcome">
-              <OutcomePanel objective={o} execution={ex} onExecution={reload} />
-            </Section>
+          {ex && (
+            <Stage id="outcome" n={7} state={st.outcome.state} title="Outcome" meta={st.outcome.note || undefined}>
+              {ex.status === "COMPLETED" ? (
+                <OutcomePanel objective={o} execution={ex} onExecution={reload} />
+              ) : (
+                <div className="cs-empty">
+                  <Icon name="target" size={16} />
+                  <p>
+                    {ex.status === "FAILED" || ex.status === "CANCELLED"
+                      ? "This attempt ended before the outcome could be measured."
+                      : "Measured against your success criteria once the result passes verification."}
+                  </p>
+                </div>
+              )}
+            </Stage>
           )}
 
           {ex && ex.memories.length > 0 && (
-            <Section title="What Ensemblis learned" count={ex.memories.length}>
-              <div className="card tight">
-                {ex.memories.map((m) => (
-                  <div key={m.id} className="row between" style={{ padding: "6px 0", gap: 12 }}>
-                    <span className="small">{m.content}</span>
-                    <Tag variant={m.status === "ACTIVE" ? "ok" : "warn"}>{m.status === "ACTIVE" ? "Remembered" : "Needs your confirmation"}</Tag>
-                  </div>
-                ))}
-                <Link href={ROUTES.memory} className="tiny" style={{ color: "var(--accent)" }}>
-                  Review memory →
-                </Link>
-              </div>
-            </Section>
+            <Stage id="cs-memory" icon="layers" title="Memory" meta="What Ensemblis learned">
+              <MemoryList items={ex.memories} />
+            </Stage>
           )}
         </div>
 
-        <aside className="side">
-          {ex && <LiveCard execution={ex} stream={stream} />}
+        <div className="cs-side">
+          <NowCard objective={o} execution={ex} stream={stream} openException={openException} />
           {ex && (
-            <div className="card tight">
-              <h2 className="sh">Activity</h2>
-              <EventFeed events={ex.events} limit={40} />
-            </div>
+            <section className="cs-panel cs-activity" aria-labelledby="cs-act-h">
+              <div className="cs-panel-h">
+                <h2 id="cs-act-h">Activity</h2>
+                <span>{ex.events.length}</span>
+              </div>
+              <EventFeed events={ex.events} limit={12} />
+            </section>
           )}
           {detail.executions.length > 1 && (
-            <div className="card tight">
-              <h2 className="sh">Attempts</h2>
-              {detail.executions.map((e) => (
-                <div key={e.id} className="row between small" style={{ padding: "5px 0" }}>
-                  <span>
-                    #{e.attempt} · {relativeTime(e.createdAt)}
-                  </span>
-                  <StatusTag status={e.status} />
-                </div>
-              ))}
-            </div>
+            <section className="cs-panel" aria-labelledby="cs-att-h">
+              <div className="cs-panel-h">
+                <h2 id="cs-att-h">Attempts</h2>
+                <span>{detail.executions.length}</span>
+              </div>
+              <ol className="cs-attempts">
+                {detail.executions.map((e) => (
+                  <li key={e.id} className={e.id === ex?.id ? "is-on" : undefined}>
+                    <span className="cs-attempt-n">#{e.attempt}</span>
+                    <span className="cs-attempt-t">
+                      {relativeTime(e.createdAt)}
+                      {e.id === ex?.id && <span className="sr-only"> (shown)</span>}
+                    </span>
+                    <StatusTag status={e.status} />
+                  </li>
+                ))}
+              </ol>
+            </section>
           )}
-          {!ex && o.status === "DRAFT" && (
-            <div className="card tight">
-              <b>Draft</b>
-              <p className="small muted" style={{ marginTop: 4 }}>
-                Nothing has been planned or charged. Send it to the Chief of Staff when you&apos;re ready.
-              </p>
-              <button type="button" className="btn p sm" style={{ marginTop: 10 }} onClick={() => act("plan")} disabled={!!busy}>
-                Plan it
-              </button>
-            </div>
-          )}
-          <button type="button" className="btn ghost sm" onClick={() => router.push(ROUTES.newObjective)}>
+          <button type="button" className="btn ghost sm cs-another" onClick={() => router.push(ROUTES.newObjective)}>
             <Icon name="plus" />
             Define another outcome
           </button>
-        </aside>
+        </div>
       </div>
     </div>
   );
 }
 
-function LiveCard({ execution, stream }: { execution: Execution; stream: string }) {
-  const working = execution.steps.filter((s) => s.status === "RUNNING");
-  const pct = execution.progress.total ? Math.round((execution.progress.done / execution.progress.total) * 100) : 0;
-  const waiting = execution.status === "WAITING_FOR_APPROVAL" ? "Waiting for your approval" : execution.status === "BLOCKED" ? "Paused — needs your attention" : null;
+const APPROVAL_KIND: Record<Approval["kind"], string> = { PLAN: "Plan review", BUDGET: "Budget", ACTION: "External action" };
+
+/** The approval stage: a record of each decision, or why none was needed. */
+function ApprovalRecord({ objective, execution, pending, blocked }: { objective: Objective; execution: Execution; pending: Approval | null; blocked: boolean }) {
+  const decided = execution.approvals.filter((a) => a.status !== "PENDING");
+  // Paused by an exception before anything was charged: the approval waits for it.
+  const onHold = blocked && execution.status === "BLOCKED" && !execution.costCents;
   return (
-    <div className="card tight" data-testid="live-card">
-      <div className="row between">
-        <h2 className="sh" style={{ margin: 0 }}>
-          Live execution
-        </h2>
-        {stream === "live" ? (
-          <span className="tiny row" style={{ gap: 6 }}>
-            <span className="pulse" aria-hidden="true" /> Live
-          </span>
-        ) : stream === "reconnecting" || stream === "polling" ? (
-          <span className="tiny muted">Reconnecting…</span>
-        ) : null}
-      </div>
-      <ProgressBar value={pct} label="Execution progress" style={{ marginTop: 10 }} />
-      <div className="tiny muted" style={{ marginTop: 6 }}>
-        {execution.progress.done} of {execution.progress.total} steps done
-      </div>
-      {working.map((s) => (
-        <div key={s.id} className="working">
-          <ExecBadge executive={s.executive} size={26} />
-          <span>
-            <b>{s.agent}</b> ({s.executiveTitle}) is working on “{s.title}”
-          </span>
-        </div>
-      ))}
-      {execution.status === "PLANNING" && (
-        <div className="working">
-          <ExecBadge executive="chief_of_staff" size={26} />
-          <span>
-            <b>Chief of Staff</b> is planning
-          </span>
+    <>
+      {pending && (
+        <div className="cs-empty is-warn">
+          <Icon name="alert" size={16} />
+          <p>
+            Waiting for your decision. The approval above has the plan, its cost and the recommendation.{" "}
+            <a href="#cs-attention" className="cs-inline-link">
+              Review it
+            </a>
+          </p>
         </div>
       )}
-      {execution.status === "VERIFYING" && (
-        <div className="working">
-          <ExecBadge executive="chief_of_staff" size={26} />
-          <span>
-            <b>Verification</b> is checking the result
-          </span>
+      {decided.length > 0 && (
+        <ul className="cs-card cs-appr">
+          {decided.map((a) => (
+            <li key={a.id} className={`s-${a.status}`}>
+              <span className="cs-appr-ic" aria-hidden="true">
+                <Icon name={a.status === "APPROVED" ? "check" : "x"} size={14} />
+              </span>
+              <div className="cs-appr-b">
+                <p className="cs-appr-t">
+                  <b>
+                    {APPROVAL_KIND[a.kind]} {a.status === "APPROVED" ? "approved" : a.status === "REJECTED" ? "rejected" : "withdrawn"}
+                  </b>{" "}
+                  <span>· {relativeTime(a.decidedAt)}</span>
+                </p>
+                <p className="cs-appr-s">{a.title}</p>
+                {a.decisionNote && <p className="cs-appr-note">“{a.decisionNote}”</p>}
+              </div>
+              <span className="cs-appr-amt">{eur(a.costCents, { decimals: true })}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+      {!pending && decided.length === 0 && onHold && (
+        <div className="cs-empty is-warn">
+          <Icon name="alert" size={16} />
+          <p>
+            On hold: an exception needs your answer before this plan can go forward for approval.{" "}
+            <a href="#cs-attention" className="cs-inline-link">
+              Resolve it
+            </a>
+          </p>
         </div>
       )}
-      {waiting && <p className="small" style={{ marginTop: 10, color: "var(--warn)" }}>{waiting}</p>}
-      {execution.status === "COMPLETED" && <p className="small" style={{ marginTop: 10, color: "var(--ok)" }}>Completed {relativeTime(execution.completedAt)}</p>}
+      {!pending && decided.length === 0 && !onHold && (
+        <div className="cs-empty">
+          <Icon name="check" size={16} />
+          <p>
+            {["PLANNING", "PLANNED"].includes(execution.status) || (execution.status === "BLOCKED" && !execution.costCents)
+              ? "The plan and its cost are reviewed here before the AI Team starts."
+              : objective.autonomy === "AUTO_WITHIN_BUDGET"
+                ? `No approval was required: this objective may proceed within its ${eur(objective.budgetCents)} budget.`
+                : "No approval is recorded for this attempt."}
+          </p>
+        </div>
+      )}
+    </>
+  );
+}
+
+const MEMORY_STATUS: Record<MemoryItem["status"], { label: string; variant: "ok" | "warn" | "gray" }> = {
+  ACTIVE: { label: "Remembered", variant: "ok" },
+  PENDING_CONFIRMATION: { label: "Needs your confirmation", variant: "warn" },
+  ARCHIVED: { label: "Archived", variant: "gray" },
+};
+
+function MemoryList({ items }: { items: MemoryItem[] }) {
+  return (
+    <div className="cs-card cs-mem">
+      <ul>
+        {items.map((m) => (
+          <li key={m.id}>
+            <span className="cs-mem-ic" aria-hidden="true">
+              <Icon name="layers" size={14} />
+            </span>
+            <p>{m.content}</p>
+            <Tag variant={MEMORY_STATUS[m.status].variant}>{MEMORY_STATUS[m.status].label}</Tag>
+          </li>
+        ))}
+      </ul>
+      <Link href={ROUTES.memory} className="cs-inline-link cs-mem-link">
+        Review memory in Company Context
+        <Icon name="arrow" size={13} />
+      </Link>
     </div>
   );
 }
@@ -375,15 +490,18 @@ function SuccessCriteria({ objective, execution, onSaved }: { objective: Objecti
   const [editing, setEditing] = useState(false);
   const [rows, setRows] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
-  const measurements = useMemo(() => new Map((execution?.measurements ?? []).map((m) => [m.criterionId, m])), [execution]);
   const start = () => {
     setRows(objective.criteria.map((c) => c.description));
     setEditing(true);
   };
+  const tooShort = rows.some((r) => r.trim().length > 0 && r.trim().length < 3);
   const save = async () => {
     setSaving(true);
     try {
-      await api.replaceCriteria(objective.id, rows.filter((r) => r.trim().length >= 3).map((description) => ({ description })));
+      await api.replaceCriteria(
+        objective.id,
+        rows.filter((r) => r.trim().length >= 3).map((description) => ({ description }))
+      );
       setEditing(false);
       toast("Success criteria updated");
       onSaved();
@@ -394,34 +512,40 @@ function SuccessCriteria({ objective, execution, onSaved }: { objective: Objecti
     }
   };
   return (
-    <Section
-      title="Success criteria"
-      count={objective.criteria.length}
-      right={
-        editable && !editing ? (
-          <button type="button" className="linkbtn small" onClick={start}>
+    <div className="cs-sc">
+      <div className="cs-sc-h">
+        <h3>
+          Success criteria <span className="cs-count">{objective.criteria.length}</span>
+        </h3>
+        {editable && !editing && (
+          <button type="button" className="cs-linkbtn" onClick={start}>
+            <Icon name="edit" size={13} />
             Edit
           </button>
-        ) : null
-      }
-    >
+        )}
+      </div>
       {editing ? (
-        <div className="card tight">
+        <div className="cs-sc-edit">
           {rows.map((r, i) => (
-            <div className="row" key={i} style={{ marginBottom: 8 }}>
-              <input className="f" value={r} maxLength={300} onChange={(e) => setRows((x) => x.map((y, j) => (j === i ? e.target.value : y)))} aria-label={`Criterion ${i + 1}`} />
-              <button type="button" className="ibtn" aria-label="Remove criterion" onClick={() => setRows((x) => x.filter((_, j) => j !== i))}>
+            <div className="cs-sc-row" key={i}>
+              <label className="cs-sc-n" htmlFor={`crit-${i}`}>
+                <span className="sr-only">Criterion </span>
+                {i + 1}
+              </label>
+              <input id={`crit-${i}`} className="f" value={r} maxLength={300} onChange={(e) => setRows((x) => x.map((y, j) => (j === i ? e.target.value : y)))} />
+              <button type="button" className="ibtn" aria-label={`Remove criterion ${i + 1}`} onClick={() => setRows((x) => x.filter((_, j) => j !== i))}>
                 <Icon name="x" />
               </button>
             </div>
           ))}
-          <div className="row wrapflex">
+          {tooShort && <p className="cs-sc-warn">Each criterion needs at least 3 characters.</p>}
+          <div className="cs-sc-btns">
             {rows.length < 6 && (
               <button type="button" className="btn sm" onClick={() => setRows((x) => [...x, ""])}>
                 <Icon name="plus" /> Add
               </button>
             )}
-            <button type="button" className="btn p sm" onClick={save} aria-busy={saving} disabled={saving || !rows.some((r) => r.trim().length >= 3)}>
+            <button type="button" className="btn p sm" onClick={save} aria-busy={saving} disabled={saving || tooShort || !rows.some((r) => r.trim().length >= 3)}>
               Save
             </button>
             <button type="button" className="btn ghost sm" onClick={() => setEditing(false)}>
@@ -430,47 +554,46 @@ function SuccessCriteria({ objective, execution, onSaved }: { objective: Objecti
           </div>
         </div>
       ) : objective.criteria.length ? (
-        <div className="crit">
-          {objective.criteria.map((c, i) => {
-            const m = measurements.get(c.id);
-            return (
-              <div className="row2" key={c.id} data-testid="criterion">
-                <span className="n">{i + 1}</span>
-                <div>
-                  <span className="small" style={{ fontWeight: 600 }}>
-                    {c.description}
-                  </span>
-                  {c.source === "proposed" && <span className="src">proposed by the Chief of Staff</span>}
-                  {c.targetValue != null && (
-                    <div className="tiny muted">
-                      Target: {c.targetValue} {c.unit}
-                    </div>
-                  )}
-                </div>
-                {m ? <span className="tiny muted">{m.result.replace(/_/g, " ").toLowerCase()}</span> : <span />}
+        <ol className="cs-sc-list">
+          {objective.criteria.map((c, i) => (
+            <li key={c.id} data-testid="criterion">
+              <span className="cs-sc-n" aria-hidden="true">
+                {i + 1}
+              </span>
+              <div>
+                <p>{c.description}</p>
+                {(c.targetValue != null || c.source === "proposed") && (
+                  <p className="cs-sc-meta">
+                    {c.targetValue != null && (
+                      <span>
+                        Target: {c.targetValue} {c.unit}
+                      </span>
+                    )}
+                    {c.source === "proposed" && <span>Proposed by the Chief of Staff</span>}
+                  </p>
+                )}
               </div>
-            );
-          })}
-        </div>
+            </li>
+          ))}
+        </ol>
       ) : (
-        <p className="small muted">The Chief of Staff proposes success criteria while planning.</p>
+        <p className="cs-sc-none">The Chief of Staff proposes success criteria while planning.</p>
       )}
-    </Section>
+    </div>
   );
 }
 
-function ShareButton({ execution, onChange }: { execution: Execution; onChange: () => void }) {
+function ShareControls({ execution, onChange }: { execution: Execution; onChange: () => void }) {
   const toast = useToast();
   const [busy, setBusy] = useState(false);
   const url = execution.shareToken && typeof window !== "undefined" ? `${window.location.origin}${ROUTES.sharedReport(execution.shareToken)}` : null;
-  const toggle = async () => {
+  const toggle = useCallback(async () => {
     setBusy(true);
     try {
       const r = await api.shareExecution(execution.id, !execution.shareToken);
       if (r.shareToken) {
-        const link = `${window.location.origin}${ROUTES.sharedReport(r.shareToken)}`;
-        await navigator.clipboard?.writeText(link).catch(() => undefined);
-        toast("Public link created and copied");
+        const ok = await copyText(`${window.location.origin}${ROUTES.sharedReport(r.shareToken)}`);
+        toast(ok ? "Public link created and copied" : "Public link created — open Public page to copy it");
       } else toast("Public link turned off");
       onChange();
     } catch (e) {
@@ -478,18 +601,18 @@ function ShareButton({ execution, onChange }: { execution: Execution; onChange: 
     } finally {
       setBusy(false);
     }
-  };
+  }, [execution.id, execution.shareToken, onChange, toast]);
   return (
-    <div className="row" style={{ gap: 6 }}>
+    <>
       {url && (
         <a className="btn sm" href={url} target="_blank" rel="noopener noreferrer" data-testid="share-link">
           <Icon name="ext" /> Public page
         </a>
       )}
-      <button type="button" className="btn sm" onClick={toggle} aria-busy={busy} disabled={busy}>
+      <button type="button" className={execution.shareToken ? "btn sm" : "btn p sm"} onClick={toggle} aria-busy={busy} disabled={busy}>
         <Icon name="share" />
         {execution.shareToken ? "Stop sharing" : "Share"}
       </button>
-    </div>
+    </>
   );
 }

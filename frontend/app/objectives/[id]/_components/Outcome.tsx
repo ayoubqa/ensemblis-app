@@ -1,13 +1,30 @@
 "use client";
 
 import { useState } from "react";
-import { api, type Execution, type Objective, type OutcomeStatus } from "@/lib/api";
-import { CriterionTag, OutcomeTag, useToast } from "@/components";
+import { api, type Execution, type Objective, type OutcomeMeasurement, type OutcomeStatus } from "@/lib/api";
+import { CriterionTag, Icon, outcomeLabel, useToast, type IconName } from "@/components";
+import { relativeTime } from "@/lib/format";
+
+const METHOD: Record<OutcomeMeasurement["method"], string> = {
+  "model-assessed": "Assessed by AI review",
+  deterministic: "Measured",
+  "not-assessed": "Not assessed",
+  "user-confirmed": "Confirmed by a person",
+};
+
+const OUTCOME_ICON: Record<OutcomeStatus, IconName> = { ACHIEVED: "check", PARTIALLY_ACHIEVED: "flag", NOT_ACHIEVED: "x", UNKNOWN: "info" };
+
+const JUDGMENTS = [
+  ["ACHIEVED", "Achieved"],
+  ["PARTIALLY_ACHIEVED", "Partially achieved"],
+  ["NOT_ACHIEVED", "Not achieved"],
+] as const;
 
 export function OutcomePanel({ objective, execution, onExecution }: { objective: Objective; execution: Execution; onExecution: () => void }) {
   const toast = useToast();
   const [busy, setBusy] = useState<OutcomeStatus | null>(null);
   const byCriterion = new Map(execution.measurements.map((m) => [m.criterionId, m]));
+  const status = execution.outcomeStatus ?? "UNKNOWN";
   const confirm = async (s: Exclude<OutcomeStatus, "UNKNOWN">) => {
     setBusy(s);
     try {
@@ -21,45 +38,65 @@ export function OutcomePanel({ objective, execution, onExecution }: { objective:
     }
   };
   return (
-    <div className="card tight" data-testid="outcome-panel">
-      <div className="row between wrapflex" style={{ gap: 8 }}>
-        <div>
-          <div className="row" style={{ gap: 8 }}>
-            <OutcomeTag outcome={execution.outcomeStatus ?? "UNKNOWN"} />
-            {execution.outcomeConfirmedAt && <span className="tiny muted">confirmed by a person</span>}
-          </div>
-          {execution.outcomeSummary && <p className="small" style={{ marginTop: 6 }}>{execution.outcomeSummary}</p>}
+    <div className="cs-card cs-out" data-testid="outcome-panel">
+      <div className="cs-out-head">
+        <span className={`cs-out-badge o-${status}`} aria-hidden="true">
+          <Icon name={OUTCOME_ICON[status]} size={20} />
+        </span>
+        <div className="cs-out-tt">
+          <p className="cs-out-v">{outcomeLabel(status)}</p>
+          {execution.outcomeSummary && <p className="cs-out-sum">{execution.outcomeSummary}</p>}
         </div>
+        {execution.outcomeConfirmedAt && (
+          <span className="cs-out-conf">
+            <Icon name="user" size={13} />
+            Confirmed {relativeTime(execution.outcomeConfirmedAt)}
+          </span>
+        )}
       </div>
-      <div className="crit" style={{ marginTop: 12 }}>
+
+      <ol className="cs-crit" aria-label="Success criteria results">
         {objective.criteria.map((c, i) => {
           const m = byCriterion.get(c.id);
           return (
-            <div className="row2" key={c.id}>
-              <span className="n">{i + 1}</span>
-              <div>
-                <div className="small" style={{ fontWeight: 600 }}>
-                  {c.description}
-                </div>
+            <li key={c.id}>
+              <span className="cs-crit-n" aria-hidden="true">
+                {i + 1}
+              </span>
+              <div className="cs-crit-b">
+                <p className="cs-crit-t">{c.description}</p>
                 {m && (
-                  <div className="tiny muted" style={{ marginTop: 3 }}>
+                  <p className="cs-crit-m">
                     {m.measurement}
-                    {m.explanation ? ` — ${m.explanation}` : ""} <span>({m.method.replace("-", " ")})</span>
-                  </div>
+                    {m.explanation ? ` — ${m.explanation}` : ""}
+                    <span className="cs-crit-how">{METHOD[m.method] ?? m.method}</span>
+                  </p>
                 )}
               </div>
-              {m ? <CriterionTag result={m.result} /> : <span className="tiny muted">—</span>}
-            </div>
+              {m ? <CriterionTag result={m.result} /> : <span className="cs-crit-none">Not measured</span>}
+            </li>
           );
         })}
-      </div>
-      <div className="row wrapflex" style={{ marginTop: 12, gap: 8 }}>
-        <span className="small muted">Your judgement:</span>
-        {(["ACHIEVED", "PARTIALLY_ACHIEVED", "NOT_ACHIEVED"] as const).map((s) => (
-          <button key={s} type="button" className={execution.outcomeStatus === s && execution.outcomeConfirmedAt ? "chip on" : "chip"} onClick={() => confirm(s)} aria-busy={busy === s} disabled={!!busy}>
-            {s === "ACHIEVED" ? "Achieved" : s === "PARTIALLY_ACHIEVED" ? "Partially" : "Not achieved"}
-          </button>
-        ))}
+      </ol>
+
+      <div className="cs-judge" role="group" aria-labelledby={`judge-${execution.id}`}>
+        <div className="cs-judge-tt">
+          <p id={`judge-${execution.id}`} className="cs-judge-l">
+            Your judgment
+          </p>
+          <p className="cs-judge-h">Was the outcome achieved? Your answer is recorded with this result.</p>
+        </div>
+        <div className="cs-seg">
+          {JUDGMENTS.map(([s, label]) => {
+            const on = execution.outcomeStatus === s && !!execution.outcomeConfirmedAt;
+            return (
+              <button key={s} type="button" className={on ? "on" : undefined} aria-pressed={on} onClick={() => confirm(s)} aria-busy={busy === s} disabled={!!busy}>
+                {on && <Icon name="check" size={13} />}
+                {label}
+              </button>
+            );
+          })}
+        </div>
       </div>
     </div>
   );

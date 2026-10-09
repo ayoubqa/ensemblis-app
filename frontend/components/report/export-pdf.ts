@@ -1,17 +1,19 @@
 // PDF export. Loaded lazily by <ExportMenu> (dynamic import on click), and it
 // in turn lazy-loads pdfmake + its bundled Roboto fonts.
 import { leadingTitle, markdownToBlocks, withoutLeadingTitle, type Block, type Inline } from "./markdown";
-import { AI_NOTE, KIND_LABEL, metaLine, prettyDate, safeHref, sortSources, sourceDomain, type ExportInput } from "./shared";
+import { AI_NOTE, metaLine, prettyDate, safeHref, sortSources, sourceDomain, sourceLabel, type ExportInput } from "./shared";
+import { BRAND, loadBrandMark } from "./brand";
 
 type Node = Record<string, unknown>;
 type Content = Node | string | Content[];
 
-const ACCENT = "#5B3DF5";
-const INK = "#0B1020";
-const MUTED = "#586178";
-const LINE = "#E2E5EE";
-const SOFT = "#F5F6FA";
-const CODE_BG = "#EEF0F6";
+// Official Ensemblis palette (print-safe values: blue and slate deep enough for AA on white).
+const ACCENT = `#${BRAND.blueText}`;
+const INK = `#${BRAND.ink}`;
+const MUTED = `#${BRAND.slate}`;
+const LINE = `#${BRAND.line}`;
+const SOFT = `#${BRAND.soft}`;
+const CODE_BG = `#${BRAND.code}`;
 const PAGE_W = 595.28; // A4
 const MARGIN = 56;
 const CONTENT_W = PAGE_W - MARGIN * 2;
@@ -42,6 +44,8 @@ export function pdfSafe(s: string): string {
 export interface PdfOptions {
   /** Footer text on the left; defaults to "Ensemblis · <title>". */
   footerLabel?: string;
+  /** The official mark as a PNG data URL (cover line); text only when absent. */
+  markDataUrl?: string | null;
 }
 
 /** Build the pdfmake document definition (pure; unit-testable in Node). */
@@ -168,18 +172,22 @@ export function buildPdfDefinition(input: ExportInput, opts: PdfOptions = {}): N
 
   const content: Content[] = [];
   const meta = metaLine(input.meta);
+  const note = pdfSafe(input.meta?.note || AI_NOTE);
 
-  // Branded cover line
+  // Branded cover line: the official mark (never redrawn) + the wordmark set in text.
+  const wordmark = { text: "ENSEMBLIS", bold: true, color: INK, fontSize: 10.5, characterSpacing: 2.2, margin: [0, opts.markDataUrl ? 5 : 0, 0, 0] };
   content.push({
     columns: [
-      { text: [{ text: "■ ", color: ACCENT }, { text: "Ensemblis", bold: true, color: INK }], fontSize: 12, width: "*" },
-      { text: input.meta?.label ? pdfSafe(input.meta.label) : "AI agent report", alignment: "right", color: MUTED, fontSize: 9, width: "auto", margin: [0, 2, 0, 0] },
+      opts.markDataUrl
+        ? { columns: [{ image: opts.markDataUrl, width: 20, height: 20 }, wordmark], columnGap: 8, width: "*" }
+        : { ...wordmark, width: "*" },
+      { text: pdfSafe(input.meta?.label || "Ensemblis report"), alignment: "right", color: MUTED, fontSize: 9, width: "auto", margin: [0, opts.markDataUrl ? 6 : 1, 0, 0] },
     ],
   });
-  content.push({ canvas: [{ type: "line", x1: 0, y1: 0, x2: CONTENT_W, y2: 0, lineWidth: 1.4, lineColor: ACCENT }], margin: [0, 8, 0, 0] });
-  content.push({ text: title, fontSize: 24, bold: true, color: INK, lineHeight: 1.12, margin: [0, 20, 0, 8] });
+  content.push({ canvas: [{ type: "line", x1: 0, y1: 0, x2: CONTENT_W, y2: 0, lineWidth: 1, lineColor: ACCENT }], margin: [0, 10, 0, 0] });
+  content.push({ text: title, fontSize: 24, bold: true, color: INK, lineHeight: 1.12, margin: [0, 22, 0, 8] });
   if (meta) content.push({ text: pdfSafe(meta), color: MUTED, fontSize: 10, margin: [0, 0, 0, 4] });
-  content.push({ text: AI_NOTE, color: MUTED, italics: true, fontSize: 8.5, margin: [0, 0, 0, 18] });
+  content.push({ text: note, color: MUTED, italics: true, fontSize: 8.5, margin: [0, 0, 0, 18] });
 
   for (const b of blocks) {
     const c = block(b);
@@ -193,7 +201,7 @@ export function buildPdfDefinition(input: ExportInput, opts: PdfOptions = {}): N
     content.push({ text: `${sources.length} numbered source${sources.length === 1 ? "" : "s"}, cited in the text as [n].`, color: MUTED, fontSize: 9, margin: [0, 0, 0, 10] });
     for (const s of sources) {
       const url = safeHref(s.url);
-      const where = [sourceDomain(s), KIND_LABEL[s.kind], s.publishedAt ? prettyDate(s.publishedAt) : null].filter(Boolean).join(" · ");
+      const where = [sourceDomain(s), sourceLabel(s), s.publishedAt ? prettyDate(s.publishedAt) : null].filter(Boolean).join(" · ");
       const stack: Content[] = [{ text: pdfSafe(s.title || "Untitled source"), bold: true, fontSize: 9.5, color: INK }];
       if (where) stack.push({ text: pdfSafe(where), color: MUTED, fontSize: 8.5, margin: [0, 1, 0, 0] });
       if (url) stack.push({ text: url.length > 95 ? `${url.slice(0, 94)}…` : url, link: url, color: ACCENT, fontSize: 8.5, margin: [0, 1, 0, 0] });
@@ -218,7 +226,7 @@ export function buildPdfDefinition(input: ExportInput, opts: PdfOptions = {}): N
   return {
     pageSize: "A4",
     pageMargins: [MARGIN, 52, MARGIN, 60],
-    info: { title, author: "Ensemblis", creator: "Ensemblis", producer: "Ensemblis", subject: AI_NOTE },
+    info: { title, author: "Ensemblis", creator: "Ensemblis", producer: "Ensemblis", subject: note },
     defaultStyle: { font: "Roboto", fontSize: 10.5, color: INK, lineHeight: 1.3 },
     content,
     footer: (currentPage: number, pageCount: number) => ({
@@ -265,7 +273,8 @@ export async function exportPdf(input: ExportInput, opts?: PdfOptions): Promise<
     /* older builds use the vfs argument below */
   }
   // Pass layouts, fonts and vfs explicitly so nothing depends on a global `pdfMake`.
-  const doc = pdfMake.createPdf(buildPdfDefinition(input, opts), {}, ROBOTO, vfs);
+  const markDataUrl = opts?.markDataUrl ?? (await loadBrandMark("dataUrl"));
+  const doc = pdfMake.createPdf(buildPdfDefinition(input, { ...opts, markDataUrl }), {}, ROBOTO, vfs);
   return new Promise<Blob>((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error("PDF generation timed out")), 30_000);
     const done = (b: Blob) => {

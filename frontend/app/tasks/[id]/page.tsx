@@ -5,9 +5,11 @@ import { useCallback, useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { api, ApiError, type LegacyTask } from "@/lib/api";
 import { EmptyState, Icon, PageSkeleton, RequireAuth, useToast } from "@/components";
-import { ExportMenu, ReportView, reportTitle } from "@/components/report";
+import { ExportMenu, LEGACY_NOTE, ReportView, copyText, reportTitle } from "@/components/report";
 import { eur, longDate } from "@/lib/format";
 import { ROUTES } from "@/lib/routes";
+
+const EARLIER = `${ROUTES.objectives}?group=earlier`;
 
 export default function LegacyReportPage() {
   return (
@@ -17,7 +19,7 @@ export default function LegacyReportPage() {
   );
 }
 
-/** Read-only view of a report produced before objectives existed (v1–v3 tasks). */
+/** Read-only view of an earlier report, produced before objectives existed (v1–v3). */
 function LegacyReport() {
   const { id } = useParams<{ id: string }>();
   const toast = useToast();
@@ -38,11 +40,32 @@ function LegacyReport() {
     load();
   }, [load]);
 
+  useEffect(() => {
+    if (!task) return;
+    const before = document.title;
+    document.title = `${task.title} · Earlier report · Ensemblis`;
+    return () => {
+      document.title = before;
+    };
+  }, [task]);
+
   if (error) {
-    const missing = error instanceof ApiError && [403, 404].includes(error.status);
+    const missing = error instanceof ApiError && [400, 403, 404].includes(error.status);
     return (
       <div className="narrow" style={{ padding: "56px 0" }}>
-        <EmptyState icon="file" title={missing ? "Report not found" : "Couldn't load this report"} action={{ label: "Back to objectives", href: `${ROUTES.objectives}?group=earlier` }}>
+        <EmptyState
+          icon="file"
+          title={missing ? "Report not found" : "Couldn't load this report"}
+          action={
+            missing ? (
+              { label: "Back to earlier reports", href: EARLIER }
+            ) : (
+              <button type="button" className="btn p" onClick={() => void load()}>
+                Try again
+              </button>
+            )
+          }
+        >
           {missing ? "It may belong to another organization, or the link is incomplete." : error.message}
         </EmptyState>
       </div>
@@ -54,6 +77,7 @@ function LegacyReport() {
   const markdown = latest?.result ?? task.result ?? "";
   const title = reportTitle(markdown) || task.title;
   const shareUrl = task.shareToken && typeof window !== "undefined" ? `${window.location.origin}${ROUTES.sharedReport(task.shareToken)}` : null;
+  const done = task.status === "COMPLETED" && !!markdown.trim();
 
   const toggleShare = async () => {
     setBusy(true);
@@ -61,8 +85,8 @@ function LegacyReport() {
       const { task: t } = await api.shareLegacyReport(task.id, !task.shareToken);
       setTask((cur) => (cur ? { ...cur, shareToken: t.shareToken } : cur));
       if (t.shareToken) {
-        await navigator.clipboard?.writeText(`${window.location.origin}${ROUTES.sharedReport(t.shareToken)}`).catch(() => undefined);
-        toast("Public link created and copied");
+        const ok = await copyText(`${window.location.origin}${ROUTES.sharedReport(t.shareToken)}`);
+        toast(ok ? "Public link created and copied" : "Public link created — open Public page to copy it");
       } else toast("Public link turned off");
     } catch (e) {
       toast.error((e as Error).message);
@@ -72,52 +96,78 @@ function LegacyReport() {
   };
 
   return (
-    <div className="wrap" style={{ paddingBottom: 48 }}>
-      <div className="pagehead">
-        <Link href={`${ROUTES.objectives}?group=earlier`} className="small muted">
-          ← Earlier reports
-        </Link>
-        <div className="row wrapflex" style={{ gap: 8, marginTop: 10 }}>
-          <span className="tag gray">Earlier report · read-only</span>
+    <div className="wrap cs-legacy">
+      <header className="cs-legacy-head">
+        <div className="cs-crumbs">
+          <Link href={EARLIER}>
+            <Icon name="back" size={14} />
+            Earlier reports
+          </Link>
+          <span aria-hidden="true">/</span>
+          <span className="cs-crumb-here">Earlier report</span>
+        </div>
+        <h1>{title}</h1>
+        <div className="cs-legacy-tags">
+          <span className="tag gray">
+            <Icon name="lock" />
+            Read-only
+          </span>
           {task.category && <span className="tag gray">{task.category}</span>}
           {latest && latest.version > 1 && <span className="tag gray">Version {latest.version}</span>}
+          {task.sources.length > 0 && (
+            <span className="tag gray">
+              {task.sources.length} {task.sources.length === 1 ? "source" : "sources"}
+            </span>
+          )}
         </div>
-        <h1 style={{ marginTop: 10 }}>{title}</h1>
-        <p className="small muted">
-          {task.createdBy.name} · {longDate(task.completedAt ?? task.createdAt)} · {eur(task.costCents, { decimals: true })}
+        <p className="cs-legacy-meta">
+          {task.createdBy.name} · {longDate(task.completedAt ?? task.createdAt)}
+          {task.costCents > 0 && ` · ${eur(task.costCents, { decimals: true })}`}
         </p>
-      </div>
+      </header>
 
-      <div className="banner-info" style={{ marginBottom: 16 }}>
-        <Icon name="info" size={15} />
-        <span className="small">
-          This report was produced before objectives existed, so it has no success criteria or verification. To build on it,{" "}
-          <Link href={ROUTES.newObjective} style={{ color: "var(--accent)", fontWeight: 600 }}>
+      <div className="cs-legacy-note" role="note">
+        <Icon name="info" size={16} />
+        <span>
+          This earlier report was produced before objectives existed, so it has no success criteria, approval or verification. To build on it,{" "}
+          <Link href={ROUTES.newObjective} className="cs-inline-link">
             define an outcome
           </Link>
           .
         </span>
       </div>
 
-      {task.status !== "COMPLETED" || !markdown.trim() ? (
+      {!done ? (
         <EmptyState icon="alert" title="No report was produced">
-          {task.errorMessage ?? "This run didn't finish. Any charge for it was refunded."}
+          {task.errorMessage ?? "This report wasn't completed. Any charge for it was refunded."}
         </EmptyState>
       ) : (
         <>
-          <div className="row wrapflex" style={{ gap: 8, marginBottom: 14 }}>
-            <ExportMenu title={title} markdown={markdown} sources={task.sources} meta={{ date: task.completedAt, depth: task.depth, agent: null, version: latest?.version ?? 1, label: "Report" }} />
-            {shareUrl && (
-              <a className="btn sm" href={shareUrl} target="_blank" rel="noopener noreferrer">
-                <Icon name="ext" /> Public page
-              </a>
-            )}
-            <button type="button" className="btn sm" onClick={toggleShare} aria-busy={busy} disabled={busy}>
-              <Icon name="share" />
-              {task.shareToken ? "Stop sharing" : "Share"}
-            </button>
+          <div className="cs-legacy-bar">
+            <div className="cs-legacy-acts">
+              {shareUrl && (
+                <a className="btn sm" href={shareUrl} target="_blank" rel="noopener noreferrer">
+                  <Icon name="ext" /> Public page
+                </a>
+              )}
+              <button type="button" className={task.shareToken ? "btn sm" : "btn p sm"} onClick={toggleShare} aria-busy={busy} disabled={busy}>
+                <Icon name="share" />
+                {task.shareToken ? "Stop sharing" : "Share"}
+              </button>
+            </div>
+            <ExportMenu
+              title={title}
+              markdown={markdown}
+              sources={task.sources}
+              meta={{ date: task.completedAt, version: latest?.version ?? 1, label: "Earlier report", note: LEGACY_NOTE }}
+            />
           </div>
-          <ReportView markdown={markdown} sources={task.sources} />
+          <ReportView
+            markdown={markdown}
+            sources={task.sources}
+            disclaimer={LEGACY_NOTE}
+            sourcesNote="The sources gathered when this report was made. Open them to check a claim before you rely on it."
+          />
         </>
       )}
     </div>

@@ -3,17 +3,35 @@
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { api, ApiError, type PublicReport } from "@/lib/api";
-import { Avatar, CriterionTag, EmptyState, Icon, Mark, OutcomeTag, Skeleton, SkeletonText, VerificationTag } from "@/components";
-import { ExecBadge } from "@/components/ops";
-import { ExportMenu, ReportView, reportTitle } from "@/components/report";
-import { longDate, plural } from "@/lib/format";
+import { CriterionTag, EmptyState, Icon, Mark, OutcomeTag, Skeleton, SkeletonText, VerificationTag, outcomeLabel, type IconName } from "@/components";
+import { EXEC_LABEL, ExecBadge } from "@/components/ops";
+import { AI_NOTE, ExportMenu, LEGACY_NOTE, ReportView, reportTitle } from "@/components/report";
+import { longDate } from "@/lib/format";
 import { useConfig } from "@/lib/config";
 import { ROUTES } from "@/lib/routes";
 import S from "./shared.module.css";
 
 type State = { kind: "loading" } | { kind: "ok"; report: PublicReport } | { kind: "missing" } | { kind: "error"; message: string };
 
-/** Public, read-only report at /r/<token>. No auth. */
+const CHECK_TEXT: Record<string, { text: string; icon: IconName }> = {
+  pass: { text: "Passed", icon: "check" },
+  warn: { text: "Warning", icon: "alert" },
+  fail: { text: "Failed", icon: "x" },
+  not_assessed: { text: "Not assessed", icon: "info" },
+};
+
+/** The lifecycle every shared result went through — described honestly, without the owner's private details. */
+const LIFECYCLE: { label: string; text: string }[] = [
+  { label: "Objective", text: "A business objective with success criteria." },
+  { label: "Plan", text: "The Chief of Staff planned the steps and priced the work." },
+  { label: "Approval", text: "Cleared to proceed by the owner, or within their pre-approved budget." },
+  { label: "Execution", text: "The AI Team executed each step." },
+  { label: "Verification", text: "Checked against the evidence and the success criteria." },
+  { label: "Evidence", text: "Numbered sources, cited in the text as [n]." },
+  { label: "Outcome", text: "Each success criterion measured." },
+];
+
+/** Public, read-only report at /r/<token>. No auth, never any amounts. */
 export function SharedReport({ token }: { token: string }) {
   const [state, setState] = useState<State>({ kind: "loading" });
   const { config } = useConfig();
@@ -37,16 +55,14 @@ export function SharedReport({ token }: { token: string }) {
 
   if (state.kind === "missing") {
     return (
-      <div className="narrow" style={{ padding: "56px 0" }}>
+      <div className={`narrow ${S.state}`}>
         <EmptyState
           icon="lock"
           title="This link isn't active"
           action={
-            <div className="row wrapflex" style={{ justifyContent: "center", gap: 10 }}>
-              <Link className="btn p" href={ROUTES.home}>
-                What is Ensemblis?
-              </Link>
-            </div>
+            <Link className="btn p" href={ROUTES.howItWorksPage}>
+              What is Ensemblis?
+            </Link>
           }
         >
           The owner may have stopped sharing this result, or the link is incomplete. Ask them for a fresh link.
@@ -57,25 +73,29 @@ export function SharedReport({ token }: { token: string }) {
 
   if (state.kind === "error") {
     return (
-      <div className="narrow" style={{ padding: "56px 0" }}>
-        <div className="notice" role="alert">
-          <Icon name="alert" />
-          <span className="sp">{state.message}</span>
-          <button type="button" className="btn sm" onClick={load}>
-            Try again
-          </button>
-        </div>
+      <div className={`narrow ${S.state}`}>
+        <EmptyState
+          icon="alert"
+          title="Couldn't load this result"
+          action={
+            <button type="button" className="btn p" onClick={load}>
+              Try again
+            </button>
+          }
+        >
+          {state.message}
+        </EmptyState>
       </div>
     );
   }
 
   if (state.kind === "loading") {
     return (
-      <div className="wrap" style={{ paddingTop: 22 }} aria-busy="true" aria-label="Loading the shared report">
-        <Skeleton height={46} radius={14} />
-        <div style={{ padding: "34px 0 22px" }}>
-          <Skeleton width={160} height={20} />
-          <Skeleton width="70%" height={44} style={{ marginTop: 16 }} />
+      <div className={`wrap ${S.page}`} aria-busy="true" aria-label="Loading the shared result">
+        <Skeleton height={52} radius={14} />
+        <div className={S.cover}>
+          <Skeleton width={160} height={14} />
+          <Skeleton width="70%" height={44} style={{ marginTop: 18 }} />
           <Skeleton width="40%" height={14} style={{ marginTop: 18 }} />
         </div>
         <div className="card" style={{ padding: 28 }}>
@@ -88,206 +108,278 @@ export function SharedReport({ token }: { token: string }) {
   const r = state.report;
   const exec = r.kind === "execution";
   const title = exec ? r.title : reportTitle(r.result) || r.title;
+  const v = exec ? r.verification ?? null : null;
+  const verified = !!v && v.status !== "FAIL";
+  const criteria = exec ? r.objective?.criteria ?? [] : [];
+  const measurements = r.objective?.measurements ?? [];
+  const byCriterion = new Map(measurements.map((m) => [m.criterionId, m]));
+  const met = measurements.filter((m) => m.result === "MET").length;
+  const outcome = exec ? r.objective?.outcomeStatus ?? null : null;
   const team = r.team ?? [];
-  const lead = r.leadAgent;
-  const names = team.length ? team.map((t) => t.agentName) : lead ? [lead.name] : [];
-  const unique = Array.from(new Set(names));
-  const byCriterion = new Map((r.objective?.measurements ?? []).map((m) => [m.criterionId, m]));
+  const sourceCount = r.sources?.length ?? 0;
+  const kicker = !exec ? "Earlier report" : verified ? "Verified report" : "Report";
 
   return (
     <>
-      <div className="wrap" style={{ paddingTop: 22 }} data-testid="shared-report">
+      <div className={`wrap ${S.page}`} data-testid="shared-report">
         <div className={S.bar}>
-          <Link href={ROUTES.home} className={S.brand}>
-            <Mark size={22} />
-            <span>
-              Shared {exec ? "result" : "report"} · made with <b>Ensemblis</b>
-            </span>
+          <Link href={ROUTES.howItWorksPage} className={S.brand}>
+            <Mark size={24} />
+            <span className={S.brandName}>Ensemblis</span>
+            <span className={S.brandSep} aria-hidden="true" />
+            <span className={S.brandSub}>Shared {exec ? "result" : "report"}</span>
           </Link>
           <ExportMenu
             title={title}
             markdown={r.result}
             sources={r.sources}
-            meta={{ date: r.completedAt, depth: r.depth, agent: lead?.name ?? null, version: r.version, label: exec ? "Shared result" : "Shared report" }}
+            meta={
+              exec
+                ? { date: r.completedAt, label: verified ? "Verified report" : "Report", note: AI_NOTE }
+                : { date: r.completedAt, label: "Earlier report", version: r.version, note: LEGACY_NOTE }
+            }
           />
         </div>
 
-        <header className={S.head}>
-          <div className="row wrapflex" style={{ gap: 8 }}>
-            {exec ? (
-              <>
-                <span className="tag">Objective</span>
-                {r.objective?.outcomeStatus && <OutcomeTag outcome={r.objective.outcomeStatus} />}
-                {r.verification && <VerificationTag status={r.verification.status} score={r.verification.score} />}
-              </>
-            ) : (
-              <>
-                {r.category && <span className="tag">{r.category}</span>}
-                <span className="tag gray">{r.depth.charAt(0).toUpperCase() + r.depth.slice(1)} depth</span>
-                {r.version > 1 && <span className="tag gray">Version {r.version}</span>}
-              </>
-            )}
-            {r.sources?.length > 0 && <span className="tag gray">{plural(r.sources.length, "source")}</span>}
-            {exec && config.mockAI && (
-              <span className="tag warn" title="This server runs the mock AI provider: the content is placeholder output for development and testing.">
-                Mock AI — test output
-              </span>
-            )}
-          </div>
+        <header className={S.cover}>
+          <p className={S.kicker}>
+            <Icon name={exec && verified ? "shield" : "report"} size={14} />
+            {kicker}
+            {!exec && r.version > 1 && <span className={S.kickerSub}>Version {r.version}</span>}
+          </p>
           <h1>{title}</h1>
-          <div className={S.byline}>
-            {!exec && unique.length > 0 && (
-              <span className={S.stack} aria-hidden="true">
-                {unique.slice(0, 4).map((n) => (
-                  <Avatar key={n} name={n} hue={lead && lead.name === n ? lead.hue : undefined} size="xs" />
-                ))}
-              </span>
+          <p className={S.byline}>
+            {exec ? "Planned by a Chief of Staff, executed by an AI Team and checked against evidence" : "Produced by an earlier version of Ensemblis"}
+            {r.completedAt && (
+              <>
+                <span aria-hidden="true"> · </span>
+                <time dateTime={r.completedAt}>{longDate(r.completedAt)}</time>
+              </>
             )}
-            <span>
-              {exec
-                ? "Planned by a Chief of Staff, executed by an AI Team and checked against evidence"
-                : unique.length > 1
-                  ? `Produced by a team of ${unique.length} AI specialists`
-                  : "Produced by an AI specialist"}
-            </span>
-            {r.completedAt && <span>· {longDate(r.completedAt)}</span>}
-          </div>
+          </p>
+          {exec && config.mockAI && (
+            <p className={S.mock}>
+              <span className="tag warn">Mock AI — test output</span>
+              <span>Generated by the mock AI provider for development and testing — not real analysis.</span>
+            </p>
+          )}
+          {exec ? (
+            <dl className={S.facts}>
+              {outcome && (
+                <div>
+                  <dt>Outcome</dt>
+                  <dd>
+                    <span className={`${S.dot} ${S[`o_${outcome}`] ?? ""}`} aria-hidden="true" />
+                    {outcomeLabel(outcome)}
+                  </dd>
+                </div>
+              )}
+              {v && (
+                <div>
+                  <dt>Verification</dt>
+                  <dd>
+                    <span className={`${S.dot} ${S[`v_${v.status}`] ?? ""}`} aria-hidden="true" />
+                    {v.score}
+                    <small>/100</small>
+                  </dd>
+                </div>
+              )}
+              {criteria.length > 0 && (
+                <div>
+                  <dt>Success criteria</dt>
+                  <dd>
+                    {met}
+                    <small> of {criteria.length} met</small>
+                  </dd>
+                </div>
+              )}
+              <div>
+                <dt>Evidence</dt>
+                <dd>
+                  {sourceCount}
+                  <small> {sourceCount === 1 ? "source" : "sources"}</small>
+                </dd>
+              </div>
+            </dl>
+          ) : (
+            <p className={S.legacyNote}>
+              <Icon name="info" size={15} />
+              <span>This report predates objectives, approvals and verification, so it has no success criteria or verification score.</span>
+            </p>
+          )}
         </header>
 
-        {exec && r.objective && r.objective.criteria.length > 0 && (
-          <section className="card tight" style={{ marginBottom: 20 }} aria-labelledby="sr-outcome">
-            <div className="row between wrapflex" style={{ gap: 8 }}>
-              <h3 id="sr-outcome" style={{ margin: 0 }}>
-                Success criteria
-              </h3>
-              {r.objective.outcomeStatus && <OutcomeTag outcome={r.objective.outcomeStatus} />}
+        {exec && criteria.length > 0 && (
+          <section className={`cs-card ${S.outcome}`} aria-labelledby="sr-outcome">
+            <div className="cs-out-head">
+              <span className={`cs-out-badge o-${outcome ?? "UNKNOWN"}`} aria-hidden="true">
+                <Icon name={outcome === "ACHIEVED" ? "check" : outcome === "NOT_ACHIEVED" ? "x" : outcome === "PARTIALLY_ACHIEVED" ? "flag" : "target"} size={20} />
+              </span>
+              <div className="cs-out-tt">
+                <h2 id="sr-outcome" className={S.h2}>
+                  Success criteria
+                </h2>
+                {r.objective?.outcomeSummary && <p className="cs-out-sum">{r.objective.outcomeSummary}</p>}
+              </div>
+              {outcome && <OutcomeTag outcome={outcome} />}
             </div>
-            {r.objective.outcomeSummary && <p className="small muted" style={{ marginTop: 6 }}>{r.objective.outcomeSummary}</p>}
-            <div className="crit" style={{ marginTop: 12 }}>
-              {r.objective.criteria.map((c, i) => {
+            <ol className="cs-crit" aria-label="Success criteria results">
+              {criteria.map((c, i) => {
                 const m = byCriterion.get(c.id);
                 return (
-                  <div className="row2" key={c.id}>
-                    <span className="n">{i + 1}</span>
-                    <div>
-                      <div className="small" style={{ fontWeight: 600 }}>
-                        {c.description}
-                      </div>
+                  <li key={c.id}>
+                    <span className="cs-crit-n" aria-hidden="true">
+                      {i + 1}
+                    </span>
+                    <div className="cs-crit-b">
+                      <p className="cs-crit-t">{c.description}</p>
                       {m && (
-                        <div className="tiny muted" style={{ marginTop: 3 }}>
+                        <p className="cs-crit-m">
                           {m.measurement}
                           {m.explanation ? ` — ${m.explanation}` : ""}
-                        </div>
+                        </p>
                       )}
                     </div>
-                    {m ? <CriterionTag result={m.result} /> : <span className="tiny muted">—</span>}
-                  </div>
+                    {m ? <CriterionTag result={m.result} /> : <span className="cs-crit-none">Not measured</span>}
+                  </li>
                 );
               })}
-            </div>
+            </ol>
           </section>
         )}
 
-        <ReportView markdown={r.result} sources={r.sources} idPrefix="s" tocExtra={[{ id: "about", label: exec ? "How this was verified" : "How this was made" }]}>
-          <section id="about" className="card" style={{ marginTop: 20, scrollMarginTop: 84 }} aria-labelledby="about-h">
+        <ReportView
+          markdown={r.result}
+          sources={r.sources}
+          idPrefix="s"
+          className={S.reader}
+          disclaimer={exec ? AI_NOTE : LEGACY_NOTE}
+          sourcesNote={exec ? undefined : "The sources gathered when this report was made. Open them to check a claim before you rely on it."}
+          tocExtra={[{ id: "about", label: exec ? (verified ? "How this was verified" : "How this was produced") : "About this report" }]}
+        >
+          <section id="about" className={`cs-card ${S.about}`} aria-labelledby="about-h">
             {exec ? (
               <>
-                <h3 id="about-h">How this result was produced and verified</h3>
-                <p className="small muted" style={{ marginTop: 4, maxWidth: "62ch" }}>
-                  Someone defined a business objective with success criteria. The Chief of Staff planned it and assigned the work to the AI Team below. Every
-                  claim was then checked against the numbered evidence, and each success criterion was assessed.
+                <h2 id="about-h" className={S.h2}>
+                  {verified ? "How this result was produced and verified" : "How this result was produced"}
+                </h2>
+                <p className={S.lead}>
+                  Someone defined a business objective with success criteria. The Chief of Staff planned it and the AI Team executed it. Statements that cite
+                  evidence or give figures were then checked against the numbered sources (a text match), and each success criterion was assessed.
                 </p>
-                {r.verification && (
-                  <div style={{ marginTop: 14 }}>
-                    <div className="row wrapflex" style={{ gap: 8 }}>
-                      <VerificationTag status={r.verification.status} score={r.verification.score} />
-                      <span className="small">{r.verification.summary}</span>
+                <ol className={S.life} aria-label="How the result was produced">
+                  {LIFECYCLE.map((s, i) => (
+                    <li key={s.label}>
+                      <span className={S.lifeN} aria-hidden="true">
+                        {i + 1}
+                      </span>
+                      <b>{s.label}</b>
+                      <span>{s.text}</span>
+                    </li>
+                  ))}
+                </ol>
+
+                {v && (
+                  <div className={S.verify}>
+                    <div className={S.verifyHead}>
+                      <h3 className={S.h3}>Verification</h3>
+                      <VerificationTag status={v.status} score={v.score} />
                     </div>
-                    {r.verification.checks.length > 0 && (
-                      <div className="vchecks" style={{ marginTop: 10 }}>
-                        {r.verification.checks.map((c) => (
-                          <div className="vcheck" key={c.key}>
-                            <span className={`ic ${c.status}`} aria-hidden="true">
-                              {c.status === "pass" ? "✓" : c.status === "fail" ? "✕" : c.status === "warn" ? "!" : "–"}
+                    <p className={S.verifySum}>{v.summary}</p>
+                    {v.status === "FAIL" && <p className={S.verifyWarn}>This result did not pass verification. The owner chose to accept it with its warnings.</p>}
+                    {v.checks.length > 0 && (
+                      <ul className="cs-checks" aria-label="Verification checks">
+                        {v.checks.map((c) => (
+                          <li className={`cs-check s-${c.status}`} key={c.key}>
+                            <span className="cs-check-ic" aria-hidden="true">
+                              <Icon name={CHECK_TEXT[c.status]?.icon ?? "info"} size={13} />
                             </span>
-                            <div>
-                              <b className="small">{c.label}</b>
-                              <div className="tiny muted">{c.detail}</div>
+                            <div className="cs-check-b">
+                              <p className="cs-check-l">
+                                <span className="sr-only">{CHECK_TEXT[c.status]?.text ?? c.status}: </span>
+                                {c.label}
+                              </p>
+                              <p className="cs-check-d">{c.detail}</p>
                             </div>
-                            <span className="tiny muted" style={{ textAlign: "right" }}>
-                              {c.score === null ? "—" : c.score}
-                            </span>
-                          </div>
+                            <div className="cs-check-s">
+                              {c.score !== null && (
+                                <span className="cs-meter" aria-hidden="true">
+                                  <i style={{ width: `${Math.max(0, Math.min(100, c.score))}%` }} />
+                                </span>
+                              )}
+                              <b>
+                                {c.score ?? "—"}
+                                {c.score !== null && <span className="sr-only"> out of 100</span>}
+                              </b>
+                            </div>
+                          </li>
                         ))}
-                      </div>
+                      </ul>
                     )}
-                    {r.verification.warnings.length > 0 && (
-                      <ul className="tiny muted" style={{ marginTop: 10, paddingLeft: 18 }}>
-                        {r.verification.warnings.map((w) => (
+                    {v.warnings.length > 0 && (
+                      <ul className={S.warnings}>
+                        {v.warnings.map((w) => (
                           <li key={w}>{w}</li>
                         ))}
                       </ul>
                     )}
                   </div>
                 )}
+
                 {team.length > 0 && (
-                  <ol className={S.team}>
-                    {team.map((m, i) => (
-                      <li key={`${m.agentName}-${i}`}>
-                        <span className="tiny muted" style={{ width: 22, fontWeight: 700 }}>
-                          {String(i + 1).padStart(2, "0")}
-                        </span>
-                        <ExecBadge executive={m.role} size={26} />
-                        <div className="sp" style={{ minWidth: 0 }}>
-                          <b className="small">{m.agentName}</b>
-                          <div className="tiny muted">{m.title}</div>
-                        </div>
-                      </li>
-                    ))}
-                  </ol>
+                  <div className={S.teamWrap}>
+                    <h3 className={S.h3}>The AI Team</h3>
+                    <ol className={S.team}>
+                      {team.map((m, i) => (
+                        <li key={`${m.agentName}-${i}`}>
+                          <span className={S.teamN} aria-hidden="true">
+                            {String(i + 1).padStart(2, "0")}
+                          </span>
+                          <ExecBadge executive={m.role} size={28} />
+                          <div className={S.teamB}>
+                            <b>{m.agentName}</b>
+                            <span>
+                              {EXEC_LABEL[m.role] ? `${EXEC_LABEL[m.role]} · ` : ""}
+                              {m.title}
+                            </span>
+                          </div>
+                        </li>
+                      ))}
+                    </ol>
+                  </div>
                 )}
               </>
             ) : (
               <>
-                <h3 id="about-h">How this report was made</h3>
-                <p className="small muted" style={{ marginTop: 4, maxWidth: "62ch" }}>
-                  This report was produced by an earlier version of Ensemblis: a sequence of AI specialists, each handing its work to the next, with the final
-                  report citing the numbered sources they gathered.
+                <h2 id="about-h" className={S.h2}>
+                  About this report
+                </h2>
+                <p className={S.lead}>
+                  This report was produced by an earlier version of Ensemblis, before objectives, approvals and verification existed. It cites the numbered
+                  sources gathered at the time.
                 </p>
-                {team.length > 0 && (
-                  <ol className={S.team}>
-                    {team.map((m, i) => (
-                      <li key={`${m.agentName}-${i}`}>
-                        <span className="tiny muted" style={{ width: 22, fontWeight: 700 }}>
-                          {String(i + 1).padStart(2, "0")}
-                        </span>
-                        <Avatar name={m.agentName} hue={lead && lead.name === m.agentName ? lead.hue : undefined} size="sm" />
-                        <div className="sp" style={{ minWidth: 0 }}>
-                          <b className="small">{m.agentName}</b>
-                          <div className="tiny muted">
-                            {m.role} · {m.title}
-                          </div>
-                        </div>
-                      </li>
-                    ))}
-                  </ol>
-                )}
               </>
             )}
-            <p className="tiny muted" style={{ marginTop: 12 }}>
-              Shared with a private link. Only this result is visible here — not the owner&apos;s account, company documents, costs or other work.
+            <p className={S.private}>
+              <Icon name="lock" size={14} />
+              <span>Shared with a private link. Only this result is visible here — not the owner&apos;s account, company documents, costs or other work.</span>
             </p>
           </section>
         </ReportView>
       </div>
 
-      <section className={`dk cta-band ${S.cta}`} style={{ marginTop: 48 }}>
+      <section className={`dk ${S.cta}`} aria-labelledby="sr-cta-h">
         <div className="wrap">
-          <div className="eyebrow">MADE WITH ENSEMBLIS</div>
-          <h2>Describe the outcome. We do the work.</h2>
-          <p>Ensemblis turns a business objective into a plan, has an AI Team execute it, and verifies the result against evidence.</p>
-          <div className="row wrapflex" style={{ marginTop: 26 }}>
-            <Link className="btn p lg" href={ROUTES.home}>
+          <p className={S.ctaEyebrow}>
+            <Mark size={20} />
+            Made with Ensemblis
+          </p>
+          <h2 id="sr-cta-h">Describe the outcome. We do the work.</h2>
+          <p className={S.ctaText}>
+            Ensemblis turns a business objective into a plan, has an AI Team execute it, and verifies the result against evidence and your success criteria.
+          </p>
+          <div className={S.ctaBtns}>
+            <Link className="btn p lg" href={ROUTES.howItWorksPage}>
               See how it works
               <Icon name="arrow" />
             </Link>

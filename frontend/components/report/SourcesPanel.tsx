@@ -1,11 +1,10 @@
 "use client";
 
-import type { CSSProperties } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import type { TaskSource } from "@/lib/api";
 import { Icon } from "@/components/Icon";
-import { hueFrom } from "@/lib/utils";
 import { sourceDomId } from "./ReportMarkdown";
-import { KIND_LABEL, prettyDate, safeHref, sortSources, sourceDomain, sourceInitial } from "./shared";
+import { prettyDate, safeHref, sortSources, sourceDomain, sourceInitial, sourceLabel } from "./shared";
 import s from "./report.module.css";
 
 export interface SourcesPanelProps {
@@ -21,6 +20,8 @@ export interface SourcesPanelProps {
   /** DOM id of the panel (TOC anchor). */
   id?: string;
   title?: string;
+  /** Footnote under the list; `false` hides it. */
+  note?: ReactNode | false;
   className?: string;
   style?: CSSProperties;
 }
@@ -35,6 +36,7 @@ export function SourcesPanel({
   onExpand,
   id,
   title = "Sources",
+  note,
   className,
   style,
 }: SourcesPanelProps) {
@@ -46,13 +48,13 @@ export function SourcesPanel({
   return (
     <section id={id} className={["card", s.sources, className].filter(Boolean).join(" ")} style={style} aria-labelledby={id ? `${id}-h` : undefined}>
       <div className="row between wrapflex" style={{ gap: 8 }}>
-        <h3 id={id ? `${id}-h` : undefined} className="row" style={{ gap: 8 }}>
+        <h3 id={id ? `${id}-h` : undefined} className={s.srcHead}>
           <Icon name="link" />
           {title}
         </h3>
-        <span className="tiny muted">
+        <span className={s.srcCount}>
           {list.length} {list.length === 1 ? "source" : "sources"}
-          {mine ? ` · ${mine} provided` : ""} · cited as [n]
+          {mine ? ` · ${mine} internal` : ""} · cited as [n]
         </span>
       </div>
       <ol className={s.srcList}>
@@ -67,8 +69,8 @@ export function SourcesPanel({
               tabIndex={-1}
               className={[s.srcItem, flash === src.n && s.flash].filter(Boolean).join(" ")}
             >
-              <span className={s.badge} style={{ ["--h" as string]: hueFrom(domain || src.title || String(src.n)) } as CSSProperties} aria-hidden="true">
-                {src.kind === "upload" ? <Icon name="file" size={16} /> : sourceInitial(src)}
+              <span className={s.badge} aria-hidden="true">
+                {own ? <Icon name="file" size={16} /> : sourceInitial(src)}
                 <span className={s.badgeN}>{src.n}</span>
               </span>
               <div style={{ minWidth: 0 }}>
@@ -83,7 +85,7 @@ export function SourcesPanel({
                   <span className={s.srcTitle}>{src.title || "Untitled source"}</span>
                 )}
                 <div className={s.srcMeta}>
-                  <span className={[s.kind, own && s.kindMine].filter(Boolean).join(" ")}>{KIND_LABEL[src.kind] ?? "Source"}</span>
+                  <span className={[s.kind, own && s.kindMine].filter(Boolean).join(" ")}>{sourceLabel(src)}</span>
                   {domain && <span className={s.domain}>{domain}</span>}
                   {src.publishedAt && prettyDate(src.publishedAt) && <span>· {prettyDate(src.publishedAt)}</span>}
                 </div>
@@ -99,9 +101,9 @@ export function SourcesPanel({
           Show all {list.length} sources
         </button>
       )}
-      <p className="tiny muted" style={{ marginTop: 10 }}>
-        Sources are the evidence the AI Team worked from. Open them to check a claim before you rely on it.
-      </p>
+      {note !== false && (
+        <p className={s.srcNote}>{note ?? "Sources are the evidence the AI Team worked from. Open them to check a claim before you rely on it."}</p>
+      )}
     </section>
   );
 }

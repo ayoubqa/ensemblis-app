@@ -53,14 +53,14 @@
   font-variant-numeric: tabular-nums;
   color: var(--accent) !important;
   background: var(--accent-soft);
-  border: 1px solid color-mix(in srgb, var(--accent) 24%, transparent);
+  border: 1px solid var(--accent-line);
   text-decoration: none !important;
   cursor: pointer;
   transition: background 0.12s, color 0.12s, transform 0.12s;
 }
 .cite:hover,
 .cite:focus-visible,
-.cite[aria-expanded="true"] {
+.cite[data-open="true"] {
   background: var(--accent);
   color: var(--accent-ink) !important;
   border-color: var(--accent);
@@ -192,10 +192,11 @@
   border-radius: 10px;
   display: grid;
   place-items: center;
-  font-weight: 700;
+  font-weight: 650;
   font-size: 14px;
-  background: hsl(var(--h) 38% var(--avl));
-  color: hsl(var(--h) 50% var(--avc));
+  background: var(--surface2);
+  border: 1px solid var(--line2);
+  color: var(--accent);
   flex: none;
 }
 .badgeN {
@@ -206,8 +207,8 @@
   height: 18px;
   padding: 0 4px;
   border-radius: 999px;
-  background: var(--ink);
-  color: var(--bg);
+  background: var(--accent-fill);
+  color: var(--accent-ink);
   font-size: 10px;
   font-weight: 700;
   display: grid;
@@ -215,15 +216,43 @@
   border: 2px solid var(--surface);
   font-variant-numeric: tabular-nums;
 }
+.srcHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 15px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+.srcHead svg {
+  color: var(--accent);
+}
+.srcCount {
+  font-size: 12px;
+  color: var(--muted);
+}
+.srcNote {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+  font-size: 12.5px;
+  color: var(--muted);
+}
 .srcTitle {
   font-weight: 600;
   line-height: 1.35;
   word-break: break-word;
 }
+a.srcTitle {
+  color: var(--ink);
+  text-decoration: underline;
+  text-decoration-color: var(--line2);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
 a.srcTitle:hover {
   color: var(--accent);
-  text-decoration: underline;
-  text-underline-offset: 2px;
+  text-decoration-color: var(--accent);
 }
 .srcMeta {
   display: flex;
@@ -297,20 +326,14 @@ a.srcTitle:hover {
   color: var(--muted);
 }
 .fmtPdf {
-  color: #c2410c;
-  background: color-mix(in srgb, #c2410c 10%, var(--surface));
-  border-color: color-mix(in srgb, #c2410c 28%, var(--line));
+  color: var(--bad);
+  background: var(--bad-soft);
+  border-color: color-mix(in srgb, var(--bad) 30%, var(--line));
 }
 .fmtDoc {
-  color: #2563eb;
-  background: color-mix(in srgb, #2563eb 10%, var(--surface));
-  border-color: color-mix(in srgb, #2563eb 28%, var(--line));
-}
-:global([data-theme="dark"]) .fmtPdf {
-  color: #fb923c;
-}
-:global([data-theme="dark"]) .fmtDoc {
-  color: #7aa7ff;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-color: var(--accent-line);
 }
 .miText {
   display: flex;
@@ -330,7 +353,13 @@ a.srcTitle:hover {
   display: flex;
   gap: 8px;
   align-items: flex-start;
-  margin: 0 0 10px;
+  margin: 0 0 12px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+.note svg {
+  color: var(--subtle);
 }
 
 @media print {

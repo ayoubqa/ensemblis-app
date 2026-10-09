@@ -22,7 +22,7 @@ const STATUS: Record<ObjectiveStatus, { label: string; variant: TagVariant; live
   PLANNING: { label: "Planning", variant: "accent", live: true },
   PLANNED: { label: "Planned", variant: "accent" },
   WAITING_FOR_APPROVAL: { label: "Awaiting approval", variant: "warn" },
-  RUNNING: { label: "Running", variant: "accent", live: true },
+  RUNNING: { label: "Executing", variant: "accent", live: true },
   BLOCKED: { label: "Needs attention", variant: "warn" },
   VERIFYING: { label: "Verifying", variant: "accent", live: true },
   COMPLETED: { label: "Completed", variant: "ok" },
@@ -30,8 +30,12 @@ const STATUS: Record<ObjectiveStatus, { label: string; variant: TagVariant; live
   CANCELLED: { label: "Cancelled", variant: "gray" },
 };
 
+/** "SOME_STATUS" → "Some status": a readable fallback for a status this build doesn't know yet. */
+const humanize = (s: string) => (s ? `${s.charAt(0)}${s.slice(1).toLowerCase().replace(/_/g, " ")}` : "Unknown");
+
+/** Human label for every objective / execution status (RUNNING reads "Executing"). */
 export function statusLabel(s: ObjectiveStatus | ExecutionStatus): string {
-  return STATUS[s]?.label ?? s;
+  return STATUS[s]?.label ?? humanize(String(s));
 }
 
 export function isLiveStatus(s: ObjectiveStatus | ExecutionStatus | undefined | null): boolean {
@@ -40,7 +44,7 @@ export function isLiveStatus(s: ObjectiveStatus | ExecutionStatus | undefined | 
 
 /** Objective / execution status (running states get a live pulse). */
 export function StatusTag({ status }: { status: ObjectiveStatus | ExecutionStatus }) {
-  const m = STATUS[status] ?? { label: status, variant: "gray" as TagVariant };
+  const m = STATUS[status] ?? { label: humanize(String(status)), variant: "gray" as TagVariant };
   return (
     <span className={["tag", m.variant !== "accent" && m.variant].filter(Boolean).join(" ")} data-status={status}>
       {m.live && <span className="pulse" aria-hidden="true" />}

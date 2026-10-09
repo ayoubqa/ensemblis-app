@@ -28,6 +28,13 @@ export function useObjectiveLive(id: string) {
       const d = await api.getObjective(id);
       setDetail(d);
       setError(null);
+      // Drop streamed text of steps that are no longer running (a retried step starts fresh).
+      const running = new Set((d.execution?.steps ?? []).filter((s) => s.status === "RUNNING").map((s) => s.id));
+      setPartials((m) => {
+        const keys = Object.keys(m);
+        if (keys.every((k) => running.has(k))) return m;
+        return Object.fromEntries(keys.filter((k) => running.has(k)).map((k) => [k, m[k]]));
+      });
       return d;
     } catch (e) {
       setError(e instanceof ApiError ? e : new ApiError("Something went wrong", 500));
@@ -73,6 +80,7 @@ export function useObjectiveLive(id: string) {
       onEnd: () => scheduleRefetch(),
       onStatus: (s) => {
         if (s === "reconnecting") failures++;
+        if (s === "live") failures = 0;
         setStream(s === "live" ? "live" : s === "reconnecting" ? (failures > 3 ? "polling" : "reconnecting") : "idle");
       },
     });
@@ -92,6 +100,14 @@ export function useObjectiveLive(id: string) {
     document.addEventListener("visibilitychange", on);
     return () => document.removeEventListener("visibilitychange", on);
   }, [load]);
+
+  // A transient load error (network, 5xx) before anything is shown: retry quietly.
+  const failedFirstLoad = !detail && !!error && error.status !== 404 && error.status !== 400 && error.status !== 403;
+  useEffect(() => {
+    if (!failedFirstLoad) return;
+    const t = setTimeout(() => void load(), 5_000);
+    return () => clearTimeout(t);
+  }, [failedFirstLoad, load, error]);
 
   return { detail, error, reload: load, stream, partials, setDetail, isLive: isLiveStatus(status) };
 }

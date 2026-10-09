@@ -9,16 +9,16 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const data = await fetchPublicJson<{ report: PublicReport }>(`/api/public/reports/${encodeURIComponent(params.token)}`);
   if (!data?.report) {
     return {
-      title: "Shared report",
-      description: "A verified result produced by an AI Team on Ensemblis.",
+      title: "Shared result",
+      description: "A result shared from Ensemblis, the AI operating layer for business.",
       robots: { index: false, follow: false },
     };
   }
   return reportMetadata({
     title: data.report.title,
     markdown: data.report.result,
-    kicker: "Shared report",
-    fallbackDescription: "A verified result produced by an AI Team on Ensemblis.",
+    kicker: data.report.kind === "execution" ? "Shared result" : "Earlier report",
+    fallbackDescription: "A result shared from Ensemblis, the AI operating layer for business.",
     // Shared links are unlisted: previews work, search engines stay out.
     noindex: true,
   });

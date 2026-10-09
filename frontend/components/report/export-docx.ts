@@ -1,22 +1,24 @@
 // Word (.docx) export. Loaded lazily by <ExportMenu>; it lazy-loads `docx`.
 import type * as Docx from "docx";
 import { leadingTitle, markdownToBlocks, withoutLeadingTitle, type Block, type Inline } from "./markdown";
-import { AI_NOTE, KIND_LABEL, metaLine, prettyDate, safeHref, sortSources, sourceDomain, type ExportInput } from "./shared";
+import { AI_NOTE, metaLine, prettyDate, safeHref, sortSources, sourceDomain, sourceLabel, type ExportInput } from "./shared";
+import { BRAND, loadBrandMark } from "./brand";
 
 type DocxModule = typeof Docx;
 type Child = Docx.ParagraphChild;
 type BodyChild = Docx.Paragraph | Docx.Table;
 
-const ACCENT = "5B3DF5";
-const INK = "0B1020";
-const MUTED = "586178";
-const LINE = "D5D9E4";
-const SOFT = "F5F6FA";
+// Official Ensemblis palette (print-safe values; see ./brand.ts).
+const ACCENT = BRAND.blueText;
+const INK = BRAND.ink;
+const MUTED = BRAND.slate;
+const LINE = BRAND.line;
+const SOFT = BRAND.soft;
 const BODY_TWIPS = 9026; // A4 width minus 1" margins
 const FONT = "Calibri";
 
 /** Build the docx Document (pure apart from the module passed in; unit-testable in Node). */
-export function buildDocxDocument(d: DocxModule, input: ExportInput): Docx.Document {
+export function buildDocxDocument(d: DocxModule, input: ExportInput, mark: Uint8Array | null = null): Docx.Document {
   const sources = sortSources(input.sources);
   const valid = new Set(sources.map((s) => s.n));
   const parsed = markdownToBlocks(input.markdown || "", { isCite: (n) => valid.has(n) });
@@ -173,23 +175,26 @@ export function buildDocxDocument(d: DocxModule, input: ExportInput): Docx.Docum
     }
   };
 
-  // ---- Cover ----
+  // ---- Cover: the official mark (never redrawn) + the wordmark set in text ----
+  const note = input.meta?.note || AI_NOTE;
   const body: BodyChild[] = [
     new d.Paragraph({
       children: [
-        new d.TextRun({ text: "■ ", color: ACCENT, size: 22 }),
-        new d.TextRun({ text: "Ensemblis", bold: true, size: 24, color: INK }),
-        new d.TextRun({ text: `\t${input.meta?.label || "AI agent report"}`, size: 18, color: MUTED }),
+        ...(mark
+          ? [new d.ImageRun({ type: "png", data: mark, transformation: { width: 22, height: 22 }, altText: { name: "Ensemblis", description: "Ensemblis logo", title: "Ensemblis" } }), new d.TextRun({ text: "  " })]
+          : []),
+        new d.TextRun({ text: "ENSEMBLIS", bold: true, size: 20, color: INK, characterSpacing: 40 }),
+        new d.TextRun({ text: `\t${input.meta?.label || "Ensemblis report"}`, size: 18, color: MUTED }),
       ],
       tabStops: [{ type: d.TabStopType.RIGHT, position: BODY_TWIPS }],
-      border: { bottom: { style: d.BorderStyle.SINGLE, size: 12, color: ACCENT, space: 6 } },
+      border: { bottom: { style: d.BorderStyle.SINGLE, size: 8, color: ACCENT, space: 6 } },
       spacing: { after: 360 },
     }),
     new d.Paragraph({ heading: d.HeadingLevel.TITLE, children: [new d.TextRun({ text: title })] }),
   ];
   const meta = metaLine(input.meta);
   if (meta) body.push(new d.Paragraph({ children: [new d.TextRun({ text: meta, color: MUTED, size: 20 })], spacing: { after: 60 } }));
-  body.push(new d.Paragraph({ children: [new d.TextRun({ text: AI_NOTE, italics: true, color: MUTED, size: 17 })], spacing: { after: 320 } }));
+  body.push(new d.Paragraph({ children: [new d.TextRun({ text: note, italics: true, color: MUTED, size: 17 })], spacing: { after: 320 } }));
 
   for (const b of blocks) body.push(...block(b));
   if (!blocks.length) body.push(new d.Paragraph({ children: [new d.TextRun({ text: "This report is empty.", italics: true, color: MUTED })] }));
@@ -205,7 +210,7 @@ export function buildDocxDocument(d: DocxModule, input: ExportInput): Docx.Docum
     );
     for (const s of sources) {
       const url = safeHref(s.url);
-      const where = [sourceDomain(s), KIND_LABEL[s.kind], s.publishedAt ? prettyDate(s.publishedAt) : null].filter(Boolean).join(" · ");
+      const where = [sourceDomain(s), sourceLabel(s), s.publishedAt ? prettyDate(s.publishedAt) : null].filter(Boolean).join(" · ");
       body.push(
         new d.Paragraph({
           keepNext: true,
@@ -241,7 +246,7 @@ export function buildDocxDocument(d: DocxModule, input: ExportInput): Docx.Docum
   return new d.Document({
     creator: "Ensemblis",
     title,
-    description: AI_NOTE,
+    description: note,
     styles: {
       default: {
         document: { run: { font: FONT, size: 21, color: INK }, paragraph: { spacing: { line: 288 } } },
@@ -280,6 +285,6 @@ export function buildDocxDocument(d: DocxModule, input: ExportInput): Docx.Docum
 export async function exportDocx(input: ExportInput): Promise<Blob> {
   const mod = (await import("docx")) as unknown as DocxModule & { default?: DocxModule };
   const d = (mod.Document ? mod : mod.default) as DocxModule;
-  const doc = buildDocxDocument(d, input);
+  const doc = buildDocxDocument(d, input, await loadBrandMark("bytes"));
   return d.Packer.toBlob(doc);
 }

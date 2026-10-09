@@ -1,61 +1,106 @@
 "use client";
 
-import type { Execution } from "@/lib/api";
+import type { Execution, VerificationCheck } from "@/lib/api";
 import { ClaimTag, Icon, VerificationTag } from "@/components";
+import { EvidenceChips } from "./Evidence";
 
-const MARK: Record<string, string> = { pass: "✓", warn: "!", fail: "×", not_assessed: "–" };
+const CHECK: Record<VerificationCheck["status"], { text: string; icon: "check" | "alert" | "x" | "info" }> = {
+  pass: { text: "Passed", icon: "check" },
+  warn: { text: "Warning", icon: "alert" },
+  fail: { text: "Failed", icon: "x" },
+  not_assessed: { text: "Not assessed", icon: "info" },
+};
+
+/** Score dial (decorative: the number is printed next to it). */
+function ScoreDial({ score, status }: { score: number; status: string }) {
+  const r = 30;
+  const c = 2 * Math.PI * r;
+  const v = Math.max(0, Math.min(100, score));
+  return (
+    <svg className={`cs-dial s-${status}`} width="76" height="76" viewBox="0 0 76 76" aria-hidden="true">
+      <circle cx="38" cy="38" r={r} className="cs-dial-bg" />
+      <circle cx="38" cy="38" r={r} className="cs-dial-fg" strokeDasharray={`${(v / 100) * c} ${c}`} transform="rotate(-90 38 38)" />
+    </svg>
+  );
+}
 
 export function VerificationPanel({ execution }: { execution: Execution }) {
   const v = execution.verification;
   if (!v) {
     return (
-      <p className="small muted">
-        {execution.status === "VERIFYING"
-          ? "Checking the result against the evidence and your success criteria…"
-          : "The verification gate runs after the AI Team finishes. Nothing is presented as complete until it has run."}
-      </p>
+      <div className={`cs-card cs-gate-wait${execution.status === "VERIFYING" ? " is-live" : ""}`}>
+        <span className="cs-gate-wait-ic" aria-hidden="true">
+          <Icon name="shield" size={18} />
+        </span>
+        <p>
+          {execution.status === "VERIFYING"
+            ? "Checking the result against the evidence and your success criteria…"
+            : "Verification happens after the AI Team finishes. Nothing is presented as complete until it has been verified."}
+        </p>
+      </div>
     );
   }
   const counts = v.claims.reduce<Record<string, number>>((m, c) => ((m[c.status] = (m[c.status] ?? 0) + 1), m), {});
+  const parts = [
+    `${counts.SUPPORTED ?? 0} supported by evidence`,
+    counts.PARTIALLY_SUPPORTED ? `${counts.PARTIALLY_SUPPORTED} partly` : null,
+    counts.UNSUPPORTED ? `${counts.UNSUPPORTED} not found in evidence` : null,
+    counts.UNCITED ? `${counts.UNCITED} uncited ${counts.UNCITED === 1 ? "figure" : "figures"}` : null,
+    counts.ESTIMATE ? `${counts.ESTIMATE} ${counts.ESTIMATE === 1 ? "estimate" : "estimates"}` : null,
+  ].filter(Boolean);
   return (
-    <div>
-      <div className="card tight row between wrapflex" style={{ gap: 12 }}>
-        <div className="row" style={{ gap: 14 }}>
-          <span className="score" aria-label={`Score ${v.score} out of 100`}>
+    <div className="cs-card cs-gate">
+      <div className="cs-gate-head">
+        <div className="cs-gate-score">
+          <ScoreDial score={v.score} status={v.status} />
+          <span className="cs-gate-num">
             <b>{v.score}</b>
-            <span className="muted small">/100</span>
+            <span>/100</span>
           </span>
-          <div>
-            <VerificationTag status={v.status} />
-            <div className="small" style={{ marginTop: 4 }}>
-              {v.summary}
-            </div>
-          </div>
         </div>
-        <span className="tiny muted">
-          Round {v.round} · {v.method === "deterministic+model" ? "evidence checks + AI review" : "evidence checks only"} · {v.version}
-        </span>
+        <div className="cs-gate-tt">
+          <VerificationTag status={v.status} />
+          <p className="cs-gate-sum">{v.summary}</p>
+          <p className="cs-gate-meta" title={v.version}>
+            Verification round {v.round} · {v.method === "deterministic+model" ? "evidence checks + AI review" : "evidence checks only"}
+          </p>
+        </div>
       </div>
-      <div className="vchecks" style={{ marginTop: 12 }}>
+
+      <ul className="cs-checks" aria-label="Verification checks">
         {v.checks.map((c) => (
-          <div className="vcheck" key={c.key} data-testid="verification-check">
-            <span className={`ic ${c.status}`} aria-label={c.status.replace("_", " ")}>
-              {MARK[c.status]}
+          <li className={`cs-check s-${c.status}`} key={c.key} data-testid="verification-check">
+            <span className="cs-check-ic" aria-hidden="true">
+              <Icon name={CHECK[c.status].icon} size={13} />
             </span>
-            <div>
-              <b>{c.label}</b>
-              <div className="small muted">{c.detail}</div>
+            <div className="cs-check-b">
+              <p className="cs-check-l">
+                <span className="sr-only">{CHECK[c.status].text}: </span>
+                {c.label}
+              </p>
+              <p className="cs-check-d">{c.detail}</p>
             </div>
-            <span className="sc">{c.score ?? "—"}</span>
-          </div>
+            <div className="cs-check-s">
+              {c.score !== null && (
+                <span className="cs-meter" aria-hidden="true">
+                  <i style={{ width: `${Math.max(0, Math.min(100, c.score))}%` }} />
+                </span>
+              )}
+              <b>
+                {c.score ?? "—"}
+                {c.score !== null && <span className="sr-only"> out of 100</span>}
+              </b>
+            </div>
+          </li>
         ))}
-      </div>
+      </ul>
+
       {v.humanJudgment.length > 0 && (
-        <div className="banner-info" style={{ marginTop: 12 }}>
-          <Icon name="user" size={15} />
+        <div className="cs-callout">
+          <Icon name="user" size={16} />
           <div>
-            <b className="small">Needs human judgment</b>
-            <ul className="small" style={{ paddingLeft: 18, margin: "4px 0 0" }}>
+            <p className="cs-callout-t">Needs human judgment</p>
+            <ul>
               {v.humanJudgment.map((h) => (
                 <li key={h}>{h}</li>
               ))}
@@ -63,25 +108,24 @@ export function VerificationPanel({ execution }: { execution: Execution }) {
           </div>
         </div>
       )}
+
       {v.claims.length > 0 && (
-        <details className="det" style={{ marginTop: 12 }}>
-          <summary className="small">
-            Claim checks: {counts.SUPPORTED ?? 0} supported by evidence
-            {counts.PARTIALLY_SUPPORTED ? `, ${counts.PARTIALLY_SUPPORTED} partly` : ""}
-            {counts.UNSUPPORTED ? `, ${counts.UNSUPPORTED} not found in evidence` : ""}
-            {counts.UNCITED ? `, ${counts.UNCITED} uncited figures` : ""}
-            {counts.ESTIMATE ? `, ${counts.ESTIMATE} estimates` : ""}
+        <details className="cs-disc cs-claims">
+          <summary>
+            Claim checks <span className="cs-disc-sub">{parts.join(" · ")}</span>
           </summary>
-          <p className="tiny muted" style={{ margin: "8px 0" }}>
+          <p className="cs-claims-note">
             “Supported” means the cited evidence contains the claim&apos;s figures and key terms (a text match) — not that an AI agreed with it.
           </p>
-          <ul className="claims">
+          <ul>
             {v.claims.map((c, i) => (
               <li key={i}>
-                <div>
-                  {c.claim}
-                  {c.evidenceNs.length > 0 && <span className="muted"> {c.evidenceNs.map((n) => `[${n}]`).join("")}</span>}
-                  <div className="tiny muted">{c.note}</div>
+                <div className="cs-claim-b">
+                  <p>{c.claim}</p>
+                  <div className="cs-claim-m">
+                    <EvidenceChips ns={c.evidenceNs} label="Cites" />
+                    {c.note && <span>{c.note}</span>}
+                  </div>
                 </div>
                 <ClaimTag status={c.status} />
               </li>

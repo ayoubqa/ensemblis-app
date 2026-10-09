@@ -1,27 +1,52 @@
 // Small helpers shared by the report renderer and the exporters.
 import type { Depth, TaskSource } from "@/lib/api";
 
-export const AI_NOTE = "Produced by the AI Team — check the evidence and verification before relying on it.";
+export const AI_NOTE = "Produced by an Ensemblis AI Team. Check the evidence and verification before relying on it.";
+
+/** Disclaimer for reports made before objectives, verification and evidence existed (v1–v3). */
+export const LEGACY_NOTE = "Produced by an earlier version of Ensemblis, before verification existed. Check the sources before relying on it.";
 
 export const KIND_LABEL: Record<TaskSource["kind"], string> = {
   web: "Web",
   wikipedia: "Wikipedia",
-  // Neutral wording: these labels also appear on public /r pages, the gallery and exports sent to other people.
-  upload: "Provided file",
+  // Neutral wording: these labels also appear on public /r pages and in exports sent to other people.
+  // "upload" also covers company context, calculations and tool output (the API collapses them).
+  upload: "Internal source",
   link: "Provided link",
 };
+
+/** What each kind of execution evidence is called (the API collapses several of them into sourceKind "upload"). */
+export const EVIDENCE_KIND_LABEL: Record<string, string> = {
+  WEB: "Web",
+  WIKIPEDIA: "Wikipedia",
+  DOCUMENT: "Company document",
+  COMPANY_CONTEXT: "Company context",
+  WEBSITE: "Company website",
+  CALCULATION: "Calculation",
+  TOOL_OUTPUT: "Tool output",
+  ARTIFACT: "Work product",
+};
+
+/** A source that may carry a more precise label than its `kind` (e.g. evidence converted for the reader). */
+export type LabelledSource = TaskSource & { label?: string | null };
+
+export function sourceLabel(s: TaskSource): string {
+  return (s as LabelledSource).label || KIND_LABEL[s.kind] || "Source";
+}
 
 /** What the exporters print under the title. */
 export interface ExportMeta {
   /** ISO date the report was delivered (defaults to today). */
   date?: string | null;
   depth?: Depth | null;
-  /** Lead agent name. */
+  /** Lead specialist (earlier reports only; no longer printed). */
   agent?: string | null;
   /** Version number when the report has been refined (v2, v3…). */
   version?: number | null;
-  /** A label such as "Example report" or "Shared report". */
+  /** A label such as "Ensemblis report" or "Earlier report". */
   label?: string | null;
+  /** Replaces the default disclaimer printed with the export. */
+  note?: string | null;
   /** Category, e.g. "Research". */
   category?: string | null;
 }
@@ -81,14 +106,13 @@ export function prettyDate(iso: string | null | undefined): string {
   return d.toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" });
 }
 
-/** "12 March 2026 · Standard depth · Led by X · Version 2" */
+/** "Ensemblis report · 12 March 2026 · Version 2" (depth only when a caller passes it). */
 export function metaLine(meta: ExportMeta | undefined): string {
   if (!meta) return prettyDate(null);
   return [
     meta.label,
     prettyDate(meta.date),
     depthLabel(meta.depth),
-    meta.agent ? `Led by ${meta.agent}` : null,
     meta.version && meta.version > 1 ? `Version ${meta.version}` : null,
   ]
     .filter(Boolean)
@@ -106,7 +130,7 @@ export function sourcesAppendix(sources: TaskSource[]): string {
   const lines = list.map((s) => {
     const url = safeHref(s.url);
     const title = s.title.replace(/[[\]]/g, "");
-    const where = [sourceDomain(s), KIND_LABEL[s.kind]].filter(Boolean).join(" · ");
+    const where = [sourceDomain(s), sourceLabel(s)].filter(Boolean).join(" · ");
     return `${s.n}. ${url ? `[${title}](${url})` : title}${where ? ` — ${where}` : ""}`;
   });
   return `## Sources\n\n${lines.join("\n")}\n`;
@@ -121,7 +145,7 @@ export function buildMarkdownFile({ title, markdown, sources, meta }: ExportInpu
   const metaMd = line ? `_${line}_\n\n` : "";
   const appendix = sourcesAppendix(sources);
   const withMeta = hasTitle ? body.replace(/^(#\s+[^\n]*\n)/, `$1\n${metaMd}`) : `${head}${metaMd}${body}`;
-  return `${withMeta}\n\n${appendix ? `${appendix}\n` : ""}---\n\n_${AI_NOTE} Made with Ensemblis._\n`;
+  return `${withMeta}\n\n${appendix ? `${appendix}\n` : ""}---\n\n_${meta?.note || AI_NOTE} Made with Ensemblis._\n`;
 }
 
 /** First real paragraph of a report as plain text (for previews / meta descriptions). */
