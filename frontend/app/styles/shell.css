@@ -1592,6 +1592,10 @@ footer.ft.sh-ft {
   line-height: 1.3;
   color: var(--ink-strong);
 }
+h1.sh-empty-t {
+  font-size: 22px;
+  letter-spacing: -0.02em;
+}
 .sh-empty p.sh-empty-d {
   margin-top: 6px;
   max-width: 48ch;

@@ -157,7 +157,8 @@ export function EmptyState({
   /** A button/link node, or {label, href | onClick} for a primary button. */
   action?: ReactNode | { label: string; href?: string; onClick?: () => void; icon?: IconName };
   card?: boolean;
-  titleAs?: "b" | "h2" | "h3";
+  /** "h1" when the empty state is the whole page (not found, link inactive). */
+  titleAs?: "b" | "h1" | "h2" | "h3";
   className?: string;
 }) {
   let act: ReactNode = null;

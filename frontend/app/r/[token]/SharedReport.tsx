@@ -58,6 +58,7 @@ export function SharedReport({ token }: { token: string }) {
       <div className={`narrow ${S.state}`}>
         <EmptyState
           icon="lock"
+          titleAs="h1"
           title="This link isn't active"
           action={
             <Link className="btn p" href={ROUTES.howItWorksPage}>
@@ -76,6 +77,7 @@ export function SharedReport({ token }: { token: string }) {
       <div className={`narrow ${S.state}`}>
         <EmptyState
           icon="alert"
+          titleAs="h1"
           title="Couldn't load this result"
           action={
             <button type="button" className="btn p" onClick={load}>

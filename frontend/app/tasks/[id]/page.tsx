@@ -52,9 +52,10 @@ function LegacyReport() {
   if (error) {
     const missing = error instanceof ApiError && [400, 403, 404].includes(error.status);
     return (
-      <div className="narrow" style={{ padding: "56px 0" }}>
+      <div className="narrow" style={{ paddingBlock: 56 }}>
         <EmptyState
           icon="file"
+          titleAs="h1"
           title={missing ? "Report not found" : "Couldn't load this report"}
           action={
             missing ? (

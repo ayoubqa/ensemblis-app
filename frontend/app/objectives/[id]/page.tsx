@@ -60,8 +60,8 @@ function ObjectiveConsole() {
   if (!detail) {
     if (error && (error.status === 404 || error.status === 400 || error.status === 403)) {
       return (
-        <div className="narrow" style={{ padding: "56px 0" }}>
-          <EmptyState icon="list" title="Objective not found" action={{ label: "Go to Objectives", href: ROUTES.objectives }}>
+        <div className="narrow" style={{ paddingBlock: 56 }}>
+          <EmptyState icon="list" title="Objective not found" titleAs="h1" action={{ label: "Go to Objectives", href: ROUTES.objectives }}>
             It doesn&apos;t exist or belongs to another organization.
           </EmptyState>
         </div>
@@ -69,9 +69,10 @@ function ObjectiveConsole() {
     }
     if (error) {
       return (
-        <div className="narrow" style={{ padding: "56px 0" }}>
+        <div className="narrow" style={{ paddingBlock: 56 }}>
           <EmptyState
             icon="alert"
+            titleAs="h1"
             title="Couldn't load this objective"
             action={
               <button type="button" className="btn p" onClick={() => void reload()}>

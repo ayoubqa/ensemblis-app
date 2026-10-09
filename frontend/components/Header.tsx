@@ -26,7 +26,7 @@ const starts = (p: string, ...prefixes: string[]) => prefixes.some((x) => p === 
 const cx = (...c: (string | false | null | undefined)[]) => c.filter(Boolean).join(" ");
 
 /** Signed out: the story, then Log in / Get started (right-hand side). */
-export const PUBLIC_NAV: NavItem[] = [{ href: ROUTES.howItWorks, label: "How it works", icon: "layers", match: () => false }];
+export const PUBLIC_NAV: NavItem[] = [{ href: ROUTES.howItWorksPage, label: "How it works", icon: "layers", match: (p) => p === ROUTES.howItWorksPage }];
 
 /** Signed in, primary navigation (desktop). */
 export const SIGNED_NAV: NavItem[] = [
@@ -379,7 +379,7 @@ export function BottomNav() {
   if (!user) {
     const tabs: Tab[] = [
       { key: "home", href: ROUTES.home, label: "Home", icon: "home", on: pathname === ROUTES.home },
-      { key: "how", href: ROUTES.howItWorks, label: "How it works", icon: "layers", on: false },
+      { key: "how", href: ROUTES.howItWorksPage, label: "How it works", icon: "layers", on: pathname === ROUTES.howItWorksPage },
       { key: "start", href: ROUTES.signup, label: "Get started", icon: "arrow", on: starts(pathname, ROUTES.signup) },
       { key: "login", href: ROUTES.login, label: "Log in", icon: "user", on: starts(pathname, ROUTES.login) },
     ];
