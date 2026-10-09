@@ -20,7 +20,7 @@ import { DemoBanner } from "@/components/DemoBanner";
 import { GuestBanner } from "@/components/GuestBanner";
 import { ConfigProvider } from "@/lib/config";
 import { demoInitScript } from "@/lib/demo-flags";
-import { SITE } from "@/lib/site";
+import { OG_IMAGE, SITE } from "@/lib/site";
 
 // Favicons come from the official brand pack via the app/ file conventions
 // (app/favicon.ico, app/icon.png, app/apple-icon.png); see public/brand/README.md.
@@ -38,13 +38,13 @@ export const metadata: Metadata = {
     title: `${SITE.name} — ${SITE.positioning.replace(/\.$/, "")}`,
     description: SITE.promise,
     locale: "en_US",
-    images: [{ url: "/brand/og-image.png", width: 1200, height: 630, alt: `${SITE.name} — ${SITE.positioning} ${SITE.promise}` }],
+    images: [OG_IMAGE],
   },
   twitter: {
     card: "summary_large_image",
     title: `${SITE.name} — ${SITE.positioning.replace(/\.$/, "")}`,
     description: SITE.promise,
-    images: ["/brand/og-image.png"],
+    images: [OG_IMAGE.url],
   },
   formatDetection: { telephone: false },
 };

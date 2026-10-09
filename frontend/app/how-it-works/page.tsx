@@ -157,7 +157,7 @@ export default function HowItWorksPage() {
                 The <strong>AI Team</strong> is an organization, not a collection of chatbots. The {CHIEF_OF_STAFF.title} plans and synthesises; four executives each own a
                 set of <strong>capabilities</strong>, and a specialist carries out each capability using only the tools that capability is allowed.
               </p>
-              <div className="tw mk-table">
+              <div className="tw mk-table" role="region" aria-label="Executives and their capabilities" tabIndex={0}>
                 <table>
                   <caption className="sr-only">Executives and their capabilities</caption>
                   <thead>
