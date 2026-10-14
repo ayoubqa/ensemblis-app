@@ -12,7 +12,8 @@ import { prisma } from "../db";
 import { ah, HttpError } from "../lib/http";
 import { asDepth, toPublicAgent, toSharedSource } from "../lib/serializers";
 import { toPublicEvidence } from "../engine/evidence";
-import { toPublicCriterion, toPublicMeasurement } from "../engine/serialize";
+import { criteriaFromAssessment, toPublicCriterion, toPublicMeasurement, usedMockAIOf } from "../engine/serialize";
+import { deriveResultState } from "../engine/resultState";
 
 const router = Router();
 
@@ -53,16 +54,21 @@ async function loadExecutionReport(token: string) {
       evidence: { orderBy: { n: "asc" } },
       verifications: { orderBy: { round: "desc" }, take: 1 },
       measurements: true,
-      steps: { orderBy: { order: "asc" }, select: { title: true, agent: true, executive: true, status: true, kind: true } },
+      steps: { orderBy: { order: "asc" }, select: { title: true, agent: true, executive: true, status: true, kind: true, provider: true, researchStatus: true } },
     },
   });
   if (!ex) return null;
   const v = ex.verifications[0];
   const evidence = ex.evidence.map((e) => toPublicEvidence(e, { publicView: true }));
+  const result = deriveResultState({ status: ex.status, verificationStatus: ex.verificationStatus, steps: ex.steps, objectiveKind: ex.objective.kind });
   return {
     kind: "execution" as const,
     token,
     title: ex.objective.title,
+    /** Taken from what this execution actually ran on (any step or the verifier on the mock provider). */
+    usedMockAI: usedMockAIOf({ steps: ex.steps, verifications: ex.verifications }),
+    resultState: result.state,
+    resultReasons: result.reasons,
     category: null,
     depth: "standard" as const,
     result: ex.result ?? "",
@@ -76,10 +82,23 @@ async function loadExecutionReport(token: string) {
       title: ex.objective.title,
       criteria: ex.objective.criteria.map(toPublicCriterion),
       measurements: ex.measurements.map(toPublicMeasurement),
+      /** The AI-measured outcome; confirmedOutcomeStatus is set once a person confirmed it. */
       outcomeStatus: ex.outcomeStatus,
+      confirmedOutcomeStatus: ex.confirmedOutcomeStatus ?? null,
+      outcomeConfirmedAt: ex.outcomeConfirmedAt?.toISOString() ?? null,
       outcomeSummary: ex.outcomeSummary,
     },
-    verification: v ? { status: v.status, score: v.score, summary: v.summary, warnings: v.warnings, checks: v.checks } : null,
+    verification: v
+      ? {
+          status: v.status,
+          score: v.score,
+          summary: v.summary,
+          warnings: v.warnings,
+          checks: v.checks,
+          method: v.method,
+          criteria: criteriaFromAssessment(v.assessment, new Set(ex.evidence.map((e) => e.n))),
+        }
+      : null,
   };
 }
 

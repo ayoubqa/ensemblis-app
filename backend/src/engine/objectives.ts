@@ -35,6 +35,21 @@ export interface CreateObjectiveInput {
   autonomy?: Autonomy;
   draft?: boolean;
   workflowId?: string | null;
+  /** Deliverable kind: null/undefined = the default decision memo. */
+  kind?: ObjectiveKind | null;
+  /** Constraints the plan and the deliverable must respect (scope, exclusions, sources, format). */
+  constraints?: string | null;
+}
+
+export const OBJECTIVE_KINDS = ["research_brief"] as const;
+export type ObjectiveKind = (typeof OBJECTIVE_KINDS)[number];
+export const MAX_CONSTRAINTS_CHARS = 4000;
+
+/** Normalised persisted values for kind and constraints (unknown kinds and blank constraints become null). */
+export function objectiveKindFields(input: Pick<CreateObjectiveInput, "kind" | "constraints">): { kind: ObjectiveKind | null; constraints: string | null } {
+  const kind = input.kind && (OBJECTIVE_KINDS as readonly string[]).includes(input.kind) ? input.kind : null;
+  const constraints = (input.constraints ?? "").trim().slice(0, MAX_CONSTRAINTS_CHARS);
+  return { kind, constraints: constraints || null };
 }
 
 export function titleFor(text: string): string {
@@ -104,6 +119,7 @@ export async function createObjective(org: OrgContext, input: CreateObjectiveInp
         title,
         statement,
         contextNotes: (input.contextNotes ?? "").trim().slice(0, 8000),
+        ...objectiveKindFields(input),
         deadline: input.deadline ?? null,
         budgetCents,
         autonomy: input.autonomy ?? organization.defaultAutonomy,
