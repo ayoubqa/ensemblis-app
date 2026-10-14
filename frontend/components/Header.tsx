@@ -2,586 +2,333 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useCallback, useEffect, useMemo, useRef, useState, KeyboardEvent as ReactKeyboardEvent } from "react";
-import { api, type Task } from "@/lib/api";
+import { useCallback, useEffect, useId, useRef, useState, type FocusEvent, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
+import type { Attention } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
-import { eur, relativeTime } from "@/lib/format";
-import { useMediaQuery, useOnClickOutside, usePolling } from "@/lib/hooks";
+import { eur } from "@/lib/format";
+import { useOnClickOutside } from "@/lib/hooks";
 import { ROUTES } from "@/lib/routes";
-import { storage } from "@/lib/utils";
 import { Avatar } from "./Avatar";
 import { Icon, type IconName } from "./Icon";
 import { Logo } from "./Logo";
 import { Modal } from "./Modal";
-import { useShell } from "./Shell";
+import { leavingAfterSignOut } from "./RequireAuth";
+import { refreshAttention, useAttention, useModKey, useShell } from "./Shell";
 import { ThemeSwitch } from "./ThemeSwitch";
 import { useToast } from "./Toast";
 
+// The attention hook lives in Shell (one poll shared by the header and the mobile bar);
+// re-exported here because pages import it from "./Header".
+export { useAttention, refreshAttention };
+
 // ------------------------------------------------------------------ nav model
-type NavItem = { href: string; label: string; match: (p: string) => boolean };
+export type NavItem = { href: string; label: string; icon: IconName; match: (p: string) => boolean; badge?: keyof Attention };
 const starts = (p: string, ...prefixes: string[]) => prefixes.some((x) => p === x || p.startsWith(x + "/"));
+const cx = (...c: (string | false | null | undefined)[]) => c.filter(Boolean).join(" ");
 
-export const PUBLIC_NAV: NavItem[] = [
-  {
-    href: ROUTES.newTask,
-    label: "Work",
-    match: (p) => starts(p, "/new", "/tasks"),
-  },
-  { href: ROUTES.agents, label: "Agents", match: (p) => starts(p, "/agents") },
-  {
-    href: ROUTES.developers,
-    label: "Developers",
-    match: (p) => starts(p, "/developers", "/economics"),
-  },
-  { href: ROUTES.howItWorks, label: "How it works", match: () => false },
-  {
-    href: ROUTES.network,
-    label: "Resources",
-    match: (p) => starts(p, "/network", "/changelog", "/pricing", "/brand"),
-  },
-];
+/** Signed out: the story, then Log in / Get started (right-hand side). */
+export const PUBLIC_NAV: NavItem[] = [{ href: ROUTES.howItWorksPage, label: "How it works", icon: "layers", match: (p) => p === ROUTES.howItWorksPage }];
+
+/** Signed in, primary navigation (desktop). */
 export const SIGNED_NAV: NavItem[] = [
-  {
-    href: ROUTES.dashboard,
-    label: "Dashboard",
-    match: (p) => p === "/dashboard" || starts(p, "/billing", "/settings", "/team", "/admin"),
-  },
-  {
-    href: ROUTES.tasks,
-    label: "My work",
-    match: (p) => starts(p, "/tasks", "/new", "/workflows"),
-  },
-  {
-    href: ROUTES.agents,
-    label: "Agents",
-    match: (p) => starts(p, "/agents", "/workforce"),
-  },
-  {
-    href: ROUTES.developers,
-    label: "Developers",
-    match: (p) => starts(p, "/developers", "/economics", "/dashboard/developer"),
-  },
-  {
-    href: ROUTES.network,
-    label: "Network",
-    match: (p) => starts(p, "/network", "/changelog", "/pricing", "/brand"),
-  },
+  { href: ROUTES.dashboard, label: "Home", icon: "home", match: (p) => p === ROUTES.dashboard },
+  { href: ROUTES.objectives, label: "Objectives", icon: "target", match: (p) => starts(p, ROUTES.objectives, ROUTES.routines) },
+  { href: ROUTES.aiTeam, label: "AI Team", icon: "org", match: (p) => starts(p, ROUTES.aiTeam) },
+  { href: ROUTES.context, label: "Company Context", icon: "building", match: (p) => starts(p, ROUTES.context) },
+  { href: ROUTES.reports, label: "Reports", icon: "report", match: (p) => starts(p, ROUTES.reports, "/tasks") },
 ];
 
-// ------------------------------------------------------------------ notifications
-export interface Notification {
-  id: string;
-  taskId: string;
-  kind: "ok" | "bad" | "info";
-  bold: string;
-  rest: string;
-  sub: string;
-  at: number;
-}
-
-const SEEN_KEY = (uid: string) => `ensemblis_notif_seen_${uid}`;
-
-function deriveNotifications(tasks: Task[]): Notification[] {
-  const out: Notification[] = [];
-  for (const t of tasks) {
-    const at = new Date(t.completedAt || t.startedAt || t.createdAt).getTime();
-    if (t.status === "COMPLETED")
-      out.push({
-        id: t.id + ":c",
-        taskId: t.id,
-        kind: "ok",
-        bold: t.title,
-        rest: " is ready",
-        sub: `${relativeTime(t.completedAt || t.createdAt)} · ${eur(t.costCents)}`,
-        at,
-      });
-    else if (t.status === "FAILED")
-      out.push({
-        id: t.id + ":f",
-        taskId: t.id,
-        kind: "bad",
-        bold: t.title,
-        rest: " did not complete",
-        sub: `${relativeTime(t.completedAt || t.createdAt)} · action needed`,
-        at,
-      });
-    else if (t.status === "REFUNDED")
-      out.push({
-        id: t.id + ":r",
-        taskId: t.id,
-        kind: "info",
-        bold: t.title,
-        rest: ` was refunded (${eur(t.costCents)})`,
-        sub: relativeTime(t.completedAt || t.createdAt),
-        at,
-      });
-  }
-  return out.sort((a, b) => b.at - a.at).slice(0, 8);
-}
-
-/** Notifications derived from the signed-in user's tasks (polled every 30s). */
-export function useNotifications(enabled: boolean, userId?: string) {
-  const [tasks, setTasks] = useState<Task[] | null>(null);
-  const [seenAt, setSeenAt] = useState<number>(0);
-
-  useEffect(() => {
-    if (!userId) return;
-    const raw = storage.get(SEEN_KEY(userId));
-    if (raw) setSeenAt(Number(raw) || 0);
-    else {
-      const now = Date.now();
-      storage.set(SEEN_KEY(userId), String(now));
-      setSeenAt(now);
-    }
-  }, [userId]);
-
-  const load = useCallback(async () => {
-    const r = await api.listTasks();
-    setTasks(r.tasks);
-  }, []);
-  usePolling(load, 30000, { enabled });
-
-  const items = useMemo(() => deriveNotifications(tasks || []), [tasks]);
-  const running = useMemo(() => (tasks || []).filter((t) => t.status === "RUNNING" || t.status === "PLANNING"), [tasks]);
-  const unread = items.filter((n) => n.at > seenAt).length;
-  const markRead = useCallback(() => {
-    const now = Date.now();
-    if (userId) storage.set(SEEN_KEY(userId), String(now));
-    setSeenAt(now);
-  }, [userId]);
-  return {
-    items,
-    running,
-    unread,
-    seenAt,
-    markRead,
-    reload: load,
-    loaded: tasks !== null,
-  };
-}
-
-// ------------------------------------------------------------------ menu helpers
-function focusItem(container: HTMLElement | null, dir: 1 | -1 | "first" | "last") {
-  if (!container) return;
-  const items = Array.from(container.querySelectorAll<HTMLElement>('[role="menuitem"]'));
-  if (!items.length) return;
-  const i = items.indexOf(document.activeElement as HTMLElement);
-  const n = dir === "first" ? 0 : dir === "last" ? items.length - 1 : (i + dir + items.length) % items.length;
-  items[n].focus();
-}
-function menuKeys(e: ReactKeyboardEvent<HTMLElement>, el: HTMLElement | null, close: () => void) {
-  if (e.key === "ArrowDown") {
-    e.preventDefault();
-    focusItem(el, 1);
-  } else if (e.key === "ArrowUp") {
-    e.preventDefault();
-    focusItem(el, -1);
-  } else if (e.key === "Home") {
-    e.preventDefault();
-    focusItem(el, "first");
-  } else if (e.key === "End") {
-    e.preventDefault();
-    focusItem(el, "last");
-  } else if (e.key === "Escape") {
-    e.preventDefault();
-    close();
-  } else if (e.key === "Tab") close();
-}
-
-function MenuLink({
-  href,
-  icon,
-  children,
-  onSelect,
-  right,
-  style,
-}: {
-  href: string;
-  icon: IconName;
-  children: React.ReactNode;
-  onSelect: () => void;
-  right?: React.ReactNode;
-  style?: React.CSSProperties;
-}) {
-  return (
-    <Link href={href} role="menuitem" onClick={onSelect} style={style}>
-      <Icon name={icon} />
-      {children}
-      {right && <span style={{ marginLeft: "auto" }}>{right}</span>}
-    </Link>
-  );
-}
+/** Always-visible attention controls with live counts. */
+export const ATTENTION_NAV: (NavItem & { badge: keyof Attention; tone: "warn" | "bad"; some: string; none: string })[] = [
+  { href: ROUTES.approvals, label: "Approvals", icon: "shield", match: (p) => starts(p, ROUTES.approvals), badge: "approvals", tone: "warn", some: "waiting", none: "none waiting" },
+  { href: ROUTES.exceptions, label: "Exceptions", icon: "alert", match: (p) => starts(p, ROUTES.exceptions), badge: "exceptions", tone: "bad", some: "open", none: "none open" },
+];
 
 /** Where a guest goes to turn the trial into a real account (keeps their work). */
 export const CLAIM_HREF = `${ROUTES.signup}?claim=1`;
 
-/** Tiny "TEAM" marker shown next to a balance that is the shared team wallet. */
-function TeamMark() {
+const capped = (n: number) => (n > 99 ? "99+" : String(n));
+
+// ------------------------------------------------------------------ focus helpers
+const FOCUSABLE = 'a[href], button:not([disabled]):not([tabindex="-1"])';
+function moveFocus(container: HTMLElement | null, dir: 1 | -1 | "first" | "last") {
+  if (!container) return;
+  const items = Array.from(container.querySelectorAll<HTMLElement>(FOCUSABLE)).filter((x) => x.offsetParent !== null);
+  if (!items.length) return;
+  const i = items.indexOf(document.activeElement as HTMLElement);
+  const n = dir === "first" ? 0 : dir === "last" ? items.length - 1 : i < 0 ? 0 : (i + dir + items.length) % items.length;
+  items[n].focus();
+}
+
+function AcctLink({ href, icon, children, onSelect, right, current }: { href: string; icon: IconName; children: ReactNode; onSelect: () => void; right?: ReactNode; current?: boolean }) {
   return (
-    <span
-      aria-hidden="true"
-      style={{
-        fontSize: 9.5,
-        fontWeight: 800,
-        letterSpacing: ".06em",
-        textTransform: "uppercase",
-        padding: "1px 6px",
-        borderRadius: 999,
-        background: "var(--accent)",
-        color: "var(--accent-ink)",
-        lineHeight: 1.5,
-      }}
-    >
-      team
-    </span>
+    <Link href={href} className="sh-acct-item" onClick={onSelect} aria-current={current ? "page" : undefined}>
+      <Icon name={icon} />
+      <span className="sh-acct-lbl">{children}</span>
+      {right && <span className="sh-acct-meta">{right}</span>}
+    </Link>
   );
 }
 
 // ------------------------------------------------------------------ Header
-/**
- * Sticky blurred app header (prototype `header()`, `header.top.dk`). Public vs
- * signed-in nav, ⌘K search, notifications, credits pill and account menu.
- */
+/** The navy command bar every page lives under (`.dk` whatever the theme). */
 export function Header() {
   const { user, loading, signOut } = useAuth();
   const pathname = usePathname() || "/";
   const router = useRouter();
   const shell = useShell();
   const toast = useToast();
-  const [menu, setMenu] = useState<null | "n" | "p">(null);
-  const nRef = useRef<HTMLDivElement>(null);
-  const pRef = useRef<HTMLDivElement>(null);
-  const nMenu = useRef<HTMLDivElement>(null);
-  const pMenu = useRef<HTMLDivElement>(null);
-  const notif = useNotifications(!!user, user?.id);
-  const [seenSnapshot, setSeenSnapshot] = useState(0);
-  const [confirmExit, setConfirmExit] = useState(false);
-  const phone = useMediaQuery("(max-width: 560px)");
+  const mod = useModKey();
   const isGuest = !!user?.isGuest;
-  const teamWallet = !!user && user.walletOwner === "team";
-  const walletTitle = !user
-    ? ""
-    : teamWallet
-      ? `Team wallet — ${user.team?.name ?? "your team"}`
-      : isGuest
-        ? "Trial credits — save your work to keep going"
-        : "Credit balance — top up in Billing";
+  const attention = shell.attention;
+  const [menu, setMenu] = useState(false);
+  const [confirmExit, setConfirmExit] = useState(false);
+  const hdrRef = useRef<HTMLElement>(null);
+  const acctRef = useRef<HTMLDivElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const panelId = useId();
 
-  const close = useCallback(() => setMenu(null), []);
-  useOnClickOutside([nRef, pRef], close, menu !== null);
-  useEffect(() => setMenu(null), [pathname]);
+  // Publish the real header height (--sh-header-h) so sticky banners sit exactly under it.
+  useEffect(() => {
+    const el = hdrRef.current;
+    if (!el) return;
+    const set = () => document.documentElement.style.setProperty("--sh-header-h", `${Math.round(el.getBoundingClientRect().height)}px`);
+    set();
+    if (typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(set);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
-  const openMenu = (m: "n" | "p", viaKeyboard = false) => {
-    if (menu === m) return setMenu(null);
-    if (m === "n") {
-      setSeenSnapshot(notif.seenAt);
-      notif.markRead();
-      notif.reload().catch(() => {});
-    }
-    setMenu(m);
-    if (viaKeyboard) requestAnimationFrame(() => focusItem(m === "n" ? nMenu.current : pMenu.current, "first"));
-  };
-
-  // Guests carry a wider right-hand cluster ("Save your work"); keep their nav to the essentials so nothing overlaps.
-  const nav = user ? (isGuest ? SIGNED_NAV.slice(0, 3) : SIGNED_NAV) : PUBLIC_NAV;
+  const close = useCallback(() => setMenu(false), []);
+  const closeToTrigger = useCallback(() => {
+    setMenu(false);
+    triggerRef.current?.focus();
+  }, []);
+  useOnClickOutside([acctRef], close, menu);
+  useEffect(() => setMenu(false), [pathname]);
 
   const doSignOut = () => {
-    setMenu(null);
+    setMenu(false);
     setConfirmExit(false);
+    leavingAfterSignOut(); // land on the home page, not /login?next=<this page>
     signOut();
     toast(isGuest ? "Guest session ended" : "Signed out");
     router.push(ROUTES.home);
   };
 
+  // Disclosure panel keyboard: ↑/↓/Home/End move between controls (the theme switch keeps
+  // only ←/→), Esc closes and returns focus to the trigger, Tab moves through every
+  // control (theme switch included) and leaving the panel closes it.
+  const onAcctKey = (e: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (!menu) {
+      if (e.key === "ArrowDown" && e.target === triggerRef.current) {
+        e.preventDefault();
+        setMenu(true);
+        requestAnimationFrame(() => moveFocus(panelRef.current, "first"));
+      }
+      return;
+    }
+    if (e.key === "Escape") {
+      e.preventDefault();
+      e.stopPropagation();
+      closeToTrigger();
+    } else if (e.key === "ArrowDown" || e.key === "ArrowUp" || e.key === "Home" || e.key === "End") {
+      e.preventDefault();
+      moveFocus(panelRef.current, e.key === "ArrowDown" ? 1 : e.key === "ArrowUp" ? -1 : e.key === "Home" ? "first" : "last");
+    }
+  };
+  const onAcctBlur = (e: FocusEvent<HTMLDivElement>) => {
+    const next = e.relatedTarget as Node | null;
+    if (menu && next && !acctRef.current?.contains(next)) setMenu(false);
+  };
+
+  const onUsage = starts(pathname, ROUTES.usage, "/billing");
+  const balanceTitle = user ? (user.walletOwner === "team" ? `Organization balance — ${user.team?.name ?? "your organization"}` : "Balance available for executions") : "";
+
   return (
-    <header className="top dk no-print">
-      <div className="wrap in">
-        <Logo />
-        <nav className="main" aria-label="Main">
-          {nav.map((n) => {
-            const on = n.match(pathname);
-            return (
-              <Link key={n.label} href={n.href} className={on ? "on" : undefined} aria-current={on ? "page" : undefined}>
-                {n.label}
-              </Link>
-            );
-          })}
+    <header className="sh-top dk no-print" ref={hdrRef}>
+      <div className="wrap sh-bar">
+        <Logo href={user ? ROUTES.dashboard : ROUTES.home} />
+
+        <nav className="sh-nav" aria-label="Main">
+          <ul className="sh-links">
+            {(user ? SIGNED_NAV : PUBLIC_NAV).map((n) => {
+              const on = n.match(pathname);
+              return (
+                <li key={n.label}>
+                  <Link href={n.href} className={on ? "on" : undefined} aria-current={on ? "page" : undefined}>
+                    {n.label}
+                  </Link>
+                </li>
+              );
+            })}
+          </ul>
+          {user && (
+            <ul className="sh-attn-group" aria-label="Needs attention">
+              {ATTENTION_NAV.map((n) => {
+                const on = n.match(pathname);
+                const count = attention ? attention[n.badge] : null;
+                return (
+                  <li key={n.label}>
+                    <Link
+                      href={n.href}
+                      className={cx("sh-attn", n.tone, !!count && "has", on && "on")}
+                      aria-current={on ? "page" : undefined}
+                      title={count === null ? n.label : `${n.label}, ${count ? `${count} ${n.some}` : n.none}`}
+                    >
+                      <Icon name={n.icon} />
+                      <span className="sh-attn-lbl">{n.label}</span>
+                      {!!count && (
+                        <span className="sh-count" aria-hidden="true">
+                          {capped(count)}
+                        </span>
+                      )}
+                      {count !== null && <span className="sr-only">, {count ? `${count} ${n.some}` : n.none}</span>}
+                    </Link>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
         </nav>
-        <div className={isGuest ? "hdr-r crowded guest" : teamWallet ? "hdr-r crowded" : "hdr-r"}>
+
+        <div className={cx("sh-right", isGuest && "guest")}>
           <button
             type="button"
-            className="ibtn"
+            className="sh-ibtn sh-search"
             onClick={shell.openPalette}
             aria-label="Search or jump to anything"
-            title="Search or jump to anything (⌘K)"
-            aria-keyshortcuts="Meta+K Control+K /"
-            data-hdr-search
+            title={`Search or jump to anything (${mod} K)`}
+            aria-keyshortcuts={user ? "Meta+K Control+K /" : "Meta+K Control+K"}
           >
             <Icon name="search" />
           </button>
 
           {loading ? (
-            <div
-              className="sk"
-              style={{
-                width: 120,
-                height: 30,
-                borderRadius: 999,
-                opacity: 0.5,
-              }}
-              aria-hidden="true"
-            />
+            <div className="sk sh-sk" aria-hidden="true" />
           ) : user ? (
             <>
-              <Link href={ROUTES.newTask} className={isGuest ? "btn sm hdr-new hideS" : "btn p sm hdr-new hideS"} aria-label="New task" aria-keyshortcuts="N">
+              <Link href={ROUTES.newObjective} className="btn p sm sh-cta" aria-keyshortcuts={shell.singleKeys ? "N" : undefined} title="Define an outcome">
                 <Icon name="plus" />
-                <span className="lbl">New task</span>
+                <span className="sh-cta-lbl">Define an outcome</span>
               </Link>
               <Link
-                href={ROUTES.billing}
-                className="credpill hideS"
-                title={walletTitle}
-                aria-label={`Credit balance ${eur(user.credits)}${teamWallet ? ` — team wallet${user.team ? `, ${user.team.name}` : ""}` : isGuest ? " — trial credits" : ""}`}
+                href={ROUTES.usage}
+                className={cx("sh-bal", isGuest && "guest", onUsage && "on")}
+                title={balanceTitle}
+                aria-current={onUsage ? "page" : undefined}
+                aria-label={`Balance ${eur(user.credits)}, open Usage`}
               >
-                <Icon name="eur" size={14} />
-                {eur(user.credits)}
-                {teamWallet && <TeamMark />}
+                <Icon name="wallet" size={15} />
+                <span className="sh-bal-amt">{eur(user.credits)}</span>
               </Link>
-
               {isGuest && (
-                <>
-                  <span className="tag warn hdr-guest-tag" title="You're trying Ensemblis without an account. Save your work to keep it.">
-                    <Icon name="user" />
-                    Guest
+                <Link href={CLAIM_HREF} className="btn sm sh-save" title="Create a free account and keep everything from your trial">
+                  <span className="sh-lg">Save your work</span>
+                  <span className="sh-sm">
+                    Save<span className="sr-only"> your work</span>
                   </span>
-                  <Link href={CLAIM_HREF} className="btn p sm" title="Create a free account and keep everything you've done as a guest">
-                    {phone ? "Save work" : "Save your work"}
-                  </Link>
-                </>
+                </Link>
               )}
 
-              {/* Notifications (guests on phones: hidden to make room for "Save work") */}
-              <div className={isGuest ? "rel hideS" : "rel"} ref={nRef}>
+              <div className="sh-acct-wrap" ref={acctRef} onKeyDown={onAcctKey} onBlur={onAcctBlur}>
                 <button
+                  ref={triggerRef}
                   type="button"
-                  className="ibtn"
-                  aria-label={notif.unread ? `Notifications (${notif.unread} new)` : "Notifications"}
-                  aria-haspopup="menu"
-                  aria-expanded={menu === "n"}
-                  onClick={(e) => openMenu("n", e.detail === 0)}
-                >
-                  <Icon name="bell" />
-                  {notif.unread > 0 && <span className="dot" aria-hidden="true" />}
-                </button>
-                {menu === "n" && (
-                  <div
-                    className="menu"
-                    style={{ minWidth: 320, maxWidth: "calc(100vw - 24px)" }}
-                    role="menu"
-                    aria-label="Notifications"
-                    ref={nMenu}
-                    onKeyDown={(e) => menuKeys(e, nMenu.current, close)}
-                  >
-                    <div className="mh row between">
-                      <span>Notifications</span>
-                      <Link
-                        href={ROUTES.tasks}
-                        onClick={close}
-                        className="tiny"
-                        style={{
-                          color: "var(--accent)",
-                          padding: 0,
-                          width: "auto",
-                        }}
-                      >
-                        View all work
-                      </Link>
-                    </div>
-                    {notif.running.slice(0, 2).map((t) => (
-                      <Link key={t.id} href={ROUTES.task(t.id)} role="menuitem" className="notif-item" onClick={close}>
-                        <span className="pulse" style={{ marginTop: 6, flex: "none" }} aria-hidden="true" />
-                        <span>
-                          <b>{t.title}</b> is in progress
-                          <br />
-                          <span className="tiny muted">Started {relativeTime(t.startedAt || t.createdAt)}</span>
-                        </span>
-                      </Link>
-                    ))}
-                    {notif.items.map((n) => (
-                      <Link key={n.id} href={ROUTES.task(n.taskId)} role="menuitem" className="notif-item" onClick={close}>
-                        <span className={`nd ${n.kind === "bad" ? "bad" : n.at > seenSnapshot ? "new" : ""}`} aria-hidden="true" />
-                        <span>
-                          <b>{n.bold}</b>
-                          {n.rest}
-                          <br />
-                          <span className="tiny muted">{n.sub}</span>
-                        </span>
-                      </Link>
-                    ))}
-                    {!notif.items.length && !notif.running.length && (
-                      <p className="small muted" style={{ padding: "10px 10px 12px" }}>
-                        {notif.loaded ? "No notifications yet. Finished and failed tasks will show up here." : "Loading…"}
-                      </p>
-                    )}
-                  </div>
-                )}
-              </div>
-
-              {/* Account */}
-              <div className="rel" ref={pRef}>
-                <button
-                  type="button"
-                  className="pf"
-                  aria-haspopup="menu"
-                  aria-expanded={menu === "p"}
+                  className={cx("sh-acct-btn", menu && "open")}
+                  aria-expanded={menu}
+                  aria-controls={panelId}
                   aria-label="Account menu"
-                  onClick={(e) => openMenu("p", e.detail === 0)}
+                  onClick={(e) => {
+                    const opening = !menu;
+                    setMenu(opening);
+                    if (opening && e.detail === 0) requestAnimationFrame(() => moveFocus(panelRef.current, "first"));
+                  }}
                 >
-                  <Avatar name={user.name} hue={250} round />
-                  <span className="nm">{user.name}</span>
+                  <Avatar name={isGuest ? "Guest" : user.name} hue={220} round size="sm" />
+                  <Icon name="down" size={14} className="sh-chev" />
                 </button>
-                {menu === "p" && (
-                  <div
-                    className="menu"
-                    role="menu"
-                    aria-label="Account"
-                    ref={pMenu}
-                    onKeyDown={(e) => menuKeys(e, pMenu.current, close)}
-                    style={{ minWidth: 270 }}
-                  >
-                    <div className="mi">
-                      <Avatar name={isGuest ? "Guest" : user.name} hue={250} round style={{ width: 36, height: 36 }} />
-                      <div style={{ minWidth: 0 }}>
+                {menu && (
+                  <div className="sh-acct" id={panelId} ref={panelRef}>
+                    <div className="sh-acct-id">
+                      <Avatar name={isGuest ? "Guest" : user.name} hue={220} round />
+                      <div>
                         <b>{isGuest ? "Guest session" : user.name}</b>
-                        <div
-                          className="tiny muted"
-                          style={{
-                            overflow: "hidden",
-                            textOverflow: "ellipsis",
-                          }}
-                        >
-                          {isGuest
-                            ? `${eur(user.credits)} trial credits · not saved yet`
-                            : user.team
-                              ? `${user.team.name} · ${user.team.role === "OWNER" ? "Team owner" : "Team member"}`
-                              : [user.company, user.role].filter(Boolean).join(" · ") || user.email}
-                        </div>
+                        <span>{isGuest ? "Trial — not saved to an account yet" : user.team ? `${user.team.name} · ${user.team.role === "OWNER" ? "Owner" : "Member"}` : user.email}</span>
                       </div>
                     </div>
-                    <hr />
-                    {isGuest ? (
-                      <>
-                        <MenuLink href={CLAIM_HREF} icon="check" onSelect={close} style={{ color: "var(--accent)", fontWeight: 700 }}>
-                          Save your work
-                        </MenuLink>
-                        <p className="tiny muted" style={{ padding: "0 10px 6px 36px", margin: 0, maxWidth: 260 }}>
-                          Create a free account to keep your tasks and unlock workflows, teams and more.
-                        </p>
-                        <MenuLink href={ROUTES.tasks} icon="list" onSelect={close}>
-                          My work
-                        </MenuLink>
-                        <MenuLink href={ROUTES.examples} icon="file" onSelect={close}>
-                          Examples
-                        </MenuLink>
-                      </>
-                    ) : (
-                      <>
-                        <MenuLink href={ROUTES.profile} icon="user" onSelect={close}>
-                          Profile
-                        </MenuLink>
-                        <MenuLink href={ROUTES.settings} icon="settings" onSelect={close}>
-                          Settings
-                        </MenuLink>
-                        <MenuLink
-                          href={ROUTES.billing}
-                          icon="eur"
-                          onSelect={close}
-                          right={
-                            <span className="tiny muted row" style={{ gap: 6 }} title={walletTitle}>
-                              {eur(user.credits)}
-                              {teamWallet && <TeamMark />}
-                            </span>
-                          }
-                        >
-                          Billing
-                        </MenuLink>
-                        <MenuLink
-                          href={ROUTES.team}
-                          icon="share"
-                          onSelect={close}
-                          right={
-                            <span className="tiny muted" style={{ maxWidth: 110, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "block" }}>
-                              {user.team ? user.team.name : "Invite people"}
-                            </span>
-                          }
-                        >
-                          Team
-                        </MenuLink>
-                        <MenuLink href={ROUTES.workflows} icon="redo" onSelect={close}>
-                          Workflows
-                        </MenuLink>
-                        <MenuLink href={ROUTES.workforce} icon="layers" onSelect={close}>
-                          My Workforce
-                        </MenuLink>
-                        <MenuLink href={ROUTES.examples} icon="file" onSelect={close}>
-                          Examples
-                        </MenuLink>
-                        {user.accountType === "DEVELOPER" && (
-                          <MenuLink href={ROUTES.devDashboard} icon="code" onSelect={close}>
-                            Developer dashboard
-                          </MenuLink>
-                        )}
-                        {user.isAdmin && (
-                          <MenuLink href={ROUTES.admin} icon="chart" onSelect={close}>
-                            Owner dashboard
-                          </MenuLink>
-                        )}
-                      </>
+
+                    <Link href={ROUTES.usage} className="sh-acct-bal" onClick={close} aria-current={onUsage ? "page" : undefined}>
+                      <span>
+                        <span className="sh-acct-k">{isGuest ? "Trial balance" : user.walletOwner === "team" ? "Organization balance" : "Balance"}</span>
+                        <b>{eur(user.credits)}</b>
+                      </span>
+                      <span className="sh-acct-go">
+                        Usage
+                        <Icon name="chev" size={14} />
+                      </span>
+                    </Link>
+
+                    {isGuest && (
+                      <Link href={CLAIM_HREF} className="btn p sm sh-acct-save" onClick={close}>
+                        <Icon name="userPlus" />
+                        Save your work
+                      </Link>
                     )}
-                    <hr />
-                    <div className="mi-row">
-                      <span>Theme</span>
-                      <ThemeSwitch iconsOnly />
+
+                    <div className="sh-acct-list">
+                      <AcctLink href={ROUTES.routines} icon="redo" onSelect={close} current={starts(pathname, ROUTES.routines)}>
+                        Recurring objectives
+                      </AcctLink>
+                      {!isGuest && (
+                        <>
+                          <AcctLink href={ROUTES.members} icon="users" onSelect={close} current={starts(pathname, ROUTES.members)} right={user.team ? user.team.name : "Invite"}>
+                            Organization members
+                          </AcctLink>
+                          <AcctLink href={ROUTES.settings} icon="settings" onSelect={close} current={starts(pathname, ROUTES.settings)}>
+                            Settings
+                          </AcctLink>
+                        </>
+                      )}
+                      {user.isAdmin && (
+                        <AcctLink href={ROUTES.admin} icon="chart" onSelect={close} current={starts(pathname, ROUTES.admin)} right="Admin">
+                          Operations
+                        </AcctLink>
+                      )}
                     </div>
-                    <button
-                      type="button"
-                      role="menuitem"
-                      onClick={() => {
-                        close();
-                        shell.openShortcuts();
-                      }}
-                    >
-                      <Icon name="keyboard" />
-                      Keyboard shortcuts
-                      <kbd className="kbd">?</kbd>
-                    </button>
-                    <hr />
-                    {isGuest ? (
+
+                    <div className="sh-acct-row">
+                      <span id={`${panelId}-theme`}>Theme</span>
+                      <ThemeSwitch iconsOnly horizontalOnly />
+                    </div>
+
+                    <div className="sh-acct-list">
                       <button
                         type="button"
-                        role="menuitem"
+                        className="sh-acct-item sh-kbd-only"
                         onClick={() => {
                           close();
-                          setConfirmExit(true);
+                          shell.openShortcuts();
                         }}
                       >
-                        <Icon name="out" />
-                        End guest session
+                        <Icon name="keyboard" />
+                        <span className="sh-acct-lbl">Keyboard shortcuts</span>
+                        {shell.singleKeys && <kbd className="kbd">?</kbd>}
                       </button>
-                    ) : (
-                      <button type="button" role="menuitem" onClick={doSignOut}>
+                      <button type="button" className="sh-acct-item" onClick={() => (isGuest ? (close(), setConfirmExit(true)) : doSignOut())}>
                         <Icon name="out" />
-                        Sign out
+                        <span className="sh-acct-lbl">{isGuest ? "End guest session" : "Sign out"}</span>
                       </button>
-                    )}
+                    </div>
                   </div>
                 )}
               </div>
 
               <Modal open={confirmExit} onClose={() => setConfirmExit(false)} title="End your guest session?">
                 <p className="muted small" style={{ margin: "6px 0 16px" }}>
-                  Guest work isn&apos;t saved to an account. If you end the session now, you won&apos;t be able to get back to your tasks or
-                  results. Create a free account first to keep them.
+                  Guest work isn&apos;t saved to an account. Create a free account first to keep your objectives and outcomes.
                 </p>
                 <div className="row wrapflex">
                   <Link href={CLAIM_HREF} className="btn p" onClick={() => setConfirmExit(false)} data-autofocus>
@@ -595,12 +342,17 @@ export function Header() {
             </>
           ) : (
             <>
-              <Link href={ROUTES.login} className="btn sm hideM" style={{ background: "transparent" }}>
-                Log in
-              </Link>
-              <button type="button" className="btn p sm" onClick={() => shell.openRoleSelect()}>
-                Get started
-              </button>
+              {/* The page already offers the action it is for: no "Log in" on /login, no "Get started" on /signup. */}
+              {!starts(pathname, ROUTES.login) && (
+                <Link href={ROUTES.login} className="btn ghost sm sh-login">
+                  Log in
+                </Link>
+              )}
+              {!starts(pathname, ROUTES.signup) && (
+                <Link href={ROUTES.signup} className="btn p sm">
+                  Get started
+                </Link>
+              )}
             </>
           )}
         </div>
@@ -610,98 +362,148 @@ export function Header() {
 }
 
 // ------------------------------------------------------------------ BottomNav
-/** Mobile bottom tab bar (`.bottom`, visible below 860px). */
+type Tab = { key: string; href?: string; label: ReactNode; icon: IconName; on: boolean; badge?: { n: number; tone: "warn" | "bad"; sr: string }; primary?: boolean };
+
+/** Pages reached from the mobile "More" sheet (it highlights while you are on one). */
+const MORE_PATHS = [ROUTES.aiTeam, ROUTES.context, ROUTES.reports, "/tasks", ROUTES.usage, "/billing", ROUTES.members, ROUTES.settings, ROUTES.admin];
+
+/**
+ * Mobile bottom bar (below 860px): Home · Objectives · Define · Attention · More.
+ * "More" opens a sheet with every other page, so the whole product is reachable on a phone.
+ */
 export function BottomNav() {
   const { user } = useAuth();
   const pathname = usePathname() || "/";
-  const shell = useShell();
-  const items: {
-    href?: string;
-    label: string;
-    icon: IconName;
-    on: boolean;
-    onClick?: () => void;
-  }[] = user
-    ? [
-        {
-          href: ROUTES.dashboard,
-          label: "Work",
-          icon: "home",
-          on: pathname === "/dashboard" || starts(pathname, "/tasks"),
-        },
-        {
-          href: ROUTES.agents,
-          label: "Agents",
-          icon: "compass",
-          on: starts(pathname, "/agents"),
-        },
-        {
-          href: ROUTES.newTask,
-          label: "New",
-          icon: "plus",
-          on: starts(pathname, "/new"),
-        },
-        // Guests can't use workflows or settings yet: show examples + the "save your work" path instead.
-        user.isGuest
-          ? { href: ROUTES.examples, label: "Examples", icon: "file", on: starts(pathname, "/examples") }
-          : {
-              href: ROUTES.workflows,
-              label: "Flows",
-              icon: "layers",
-              on: starts(pathname, "/workflows"),
-            },
-        user.isGuest
-          ? { href: CLAIM_HREF, label: "Save", icon: "check", on: starts(pathname, "/signup") }
-          : {
-              href: ROUTES.settings,
-              label: "Profile",
-              icon: "user",
-              on: starts(pathname, "/settings", "/billing", "/workforce", "/team"),
-            },
-      ]
-    : [
-        {
-          href: ROUTES.home,
-          label: "Home",
-          icon: "home",
-          on: pathname === "/",
-        },
-        {
-          href: ROUTES.agents,
-          label: "Agents",
-          icon: "compass",
-          on: starts(pathname, "/agents"),
-        },
-        {
-          href: ROUTES.newTask,
-          label: "Start",
-          icon: "plus",
-          on: starts(pathname, "/new"),
-        },
-        { href: ROUTES.howItWorks, label: "How", icon: "layers", on: false },
-        {
-          label: "Log in",
-          icon: "user",
-          on: starts(pathname, "/login", "/signup"),
-          onClick: () => shell.openRoleSelect(),
-        },
-      ];
+  const { attention } = useShell();
+  const [more, setMore] = useState(false);
+  useEffect(() => setMore(false), [pathname]);
+
+  if (!user) {
+    const tabs: Tab[] = [
+      { key: "home", href: ROUTES.home, label: "Home", icon: "home", on: pathname === ROUTES.home },
+      { key: "how", href: ROUTES.howItWorksPage, label: "How it works", icon: "layers", on: pathname === ROUTES.howItWorksPage },
+      { key: "start", href: ROUTES.signup, label: "Get started", icon: "arrow", on: starts(pathname, ROUTES.signup) },
+      { key: "login", href: ROUTES.login, label: "Log in", icon: "user", on: starts(pathname, ROUTES.login) },
+    ];
+    return (
+      <nav className="sh-bottom dk no-print" aria-label="Primary">
+        {tabs.map((t) => (
+          <BottomTab key={t.key} tab={t} />
+        ))}
+      </nav>
+    );
+  }
+
+  const isGuest = user.isGuest;
+  const a = attention?.approvals ?? 0;
+  const x = attention?.exceptions ?? 0;
+  const attnHref = a > 0 ? ROUTES.approvals : x > 0 ? ROUTES.exceptions : ROUTES.approvals;
+  const onMore = MORE_PATHS.some((p) => starts(pathname, p));
+  const tabs: Tab[] = [
+    { key: "home", href: ROUTES.dashboard, label: "Home", icon: "home", on: pathname === ROUTES.dashboard },
+    { key: "obj", href: ROUTES.objectives, label: "Objectives", icon: "target", on: starts(pathname, ROUTES.objectives, ROUTES.routines) && pathname !== ROUTES.newObjective },
+    {
+      key: "define",
+      href: ROUTES.newObjective,
+      label: (
+        <>
+          Define<span className="sr-only"> an outcome</span>
+        </>
+      ),
+      icon: "plus",
+      on: pathname === ROUTES.newObjective,
+      primary: true,
+    },
+    {
+      key: "attn",
+      href: attnHref,
+      label: "Attention",
+      icon: "inbox",
+      on: starts(pathname, ROUTES.approvals, ROUTES.exceptions),
+      badge: a + x > 0 ? { n: a + x, tone: x > 0 ? "bad" : "warn", sr: `, ${a + x} need${a + x === 1 ? "s" : ""} attention` } : undefined,
+    },
+  ];
+
+  const tile = (href: string, icon: IconName, label: string, meta?: ReactNode, tone?: "warn" | "bad") => {
+    const on = starts(pathname, href);
+    return (
+      <li key={href}>
+        <Link href={href} className={cx("sh-tile", on && "on")} aria-current={on ? "page" : undefined} onClick={() => setMore(false)}>
+          <span className="sh-tile-ico">
+            <Icon name={icon} />
+          </span>
+          <span className="sh-tile-txt">
+            <b>{label}</b>
+            {meta && <span className={cx("sh-tile-meta", tone)}>{meta}</span>}
+          </span>
+        </Link>
+      </li>
+    );
+  };
+
   return (
-    <nav className="bottom no-print" aria-label="Primary">
-      {items.map((it) =>
-        it.href ? (
-          <Link key={it.label} href={it.href} className={it.on ? "on" : undefined} aria-current={it.on ? "page" : undefined}>
-            <Icon name={it.icon} />
-            {it.label}
-          </Link>
-        ) : (
-          <button key={it.label} type="button" className={it.on ? "on" : undefined} onClick={it.onClick}>
-            <Icon name={it.icon} />
-            {it.label}
-          </button>
-        ),
-      )}
-    </nav>
+    <>
+      <nav className="sh-bottom dk no-print" aria-label="Primary">
+        {tabs.map((t) => (
+          <BottomTab key={t.key} tab={t} />
+        ))}
+        <button type="button" className={cx("sh-tab", onMore && "on")} aria-haspopup="dialog" aria-expanded={more} onClick={() => setMore(true)}>
+          <span className="sh-tab-ico">
+            <Icon name="grid" />
+          </span>
+          <span className="sh-tab-lbl">More</span>
+        </button>
+      </nav>
+
+      <Modal open={more} onClose={() => setMore(false)} title="More" sheet className="sh-more">
+        <nav aria-label="More pages">
+          {isGuest && (
+            <Link href={CLAIM_HREF} className="btn p sh-more-save" onClick={() => setMore(false)}>
+              <Icon name="userPlus" />
+              Save your work — create a free account
+            </Link>
+          )}
+          <h4 className="sh-more-h">Workspace</h4>
+          <ul className="sh-tiles">
+            {tile(ROUTES.aiTeam, "org", "AI Team")}
+            {tile(ROUTES.context, "building", "Company Context")}
+            {tile(ROUTES.reports, "report", "Reports")}
+          </ul>
+          <h4 className="sh-more-h">Attention</h4>
+          <ul className="sh-tiles">
+            {tile(ROUTES.approvals, "shield", "Approvals", attention ? (a ? `${a} waiting` : "None waiting") : undefined, a ? "warn" : undefined)}
+            {tile(ROUTES.exceptions, "alert", "Exceptions", attention ? (x ? `${x} open` : "None open") : undefined, x ? "bad" : undefined)}
+          </ul>
+          <h4 className="sh-more-h">Account</h4>
+          <ul className="sh-tiles">
+            {tile(ROUTES.usage, "wallet", "Usage", `Balance ${eur(user.credits)}`)}
+            {tile(ROUTES.routines, "redo", "Recurring objectives")}
+            {!isGuest && tile(ROUTES.members, "users", "Organization members", user.team?.name)}
+            {!isGuest && tile(ROUTES.settings, "settings", "Settings")}
+            {user.isAdmin && tile(ROUTES.admin, "chart", "Operations", "Admin")}
+          </ul>
+        </nav>
+      </Modal>
+    </>
+  );
+}
+
+function BottomTab({ tab }: { tab: Tab }) {
+  return (
+    <Link href={tab.href!} className={cx("sh-tab", tab.on && "on", tab.primary && "primary")} aria-current={tab.on ? "page" : undefined}>
+      <span className="sh-tab-ico">
+        <Icon name={tab.icon} />
+        {tab.badge && (
+          <span className={cx("sh-tab-badge", tab.badge.tone)} aria-hidden="true">
+            {capped(tab.badge.n)}
+          </span>
+        )}
+      </span>
+      <span className="sh-tab-lbl">
+        {tab.label}
+        {tab.badge && <span className="sr-only">{tab.badge.sr}</span>}
+      </span>
+    </Link>
   );
 }
 

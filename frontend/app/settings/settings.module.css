@@ -5,7 +5,8 @@
   width: 44px;
   height: 26px;
   border-radius: 999px;
-  border: 1px solid var(--line2);
+  /* Off: the boundary and the knob carry the state (3:1 non-text contrast on the card). */
+  border: 1px solid var(--field-line);
   background: var(--line2);
   cursor: pointer;
   padding: 0;
@@ -19,20 +20,20 @@
   width: 20px;
   height: 20px;
   border-radius: 50%;
-  background: var(--surface);
+  background: var(--muted);
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
-  transition: transform 0.18s ease;
+  transition: transform 0.18s ease, background 0.18s;
 }
 .switch[aria-checked="true"] {
-  background: var(--accent);
-  border-color: var(--accent);
+  background: var(--accent-fill);
+  border-color: var(--accent-fill);
 }
 .switch[aria-checked="true"]::after {
   transform: translateX(18px);
-  background: #fff;
+  background: var(--accent-ink);
 }
 .switch:focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--focus);
   outline-offset: 2px;
 }
 .switch:disabled {
@@ -53,7 +54,7 @@
 .guestCta {
   border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
   background:
-    radial-gradient(120% 80% at 100% 0%, color-mix(in srgb, var(--cyan) 14%, transparent), transparent 60%),
+    radial-gradient(120% 80% at 100% 0%, color-mix(in srgb, var(--accent) 14%, transparent), transparent 60%),
     linear-gradient(160deg, var(--accent-soft), var(--surface) 70%);
 }
 .guestIco {
@@ -62,7 +63,7 @@
   width: 44px;
   height: 44px;
   border-radius: 12px;
-  background: var(--accent);
+  background: var(--accent-fill);
   color: var(--accent-ink);
   margin-bottom: 14px;
 }

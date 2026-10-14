@@ -38,14 +38,16 @@ export function DemoBanner() {
   };
 
   return (
-    <div className="dbar no-print" role="region" aria-label="Demo notice">
-      <div className="dbar-in">
-        <Icon name="info" size={15} />
+    <div className="dbar sh-demo dk no-print" role="region" aria-label="Demo notice">
+      <div className="wrap sh-demo-in">
+        <span className="sh-demo-tag">
+          <Icon name="info" />
+          Public demo
+        </span>
         <p>
-          <b>Public demo</b> — AI output can be wrong. Don&apos;t enter confidential information.{" "}
-          <Link href={ROUTES.terms}>Terms</Link>
+          AI output can be wrong. Don&apos;t enter confidential information. <Link href={ROUTES.terms}>Terms</Link>
         </p>
-        <button type="button" className="dbar-x" onClick={dismiss} aria-label="Dismiss demo notice">
+        <button type="button" className="sh-x" onClick={dismiss} aria-label="Dismiss demo notice">
           <Icon name="x" size={15} />
         </button>
       </div>

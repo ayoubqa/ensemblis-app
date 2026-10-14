@@ -1,12 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Avatar, Icon, Modal, RequireAuth, Tag, ThemeSwitch, useToast } from "@/components";
-import { api, setToken, type User } from "@/lib/api";
+import { Avatar, Icon, Modal, PageHead, RequireAuth, Tag, ThemeSwitch, useToast } from "@/components";
+import { leavingAfterSignOut } from "@/components/RequireAuth";
+import { api, setToken, type Autonomy, type Organization, type User } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
-import { useConfig } from "@/lib/config";
+import { CONTACT_EMAIL, useConfig } from "@/lib/config";
 import { toastApiError } from "@/lib/errors";
 import { eur, longDate } from "@/lib/format";
 import { ROUTES } from "@/lib/routes";
@@ -23,6 +24,7 @@ export default function SettingsPage() {
 const SECTIONS = [
   ["profile", "Profile"],
   ["security", "Password"],
+  ["organization", "Organization"],
   ["appearance", "Appearance"],
   ["notifications", "Notifications"],
   ["account", "Account"],
@@ -47,24 +49,22 @@ function Settings() {
   if (!user) return null;
   if (user.isGuest) return <GuestSettings user={user} />;
   return (
-    <div className="wrap" style={{ paddingBottom: 40 }}>
-      <div className="pagehead">
-        <h1>Settings</h1>
-        <p>Manage your profile, password, appearance, email and team.</p>
-      </div>
-      <nav aria-label="Settings sections" className="row wrapflex" style={{ gap: 6, marginBottom: 18 }}>
-        {SECTIONS.map(([id, label]) => (
-          <a key={id} href={`#${id}`} className="chip">
-            {label}
-          </a>
-        ))}
-      </nav>
-      <div className="grid g2" style={{ alignItems: "start" }}>
-        <div className="stack">
+    <div className="wrap op-page">
+      <PageHead eyebrow="Account" title="Settings" sub="Your profile, password, organization policy, appearance and email." />
+      <div className="op-set">
+        <nav aria-label="Settings sections" className="op-set-nav">
+          <ul>
+            {SECTIONS.map(([id, label]) => (
+              <li key={id}>
+                <a href={`#${id}`}>{label}</a>
+              </li>
+            ))}
+          </ul>
+        </nav>
+        <div className="op-set-main">
           <ProfileCard user={user} />
           <PasswordCard />
-        </div>
-        <div className="stack">
+          <OrganizationCard />
           <AppearanceCard />
           <NotificationsCard user={user} />
           <AccountCard user={user} />
@@ -77,13 +77,25 @@ function Settings() {
 
 const anchor = { scrollMarginTop: 90 } as const;
 
+function CardHead({ id, title, sub, lead }: { id: string; title: string; sub?: React.ReactNode; lead?: React.ReactNode }) {
+  return (
+    <div className="op-card-h">
+      {lead}
+      <div style={{ minWidth: 0 }}>
+        <h2 id={id}>{title}</h2>
+        {sub && <p>{sub}</p>}
+      </div>
+    </div>
+  );
+}
+
 // ------------------------------------------------------------- profile
 function ProfileCard({ user }: { user: User }) {
   const { setUser } = useAuth();
   const toast = useToast();
   const initial = useMemo(
-    () => ({ name: user.name, role: user.role ?? "", company: user.company ?? "", builds: user.builds ?? "" }),
-    [user.name, user.role, user.company, user.builds]
+    () => ({ name: user.name, role: user.role ?? "", company: user.company ?? "" }),
+    [user.name, user.role, user.company]
   );
   const [form, setForm] = useState(initial);
   const [saving, setSaving] = useState(false);
@@ -92,7 +104,6 @@ function ProfileCard({ user }: { user: User }) {
 
   const dirty = (Object.keys(form) as (keyof typeof form)[]).some((k) => form[k].trim() !== initial[k]);
   const nameErr = form.name.trim() ? null : "Your name can't be empty.";
-  const isDev = user.accountType === "DEVELOPER";
 
   const save = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -105,7 +116,6 @@ function ProfileCard({ user }: { user: User }) {
         role: form.role.trim() || null,
         company: form.company.trim() || null,
       };
-      if (isDev) body.builds = form.builds.trim() || null;
       const { user: u } = await api.updateMe(body);
       setUser(u);
       toast("Profile saved");
@@ -119,23 +129,20 @@ function ProfileCard({ user }: { user: User }) {
   const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => setForm((f) => ({ ...f, [k]: e.target.value }));
 
   return (
-    <form className="card" id="profile" style={anchor} onSubmit={save} aria-labelledby="h-profile">
-      <div className="row" style={{ gap: 12 }}>
-        <Avatar name={form.name || user.name} round size="md" />
-        <div className="sp">
-          <h3 id="h-profile" style={{ margin: 0 }}>
-            Profile
-          </h3>
-          <div className="tiny muted">How you appear across Ensemblis.</div>
-        </div>
-      </div>
-      <div className="stack" style={{ marginTop: 14 }}>
+    <form className="op-panel op-card" id="profile" onSubmit={save} aria-labelledby="h-profile">
+      <CardHead id="h-profile" title="Profile" sub="How you appear across Ensemblis." lead={<Avatar name={form.name || user.name} round size="md" />} />
+      <div className="op-fieldset">
+        <div className="op-two">
         <div>
           <label className="l" htmlFor="pf-name">
             Full name
           </label>
-          <input id="pf-name" className="f" value={form.name} onChange={set("name")} autoComplete="name" aria-invalid={!!nameErr} maxLength={120} />
-          {nameErr && <div className="err">{nameErr}</div>}
+          <input id="pf-name" className="f" value={form.name} onChange={set("name")} autoComplete="name" aria-invalid={!!nameErr} aria-describedby={nameErr ? "pf-name-err" : undefined} maxLength={120} />
+          {nameErr && (
+            <div className="err" id="pf-name-err" role="alert">
+              {nameErr}
+            </div>
+          )}
         </div>
         <div>
           <label className="l" htmlFor="pf-role">
@@ -143,28 +150,24 @@ function ProfileCard({ user }: { user: User }) {
           </label>
           <input id="pf-role" className="f" value={form.role} onChange={set("role")} placeholder="e.g. Head of Strategy" autoComplete="organization-title" maxLength={120} />
         </div>
+        </div>
+        <div className="op-two">
         <div>
           <label className="l" htmlFor="pf-company">
             Company
           </label>
           <input id="pf-company" className="f" value={form.company} onChange={set("company")} autoComplete="organization" maxLength={160} />
         </div>
-        {isDev && (
-          <div>
-            <label className="l" htmlFor="pf-builds">
-              What you build
-            </label>
-            <textarea id="pf-builds" className="f" rows={3} value={form.builds} onChange={set("builds")} maxLength={500} placeholder="e.g. Research and data-extraction agents" />
-          </div>
-        )}
         <div>
           <label className="l" htmlFor="pf-email">
             Email
           </label>
           <input id="pf-email" className="f" value={user.email} readOnly aria-describedby="pf-email-hint" style={{ color: "var(--muted)" }} />
           <div className="hint" id="pf-email-hint">
-            Your sign-in email. Contact support to change it.
+            Your sign-in email. {CONTACT_EMAIL ? `Write to ${CONTACT_EMAIL} to change it.` : "The operator of this deployment can change it."}
           </div>
+          <EmailVerification user={user} />
+        </div>
         </div>
       </div>
       {err && (
@@ -172,7 +175,7 @@ function ProfileCard({ user }: { user: User }) {
           {err}
         </div>
       )}
-      <div className="row" style={{ marginTop: 16 }}>
+      <div className="op-actions">
         <button type="submit" className="btn p sm" disabled={!dirty || !!nameErr || saving} aria-busy={saving}>
           Save changes
         </button>
@@ -181,13 +184,15 @@ function ProfileCard({ user }: { user: User }) {
             Discard
           </button>
         )}
-        {!dirty && <span className="tiny muted">All changes saved</span>}
+        {!dirty && <span className="op-meta">All changes saved</span>}
       </div>
     </form>
   );
 }
 
 // ------------------------------------------------------------- password
+const PW_INPUT = { cur: "pw-cur", next: "pw-new", confirm: "pw-confirm" } as const;
+
 function PasswordCard() {
   const toast = useToast();
   const [cur, setCur] = useState("");
@@ -196,6 +201,12 @@ function PasswordCard() {
   const [show, setShow] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<{ field: "cur" | "next" | "confirm" | "form"; msg: string } | null>(null);
+  // Field errors are announced (role="alert") and tied to their field (aria-describedby);
+  // once rendered, focus moves to the field that needs fixing.
+  useEffect(() => {
+    if (err && err.field !== "form") document.getElementById(PW_INPUT[err.field])?.focus();
+  }, [err]);
+  const errFor = (f: keyof typeof PW_INPUT) => (err?.field === f ? { "aria-invalid": true, "aria-describedby": `${PW_INPUT[f]}-err` } : { "aria-invalid": false });
 
   const strength = useMemo(() => {
     let s = 0;
@@ -232,23 +243,29 @@ function PasswordCard() {
 
   const type = show ? "text" : "password";
   return (
-    <form className="card" id="security" style={anchor} onSubmit={submit} aria-labelledby="h-pw" noValidate>
-      <h3 id="h-pw">Change password</h3>
-      <div className="stack" style={{ marginTop: 12 }}>
+    <form className="op-panel op-card" id="security" onSubmit={submit} aria-labelledby="h-pw" noValidate>
+      <CardHead id="h-pw" title="Password" sub="Changing it signs you out on every other device." />
+      <div className="op-fieldset">
         <div>
           <label className="l" htmlFor="pw-cur">
             Current password
           </label>
-          <input id="pw-cur" className="f" type={type} value={cur} onChange={(e) => setCur(e.target.value)} autoComplete="current-password" aria-invalid={err?.field === "cur"} />
-          {err?.field === "cur" && <div className="err">{err.msg}</div>}
+          <input id="pw-cur" className="f" type={type} value={cur} onChange={(e) => setCur(e.target.value)} autoComplete="current-password" {...errFor("cur")} />
+          {err?.field === "cur" && (
+            <div className="err" id="pw-cur-err" role="alert">
+              {err.msg}
+            </div>
+          )}
         </div>
         <div>
           <label className="l" htmlFor="pw-new">
             New password
           </label>
-          <input id="pw-new" className="f" type={type} value={next} onChange={(e) => setNext(e.target.value)} autoComplete="new-password" aria-invalid={err?.field === "next"} aria-describedby="pw-strength" />
+          <input id="pw-new" className="f" type={type} value={next} onChange={(e) => setNext(e.target.value)} autoComplete="new-password" aria-describedby="pw-strength" {...errFor("next")} />
           {err?.field === "next" ? (
-            <div className="err">{err.msg}</div>
+            <div className="err" id="pw-new-err" role="alert">
+              {err.msg}
+            </div>
           ) : (
             <div className="hint row" id="pw-strength" style={{ gap: 8 }}>
               <span className="meter" style={{ width: 90 }} aria-hidden="true">
@@ -262,8 +279,12 @@ function PasswordCard() {
           <label className="l" htmlFor="pw-confirm">
             Confirm new password
           </label>
-          <input id="pw-confirm" className="f" type={type} value={confirm} onChange={(e) => setConfirm(e.target.value)} autoComplete="new-password" aria-invalid={err?.field === "confirm"} />
-          {err?.field === "confirm" && <div className="err">{err.msg}</div>}
+          <input id="pw-confirm" className="f" type={type} value={confirm} onChange={(e) => setConfirm(e.target.value)} autoComplete="new-password" {...errFor("confirm")} />
+          {err?.field === "confirm" && (
+            <div className="err" id="pw-confirm-err" role="alert">
+              {err.msg}
+            </div>
+          )}
         </div>
         <label className="row small" style={{ gap: 8, cursor: "pointer" }}>
           <input type="checkbox" checked={show} onChange={(e) => setShow(e.target.checked)} />
@@ -275,9 +296,11 @@ function PasswordCard() {
           {err.msg}
         </div>
       )}
-      <button type="submit" className="btn sm p" style={{ marginTop: 14 }} disabled={busy || !cur || !next || !confirm} aria-busy={busy}>
-        Update password
-      </button>
+      <div className="op-actions">
+        <button type="submit" className="btn sm p" disabled={busy || !cur || !next || !confirm} aria-busy={busy}>
+          Update password
+        </button>
+      </div>
     </form>
   );
 }
@@ -285,11 +308,8 @@ function PasswordCard() {
 // ------------------------------------------------------------- appearance
 function AppearanceCard() {
   return (
-    <section className="card" id="appearance" style={anchor} aria-labelledby="h-app">
-      <h3 id="h-app">Appearance</h3>
-      <p className="small muted" style={{ margin: "4px 0 12px" }}>
-        Choose a theme. System follows your device setting.
-      </p>
+    <section className="op-panel op-card" id="appearance" aria-labelledby="h-app">
+      <CardHead id="h-app" title="Appearance" sub="Choose a theme. System follows your device setting." />
       <ThemeSwitch />
     </section>
   );
@@ -311,7 +331,7 @@ function NotificationsCard({ user }: { user: User }) {
     try {
       const { user: u } = await api.updateMe({ emailOnTaskDone: next });
       setUser(u);
-      toast(next ? "You'll get an email when a task finishes" : "Task emails turned off", { icon: next ? "mail" : "bell", duration: 2200 });
+      toast(next ? "You'll get an email when an objective finishes or needs you" : "Objective emails turned off", { icon: next ? "mail" : "bell", duration: 2200 });
     } catch (e) {
       setUser((u) => (u ? { ...u, emailOnTaskDone: on } : u));
       toastApiError(toast, e, "Couldn't save your email preference");
@@ -321,17 +341,15 @@ function NotificationsCard({ user }: { user: User }) {
   };
 
   return (
-    <section className="card" id="notifications" style={anchor} aria-labelledby="h-notif">
-      <h3 id="h-notif" style={{ margin: 0 }}>
-        Email notifications
-      </h3>
-      <div className={S.toggleRow} style={{ marginTop: 4 }}>
+    <section className="op-panel op-card" id="notifications" aria-labelledby="h-notif">
+      <CardHead id="h-notif" title="Email notifications" />
+      <div className={S.toggleRow} style={{ paddingTop: 0 }}>
         <span>
           <span className="small" id="nt-done-label" style={{ fontWeight: 600, display: "block" }}>
-            Email me when a task finishes
+            Email me when an objective finishes or needs me
           </span>
           <span className="tiny muted" id="nt-done-hint" style={{ display: "block", marginTop: 2 }}>
-            A short note with a link to the report, sent to <b style={{ color: "var(--ink)", wordBreak: "break-all" }}>{user.email}</b>.
+            A short note with a link to the objective, sent to <b style={{ color: "var(--ink)", wordBreak: "break-all" }}>{user.email}</b>.
           </span>
         </span>
         <button
@@ -353,86 +371,246 @@ function NotificationsCard({ user }: { user: User }) {
           </span>
         </div>
       )}
-      <p className="tiny muted" style={{ marginTop: 12 }}>
-        In-app alerts for finished, failed and refunded tasks always appear under the bell in the header.
-      </p>
+      <p className="op-note">Approvals and exceptions always appear in the header, on Home and in the Approval and Exception centers.</p>
     </section>
   );
 }
 
 // ------------------------------------------------------------- account
 function AccountCard({ user }: { user: User }) {
-  const isDev = user.accountType === "DEVELOPER";
-  const { config } = useConfig();
   const teamWallet = user.walletOwner === "team";
   return (
-    <section className="card" id="account" style={anchor} aria-labelledby="h-acct">
-      <h3 id="h-acct">Account</h3>
-      <div style={{ marginTop: 8 }}>
-        <div className="kv">
-          <span className="muted">Account type</span>
-          <Tag variant={isDev ? "accent" : "gray"} icon={isDev ? "code" : "user"}>
-            {isDev ? "Developer" : "Company"}
-          </Tag>
-        </div>
-        <div className="kv">
-          <span className="muted">Member since</span>
+    <section className="op-panel op-card" id="account" aria-labelledby="h-acct">
+      <CardHead id="h-acct" title="Account" />
+      <div>
+        <div className="op-kv">
+          <span>Member since</span>
           <b>{longDate(user.createdAt)}</b>
         </div>
-        <div className="kv" id="team" style={anchor}>
-          <span className="muted">Team</span>
-          {user.team ? (
-            <Link href={ROUTES.team} className="row" style={{ gap: 8, color: "var(--ink)", minWidth: 0 }}>
-              <b style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 180 }}>{user.team.name}</b>
-              <Tag variant={user.team.role === "OWNER" ? "accent" : "gray"}>{user.team.role === "OWNER" ? "Owner" : "Member"}</Tag>
-              <Icon name="chev" size={14} />
-              <span className="sr-only">Manage team</span>
-            </Link>
-          ) : (
-            <Link href={ROUTES.team} className="small" style={{ color: "var(--accent)", fontWeight: 600 }}>
-              Create or join a team
-            </Link>
-          )}
+        <div className="op-kv" id="team" style={anchor}>
+          <span>Organization members</span>
+          <Link href={ROUTES.members} className="row" style={{ gap: 8, color: "var(--ink)", minWidth: 0 }}>
+            {user.team ? (
+              <>
+                <b style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 180 }}>{user.team.name}</b>
+                <Tag variant={user.team.role === "OWNER" ? "accent" : "gray"}>{user.team.role === "OWNER" ? "Owner" : "Member"}</Tag>
+              </>
+            ) : (
+              <span className="small" style={{ color: "var(--accent)", fontWeight: 600 }}>
+                Invite colleagues
+              </span>
+            )}
+            <Icon name="chev" size={14} />
+          </Link>
         </div>
-        <div className="kv">
-          <span className="muted">
-            {config.paymentsEnabled ? "Credits" : "Demo credits"}
-            {teamWallet && <span className="tiny"> · team wallet</span>}
+        <div className="op-kv">
+          <span>
+            Balance
+            {teamWallet && <span className="op-meta"> · organization balance</span>}
           </span>
           <b>{eur(user.credits)}</b>
         </div>
-        <div className="kv" style={{ borderBottom: 0 }}>
-          <span className="muted">Plan</span>
-          <b>Pay as you go</b>
+        <div className="op-kv">
+          <span>Plan</span>
+          <b>Usage-based</b>
         </div>
       </div>
-      <p className="small muted" style={{ margin: "8px 0 12px" }}>
-        {isDev
-          ? "You can publish agents to the marketplace and earn 80% of every task they run — and hire agents for your own work too."
-          : "You hire agent teams for outcomes. Building agents yourself? Developer accounts can publish to the marketplace."}
-      </p>
-      <div className="row wrapflex">
-        {isDev ? (
-          <Link className="btn sm" href={ROUTES.devDashboard}>
-            <Icon name="chart" />
-            Developer dashboard
-          </Link>
-        ) : (
-          <Link className="btn sm" href={ROUTES.developers}>
-            <Icon name="code" />
-            For developers
-          </Link>
-        )}
-        <Link className="btn sm" href={ROUTES.billing}>
+      <div className="op-actions">
+        <Link className="btn sm" href={ROUTES.usage}>
           <Icon name="wallet" />
-          Payments
+          Usage & balance
         </Link>
-        <Link className="btn sm" href={ROUTES.team}>
+        <Link className="btn sm" href={ROUTES.members}>
           <Icon name="user" />
-          {user.team ? "Team" : "Start a team"}
+          Members
         </Link>
       </div>
     </section>
+  );
+}
+
+// ------------------------------------------------------------- email verification
+function EmailVerification({ user }: { user: User }) {
+  const toast = useToast();
+  const { loaded, config } = useConfig();
+  const [busy, setBusy] = useState(false);
+  const [sent, setSent] = useState(false);
+  if (user.emailVerified) {
+    return (
+      <div className="tiny" style={{ marginTop: 6, color: "var(--ok)" }}>
+        <Icon name="check" size={12} /> Verified
+      </div>
+    );
+  }
+  const send = async () => {
+    setBusy(true);
+    try {
+      const r = await api.requestEmailVerification();
+      setSent(true);
+      toast(r.sent ? "Verification link sent — check your inbox" : "Verification requested", { icon: "mail" });
+    } catch (e) {
+      toastApiError(toast, e, "Couldn't send the verification email");
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="row wrapflex" style={{ marginTop: 8, gap: 8 }}>
+      <Tag variant="warn">Not verified</Tag>
+      <button type="button" className="btn sm" onClick={send} disabled={busy || sent} aria-busy={busy}>
+        {sent ? "Link sent" : "Send verification link"}
+      </button>
+      {loaded && !config.emailEnabled && <span className="tiny muted">Email isn&apos;t enabled on this server — an operator can verify you instead.</span>}
+    </div>
+  );
+}
+
+// ------------------------------------------------------------- organization policy
+const AUTONOMY: { id: Autonomy; title: string; sub: string }[] = [
+  { id: "REVIEW_PLAN", title: "Review the plan first", sub: "Every plan waits in Approvals before any work starts." },
+  { id: "AUTO_WITHIN_BUDGET", title: "Execute automatically within budget", sub: "Plans under the approval threshold start on their own." },
+];
+
+/** Radio cards with the radio-group keyboard pattern (one tab stop, arrow keys move and select). */
+function AutonomyChoice({ value, onChange, disabled }: { value: Autonomy; onChange: (a: Autonomy) => void; disabled?: boolean }) {
+  const refs = useRef<(HTMLButtonElement | null)[]>([]);
+  const onKey = (e: KeyboardEvent<HTMLDivElement>) => {
+    const i = AUTONOMY.findIndex((a) => a.id === value);
+    let n = -1;
+    if (e.key === "ArrowRight" || e.key === "ArrowDown") n = (i + 1) % AUTONOMY.length;
+    else if (e.key === "ArrowLeft" || e.key === "ArrowUp") n = (i - 1 + AUTONOMY.length) % AUTONOMY.length;
+    if (n < 0) return;
+    e.preventDefault();
+    onChange(AUTONOMY[n].id);
+    refs.current[n]?.focus();
+  };
+  return (
+    <div>
+      <span className="l" id="org-autonomy-l">
+        Default autonomy for new objectives
+      </span>
+      <div className="op-radios" role="radiogroup" aria-labelledby="org-autonomy-l" onKeyDown={onKey}>
+        {AUTONOMY.map((a, i) => (
+          <button
+            key={a.id}
+            ref={(el) => {
+              refs.current[i] = el;
+            }}
+            type="button"
+            role="radio"
+            aria-checked={value === a.id}
+            tabIndex={value === a.id ? 0 : -1}
+            className="op-radio"
+            disabled={disabled}
+            onClick={() => onChange(a.id)}
+          >
+            <b>{a.title}</b>
+            <span>{a.sub}</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function OrganizationCard() {
+  const toast = useToast();
+  const [org, setOrg] = useState<Organization | null>(null);
+  const [failed, setFailed] = useState(false);
+  const [name, setName] = useState("");
+  const [autonomy, setAutonomy] = useState<Autonomy>("REVIEW_PLAN");
+  const [threshold, setThreshold] = useState(20);
+  const [saving, setSaving] = useState(false);
+
+  const load = () => {
+    setFailed(false);
+    api
+      .getOrg()
+      .then(({ organization: o }) => {
+        setOrg(o);
+        setName(o.name);
+        setAutonomy(o.defaultAutonomy);
+        setThreshold(Math.round(o.approvalThresholdCents / 100));
+      })
+      .catch(() => setFailed(true));
+  };
+  useEffect(load, []);
+
+  if (!org) {
+    return (
+      <section className="op-panel op-card" id="organization" aria-labelledby="h-org" aria-busy={!failed}>
+        <CardHead id="h-org" title="Organization" sub="How much the AI Team may do without asking." />
+        {failed ? (
+          <div className="op-inline">
+            <span className="small muted">The organization policy couldn&apos;t be loaded.</span>
+            <button type="button" className="btn sm" onClick={load}>
+              <Icon name="redo" />
+              Try again
+            </button>
+          </div>
+        ) : (
+          <p className="op-meta">Loading the organization policy…</p>
+        )}
+      </section>
+    );
+  }
+  const owner = org.role === "OWNER";
+  const thresholdCents = Math.max(0, Math.min(50_000, Math.round(threshold * 100)));
+  const dirty = name.trim() !== org.name || autonomy !== org.defaultAutonomy || thresholdCents !== org.approvalThresholdCents;
+
+  const save = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!dirty || name.trim().length < 2) return;
+    setSaving(true);
+    try {
+      const { organization } = await api.updateOrg({ name: name.trim(), defaultAutonomy: autonomy, approvalThresholdCents: thresholdCents });
+      setOrg(organization);
+      toast("Organization policy saved");
+    } catch (e2) {
+      toastApiError(toast, e2, "Couldn't save the organization policy");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <form className="op-panel op-card" id="organization" onSubmit={save} aria-labelledby="h-org">
+      <CardHead id="h-org" title="Organization" sub={`How much the AI Team may do without asking.${owner ? "" : " Only the organization owner can change this."}`} />
+      <fieldset disabled={!owner} className="op-fieldset">
+        <div>
+          <label className="l" htmlFor="org-name">
+            Name
+          </label>
+          <input id="org-name" className="f" value={name} onChange={(e) => setName(e.target.value)} maxLength={120} />
+        </div>
+        <AutonomyChoice value={autonomy} onChange={setAutonomy} disabled={!owner} />
+        <div>
+          <label className="l" htmlFor="org-threshold">
+            Approval threshold
+          </label>
+          <div className="op-money">
+            <span className="muted" aria-hidden="true">
+              €
+            </span>
+            <input id="org-threshold" className="f" type="number" min={0} max={500} step={1} value={threshold} aria-describedby="org-threshold-hint" onChange={(e) => setThreshold(Number(e.target.value || 0))} />
+          </div>
+          <p className="hint" id="org-threshold-hint">
+            In euros. Any execution estimated above this needs explicit approval, whatever the objective&apos;s autonomy. €0 means every execution asks.
+          </p>
+        </div>
+      </fieldset>
+      {owner && (
+        <div className="op-actions">
+          <button type="submit" className="btn p sm" disabled={!dirty || saving || name.trim().length < 2} aria-busy={saving}>
+            Save policy
+          </button>
+          {!dirty && <span className="op-meta">All changes saved</span>}
+        </div>
+      )}
+      <p className="op-note">
+        Whatever the policy, the AI Team only reads, researches, analyses and drafts. It never sends, publishes, changes external systems or spends money outside an approved execution.
+      </p>
+    </form>
   );
 }
 
@@ -447,35 +625,33 @@ function GuestSettings({ user }: { user: User }) {
 
   const endSession = () => {
     setConfirmEnd(false);
+    leavingAfterSignOut();
     signOut();
     toast("Guest session ended");
     router.push(ROUTES.home);
   };
 
   return (
-    <div className="wrap" style={{ paddingBottom: 40 }}>
-      <div className="pagehead">
-        <h1>Settings</h1>
-        <p>You&apos;re on a free trial. Create a free account to get a profile, a password and email updates.</p>
-      </div>
+    <div className="wrap op-page">
+      <PageHead eyebrow="Account" title="Settings" sub="You're on a free trial. Create a free account to get a profile, a password and email updates." />
       <div className="grid g2" style={{ alignItems: "start" }}>
         <div className="stack">
-          <section className={`card ${S.guestCta}`} id="profile" style={anchor} aria-labelledby="h-guest">
+          <section className={`op-panel op-card ${S.guestCta}`} id="profile" aria-labelledby="h-guest">
             <span className={S.guestIco} aria-hidden="true">
-              <Icon name="spark" size={20} />
+              <Icon name="user" size={20} />
             </span>
-            <h3 id="h-guest" className="serif" style={{ fontSize: 24, fontWeight: 600, letterSpacing: "-.02em", lineHeight: 1.15 }}>
+            <h2 id="h-guest" style={{ fontSize: 24, fontWeight: 700, letterSpacing: "-.02em", lineHeight: 1.15 }}>
               Create a free account
-            </h3>
+            </h2>
             <p className="small muted" style={{ marginTop: 6 }}>
               It takes a minute, and nothing from your trial is lost.
             </p>
             <ul className={S.perks}>
               {[
-                "Keep your trial task and report — no 7-day limit",
+                "Keep your trial objective and its results — no 7-day limit",
                 "Sign in from any device with your email and password",
-                "Get an email when a task finishes",
-                "Run more tasks, follow-ups and recurring workflows",
+                "Get an email when an objective finishes or needs you",
+                "Company Context, memory and recurring objectives",
               ].map((p) => (
                 <li key={p}>
                   <Icon name="check" size={15} />
@@ -491,29 +667,27 @@ function GuestSettings({ user }: { user: User }) {
         </div>
         <div className="stack">
           <AppearanceCard />
-          <section className="card" id="account" style={anchor} aria-labelledby="h-trial">
-            <h3 id="h-trial">Free trial</h3>
-            <div style={{ marginTop: 8 }}>
-              <div className="kv">
-                <span className="muted">Trial credits left</span>
+          <section className="op-panel op-card" id="account" aria-labelledby="h-trial">
+            <CardHead id="h-trial" title="Free trial" />
+            <div>
+              <div className="op-kv">
+                <span>Trial balance left</span>
                 <b>{eur(user.credits)}</b>
               </div>
-              <div className="kv">
-                <span className="muted">Started</span>
+              <div className="op-kv">
+                <span>Started</span>
                 <b>{longDate(user.createdAt)}</b>
               </div>
-              <div className="kv" style={{ borderBottom: 0 }}>
-                <span className="muted">Results kept</span>
+              <div className="op-kv">
+                <span>Results kept</span>
                 <b>7 days unless you save them</b>
               </div>
             </div>
           </section>
-          <section className="card" id="danger" style={anchor} aria-labelledby="h-end">
-            <h3 id="h-end">End trial session</h3>
-            <div className="lane" style={{ borderBottom: 0 }}>
-              <div className="sp">
-                <div className="tiny muted">Signs this browser out of the trial. You won&apos;t be able to get back to your trial results afterwards.</div>
-              </div>
+          <section className="op-panel op-card" id="danger" aria-labelledby="h-end">
+            <CardHead id="h-end" title="End trial session" />
+            <div className="op-danger-row">
+              <p style={{ marginTop: 0 }}>Signs this browser out of the trial. You won&apos;t be able to get back to your trial results afterwards.</p>
               <button type="button" className="btn sm" onClick={() => setConfirmEnd(true)}>
                 <Icon name="out" />
                 End session
@@ -525,11 +699,11 @@ function GuestSettings({ user }: { user: User }) {
 
       <Modal open={confirmEnd} onClose={() => setConfirmEnd(false)} title="End your free trial?">
         <p className="muted small" style={{ margin: "6px 0 16px" }}>
-          Guest sessions don&apos;t have a password, so once you end this one your trial task and report can&apos;t be opened again. Save them with a free account first if you want to keep them.
+          Guest sessions don&apos;t have a password, so once you end this one your trial objective and its results can&apos;t be opened again. Save them with a free account first if you want to keep them.
         </p>
         <div className="row wrapflex">
           <Link className="btn p" href={claimHref} data-autofocus>
-            Save my results
+            Save my work
           </Link>
           <button type="button" className="btn bad" onClick={endSession}>
             End session
@@ -550,28 +724,29 @@ function DangerCard() {
 
   const doSignOut = () => {
     setConfirmOut(false);
+    leavingAfterSignOut();
     signOut();
     toast("Signed out");
     router.push(ROUTES.home);
   };
 
   return (
-    <section className="card" id="danger" style={{ ...anchor, borderColor: "color-mix(in srgb,var(--bad) 35%,var(--line))" }} aria-labelledby="h-danger">
-      <h3 id="h-danger">Danger zone</h3>
-      <div className="lane">
-        <div className="sp">
-          <b className="small">Sign out everywhere</b>
-          <div className="tiny muted">Ends your session on this device and clears your sign-in.</div>
+    <section className="op-panel op-card op-danger" id="danger" aria-labelledby="h-danger">
+      <CardHead id="h-danger" title="Danger zone" />
+      <div className="op-danger-row">
+        <div>
+          <b>Sign out of this device</b>
+          <p>Ends your session in this browser. To sign out other devices too, change your password above.</p>
         </div>
         <button type="button" className="btn sm" onClick={() => setConfirmOut(true)}>
           <Icon name="out" />
           Sign out
         </button>
       </div>
-      <div className="lane" style={{ borderBottom: 0 }}>
-        <div className="sp">
-          <b className="small">Delete account</b>
-          <div className="tiny muted">Permanently remove your account, tasks and workflows.</div>
+      <div className="op-danger-row">
+        <div>
+          <b>Delete account</b>
+          <p>Permanently remove your account, objectives and reports.</p>
         </div>
         <button type="button" className="btn bad sm" onClick={() => setDel(true)}>
           <Icon name="trash" />
@@ -581,7 +756,7 @@ function DangerCard() {
 
       <Modal open={confirmOut} onClose={() => setConfirmOut(false)} title="Sign out?">
         <p className="muted small" style={{ margin: "6px 0 16px" }}>
-          You'll need your email and password to get back in. Running tasks keep going while you're away.
+          You&apos;ll need your email and password to get back in. Executions in progress continue while you&apos;re away.
         </p>
         <div className="row">
           <button type="button" className="btn" onClick={() => setConfirmOut(false)} data-autofocus>
@@ -595,20 +770,25 @@ function DangerCard() {
 
       <Modal open={del} onClose={() => setDel(false)} title="Delete your account">
         <p className="muted small" style={{ margin: "6px 0 12px" }}>
-          Self-service account deletion isn't available yet. To delete your account and all its data, contact support and we'll take care of it — usually within two business days.
+          Self-service account deletion isn&apos;t available yet.{" "}
+          {CONTACT_EMAIL
+            ? `To delete your account and all its data, write to ${CONTACT_EMAIL} from your sign-in address.`
+            : "To delete your account and all its data, ask the operator of this Ensemblis deployment."}
         </p>
         <div className="notice" style={{ marginBottom: 16, background: "var(--surface2)", color: "var(--muted)" }}>
           <Icon name="info" />
-          <span>Your demo credits, tasks and workflows stay untouched until then.</span>
+          <span>Your balance, objectives and reports stay untouched until then.</span>
         </div>
         <div className="row">
           <button type="button" className="btn" onClick={() => setDel(false)} data-autofocus>
             Close
           </button>
-          <a className="btn bad sp" href="mailto:support@ensemblis.ai?subject=Delete%20my%20Ensemblis%20account">
-            <Icon name="mail" />
-            Contact support
-          </a>
+          {CONTACT_EMAIL && (
+            <a className="btn bad sp" href={`mailto:${CONTACT_EMAIL}?subject=Delete%20my%20Ensemblis%20account`}>
+              <Icon name="mail" />
+              Email {CONTACT_EMAIL}
+            </a>
+          )}
         </div>
       </Modal>
     </section>

@@ -28,9 +28,15 @@ async function deleteGuestAccountTx(userId: string): Promise<boolean> {
     // Never pull the rug from under a run in progress; try again next tick.
     const running = await tx.task.count({ where: { userId, status: { in: ["RUNNING", "PLANNING"] } } });
     if (running > 0) return false;
+    const executing = await tx.execution.count({
+      where: { organization: { ownerId: userId }, status: { in: ["PLANNING", "RUNNING", "VERIFYING"] } },
+    });
+    if (executing > 0) return false;
 
     // Children first (relations without ON DELETE CASCADE would block the user delete).
     await tx.transaction.deleteMany({ where: { OR: [{ userId }, { task: { userId } }] } });
+    // The guest's organization (objectives, executions, evidence, memory…) cascades with it.
+    await tx.organization.deleteMany({ where: { ownerId: userId } });
     await tx.taskAttachment.deleteMany({ where: { OR: [{ userId }, { task: { userId } }] } });
     // A featured copy of a deleted trial's shared report goes too (curated examples have no task).
     await tx.galleryItem.deleteMany({ where: { isExample: false, task: { userId } } });

@@ -5,9 +5,8 @@ import { createPortal } from "react-dom";
 import Markdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { TaskSource } from "@/lib/api";
-import { hueFrom } from "@/lib/utils";
 import { citeFromProps, remarkCitations } from "./cites";
-import { KIND_LABEL, sourceDomain, sourceInitial } from "./shared";
+import { sourceDomain, sourceInitial, sourceLabel } from "./shared";
 import s from "./report.module.css";
 
 // ---------- Citation context ----------
@@ -18,6 +17,8 @@ interface CiteCtx {
   jump?: (n: number) => void;
   /** Id prefix of the Sources panel items (`<prefix>-src-<n>`). */
   prefix: string;
+  /** DOM id a citation points at, when it isn't the Sources panel (e.g. the console's Evidence list). */
+  targetId?: (n: number) => string;
 }
 
 const CiteContext = createContext<CiteCtx | null>(null);
@@ -26,14 +27,16 @@ export function CiteProvider({
   sources,
   jump,
   prefix = "r",
+  targetId,
   children,
 }: {
   sources: TaskSource[];
   jump?: (n: number) => void;
   prefix?: string;
+  targetId?: (n: number) => string;
   children: ReactNode;
 }) {
-  const value = useMemo<CiteCtx>(() => ({ byN: new Map(sources.map((x) => [x.n, x])), jump, prefix }), [sources, jump, prefix]);
+  const value = useMemo<CiteCtx>(() => ({ byN: new Map(sources.map((x) => [x.n, x])), jump, prefix, targetId }), [sources, jump, prefix, targetId]);
   return <CiteContext.Provider value={value}>{children}</CiteContext.Provider>;
 }
 
@@ -97,12 +100,12 @@ function Cite({ n }: { n: number }) {
     <sup className={s.sup}>
       <a
         ref={ref}
-        href={external ?? `#${sourceDomId(ctx?.prefix ?? "r", n)}`}
+        href={external ?? `#${ctx?.targetId ? ctx.targetId(n) : sourceDomId(ctx?.prefix ?? "r", n)}`}
         {...(external ? { target: "_blank", rel: "noopener noreferrer" } : {})}
         className={s.cite}
         aria-label={`Source ${n}: ${src.title}`}
         aria-describedby={pos ? popId : undefined}
-        aria-expanded={pos ? true : undefined}
+        data-open={pos ? "true" : undefined}
         onMouseEnter={show}
         onMouseLeave={hide}
         onFocus={show}
@@ -124,19 +127,19 @@ function Cite({ n }: { n: number }) {
         createPortal(
           <div id={popId} role="tooltip" className={`${s.pop} ${pos.above ? s.popAbove : ""}`} style={{ top: pos.top, left: pos.left }}>
             <div className={s.popHead}>
-              <span className={s.badge} style={{ ["--h" as string]: hueFrom(domain || src.title) }} aria-hidden="true">
+              <span className={s.badge} aria-hidden="true">
                 {sourceInitial(src)}
               </span>
               <div style={{ minWidth: 0 }}>
                 <div className={s.popTitle}>{src.title}</div>
                 <div className={s.popMeta}>
                   [{n}] · {domain ? `${domain} · ` : ""}
-                  {KIND_LABEL[src.kind] ?? "Source"}
+                  {sourceLabel(src)}
                 </div>
               </div>
             </div>
             {src.snippet && <div className={s.popSnippet}>{src.snippet}</div>}
-            {ctx?.jump && <div className={s.popHint}>Click to see it in Sources</div>}
+            {ctx?.jump && <div className={s.popHint}>{ctx.targetId ? "Click to see it in Evidence" : "Click to see it in Sources"}</div>}
           </div>,
           document.body
         )}

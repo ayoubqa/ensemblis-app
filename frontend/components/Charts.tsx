@@ -31,10 +31,10 @@ export function LineChart({ values, height = 180, min = 0, label = "Chart", xLab
     <div>
       <svg viewBox={`0 0 ${w} ${h}`} style={{ width: "100%", height: "auto", display: "block" }} role="img" aria-label={label}>
         {[0, 1, 2, 3].map((i) => (
-          <line key={i} x1="0" x2={w} y1={p + (i * (h - 2 * p)) / 3} y2={p + (i * (h - 2 * p)) / 3} stroke="var(--line)" strokeWidth="1" />
+          <line key={i} x1="0" x2={w} y1={p + (i * (h - 2 * p)) / 3} y2={p + (i * (h - 2 * p)) / 3} stroke="var(--line)" strokeWidth="1" vectorEffect="non-scaling-stroke" />
         ))}
-        <polygon points={`${X(0)},${h - p} ${pts} ${X(last)},${h - p}`} fill="var(--accent)" opacity=".09" />
-        <polyline points={pts} fill="none" stroke="var(--accent)" strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" />
+        <polygon points={`${X(0)},${h - p} ${pts} ${X(last)},${h - p}`} fill="var(--accent)" opacity=".1" />
+        <polyline points={pts} fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke" />
         {format &&
           v.map((x, i) => (
             <circle key={i} cx={X(i)} cy={Y(x)} r="10" fill="transparent">
@@ -44,7 +44,7 @@ export function LineChart({ values, height = 180, min = 0, label = "Chart", xLab
         <circle cx={X(last)} cy={Y(v[last])} r="4.5" fill="var(--accent)" />
       </svg>
       {xLabels && xLabels.length > 1 && (
-        <div className="row between tiny muted" style={{ marginTop: 6 }}>
+        <div className="row between tiny muted" style={{ marginTop: 6, fontVariantNumeric: "tabular-nums" }} aria-hidden="true">
           <span>{xLabels[0]}</span>
           {xLabels.length > 2 && <span>{xLabels[Math.floor((xLabels.length - 1) / 2)]}</span>}
           <span>{xLabels[xLabels.length - 1]}</span>
@@ -82,81 +82,6 @@ export function Sparkline({
       <polyline points={pts} fill="none" stroke={color} strokeWidth="1.75" strokeLinejoin="round" strokeLinecap="round" />
       <circle cx={X(v.length - 1)} cy={Y(v[v.length - 1])} r="2.5" fill={color} />
     </svg>
-  );
-}
-
-export type PerfRow = [left: string, right: string, pct: number];
-
-/**
- * The Agent Performance Graph (prototype `perfGraphSVG`): task types on the left,
- * agents on the right, curves weighted by success %.
- */
-export function PerfGraph({ rows, leftLabel = "Task type", rightLabel = "Agent" }: { rows: PerfRow[]; leftLabel?: string; rightLabel?: string }) {
-  const w = 640;
-  const hgt = Math.max(170, rows.length * 52 + 30);
-  const lx = 10;
-  const rx = w - 172;
-  const ys = rows.map((_, i) => 30 + i * ((hgt - 54) / Math.max(1, rows.length - 1 || 1)));
-  const rightNames = Array.from(new Set(rows.map((r) => r[1])));
-  const ry = rightNames.map((_, i) => 30 + i * ((hgt - 54) / Math.max(1, rightNames.length - 1 || 1)));
-  const c1x = lx + (rx - lx) * 0.42;
-  const c2x = lx + (rx - lx) * 0.58;
-  return (
-    <div style={{ overflowX: "auto" }}>
-      <svg
-        viewBox={`-28 0 ${w + 28} ${hgt}`}
-        style={{ width: "100%", minWidth: 460, height: "auto", display: "block", fontFamily: "var(--sans)" }}
-        role="img"
-        aria-label={`Diagram of how ${leftLabel.toLowerCase()}s route to ${rightLabel.toLowerCase()}s, weighted by success rate`}
-      >
-        <text x={lx} y="12" fontSize="10" fill="var(--muted)" letterSpacing="1">
-          {leftLabel.toUpperCase()}
-        </text>
-        <text x={rx - 8} y="12" fontSize="10" fill="var(--muted)" letterSpacing="1" textAnchor="middle">
-          {rightLabel.toUpperCase()}
-        </text>
-        {rows.map((r, i) => {
-          const ri = rightNames.indexOf(r[1]);
-          const y0 = ys[i];
-          const y1 = ry[ri];
-          const pct = r[2];
-          return (
-            <path
-              key={`e${i}`}
-              d={`M${lx + 134},${y0} C${c1x},${y0} ${c2x},${y1} ${rx - 8},${y1}`}
-              fill="none"
-              stroke="var(--accent)"
-              strokeWidth={(1 + (pct / 100) * 3.4).toFixed(1)}
-              opacity={(0.22 + (pct / 100) * 0.55).toFixed(2)}
-            >
-              <title>{`${r[0]} → ${r[1]}: ${pct}% success`}</title>
-            </path>
-          );
-        })}
-        {rows.map((r, i) => (
-          <g key={`l${i}`}>
-            <title>{r[0]}</title>
-            <circle cx={lx + 134} cy={ys[i]} r="4" fill="var(--ink)" />
-            <text x={lx + 122} y={ys[i] + 4} fontSize="12" fill="var(--ink)" textAnchor="end" fontWeight="600">
-              {r[0]}
-            </text>
-          </g>
-        ))}
-        {rightNames.map((n, i) => {
-          const m = rows.filter((r) => r[1] === n);
-          const avg = Math.round(m.reduce((s, r) => s + r[2], 0) / m.length);
-          return (
-            <g key={`r${i}`}>
-              <title>{`${n}: ${avg}% avg success`}</title>
-              <circle cx={rx - 8} cy={ry[i]} r="5" fill="var(--accent)" />
-              <text x={rx + 6} y={ry[i] + 4} fontSize="12" fill="var(--ink)" fontWeight="600">
-                {n}
-              </text>
-            </g>
-          );
-        })}
-      </svg>
-    </div>
   );
 }
 

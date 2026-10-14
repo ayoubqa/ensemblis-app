@@ -6,3 +6,8 @@ dist/
 *.log
 .DS_Store
 frontend/tsconfig.tsbuildinfo
+frontend/test-results/
+frontend/playwright-report/
+frontend/blob-report/
+coverage/
+backend/smoke-results/

@@ -23,6 +23,15 @@ function bool(name: string, fallback: boolean): boolean {
 
 export const isProduction = process.env.NODE_ENV === "production";
 
+/**
+ * The mock model is refused in production AND on any hosting platform, so a
+ * forgotten NODE_ENV can't ship scripted output (Render sets RENDER=true on
+ * every service; Fly, Railway and Heroku-style hosts set their own markers).
+ */
+export function mockAIForbidden(): boolean {
+  return isProduction || !!(process.env.RENDER || process.env.FLY_APP_NAME || process.env.RAILWAY_ENVIRONMENT || process.env.DYNO);
+}
+
 const corsOrigins = (process.env.CORS_ORIGIN || "http://localhost:3000")
   .split(",")
   .map((s) => s.trim().replace(/\/+$/, ""))
@@ -49,6 +58,15 @@ export const config = {
   // (create, retry, workflow run, scheduled run) counts once.
   maxTasksPerUserPerDay: int("MAX_TASKS_PER_USER_PER_DAY", 10),
   maxTasksPerDayGlobal: int("MAX_TASKS_PER_DAY_GLOBAL", 300),
+
+  // Planning caps. Planning (and re-planning) calls the main model before anything is charged, so
+  // it has its own limits — otherwise free sign-ups or guests could drain the AI quota for everyone.
+  planning: {
+    perOrgPerDay: int("MAX_PLANS_PER_ORG_PER_DAY", Math.max(10, 4 * int("MAX_TASKS_PER_USER_PER_DAY", 10)), 1),
+    perGuestPerDay: int("MAX_PLANS_PER_GUEST_PER_DAY", 3, 1),
+    globalPerDay: int("MAX_PLANS_PER_DAY_GLOBAL", Math.max(50, 4 * int("MAX_TASKS_PER_DAY_GLOBAL", 300)), 1),
+    concurrentPerOrg: int("MAX_CONCURRENT_PLANNING_PER_ORG", 3, 1),
+  },
 
   maxDescriptionLength: int("MAX_DESCRIPTION_LENGTH", 4000, 10),
 
@@ -169,11 +187,16 @@ const INSECURE_SECRETS = new Set(["", "change-me-to-a-long-random-string", "dev-
  * In production, refuse to start with settings that would be unsafe or can't
  * work. Returns the list of problems (empty = OK).
  */
-export function productionConfigProblems(): string[] {
-  if (!isProduction) return [];
+export function productionConfigProblems(role: "api" | "worker" = "api"): string[] {
   const problems: string[] = [];
+  // Production, or a hosting platform with NODE_ENV forgotten: the same checks apply.
+  if (!mockAIForbidden()) return problems;
+  if ((process.env.AI_PROVIDER || "").trim().toLowerCase() === "mock") {
+    problems.push('AI_PROVIDER="mock" is a scripted provider for development and tests only. Use "openai", "anthropic" or "ollama".');
+  }
+  // The worker never signs or verifies sessions; the API must not fall back to the public dev secret.
   const secret = process.env.JWT_SECRET?.trim() ?? "";
-  if (INSECURE_SECRETS.has(secret) || secret.length < 16) {
+  if (role === "api" && (INSECURE_SECRETS.has(secret) || secret.length < 16)) {
     problems.push("JWT_SECRET is missing, a placeholder, or shorter than 16 characters. Set it to a long random string.");
   }
   if (!process.env.DATABASE_URL?.trim()) {
@@ -183,8 +206,8 @@ export function productionConfigProblems(): string[] {
 }
 
 /** Non-fatal production warnings, logged on boot. */
-export function productionConfigWarnings(): string[] {
-  if (!isProduction) return [];
+export function productionConfigWarnings(role: "api" | "worker" = "api"): string[] {
+  if (!mockAIForbidden()) return [];
   const warnings: string[] = [];
   const provider = (process.env.AI_PROVIDER || "ollama").toLowerCase();
   if (provider === "openai" && !process.env.OPENAI_API_KEY) {
@@ -196,8 +219,15 @@ export function productionConfigWarnings(): string[] {
   if (provider === "ollama") {
     warnings.push("AI_PROVIDER=ollama in production: a hosted server usually can't reach an Ollama instance. Use AI_PROVIDER=openai.");
   }
-  if (!process.env.CORS_ORIGIN) {
+  if (config.adminEmails.length && !config.email.enabled) {
+    warnings.push("ADMIN_EMAILS is set but email isn't configured: admins must verify their address, so the owner dashboard stays locked until RESEND_API_KEY and EMAIL_FROM are set (or the address is verified with `npm run ops:verify-email`).");
+  }
+  if (role === "api" && !process.env.CORS_ORIGIN) {
     warnings.push("CORS_ORIGIN is not set — only http://localhost:3000 may call this API, so your deployed frontend will be blocked.");
+  }
+  // The worker has no CORS_ORIGIN to fall back on, and it sends most execution emails.
+  if (config.email.enabled && !process.env.APP_URL?.trim() && (role === "worker" || !process.env.CORS_ORIGIN)) {
+    warnings.push(`APP_URL is not set — links in emails point to ${config.appUrl}. Set it to the frontend URL (the same value on the API and the worker).`);
   }
   return warnings;
 }

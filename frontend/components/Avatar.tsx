@@ -11,9 +11,9 @@ const SIZES: Record<AvatarSize, CSSProperties> = {
 };
 
 export interface AvatarProps {
-  /** Name the initials come from ("Competitive Intelligence Agent" → "CI"). */
+  /** Name the initials come from ("Head of Sales" → "HS"). */
   name: string;
-  /** 0–360 hue (Agent.hue). Defaults to a stable hash of the name. */
+  /** 0–360 hue (e.g. an AI Team member's hue). Defaults to a stable hash of the name. Folded into the brand's blue range. */
   hue?: number;
   size?: AvatarSize;
   /** Circle instead of rounded square (people). */
@@ -24,9 +24,12 @@ export interface AvatarProps {
   label?: string;
 }
 
-/** Hue-tinted initials tile — prototype `av()` (`.av`, `--h`). Works in both themes via --avl/--avc. */
+/** Any hue folded into the navy → electric-blue band (196°–236°), so tiles stay on-brand but distinguishable. */
+export const brandHue = (h: number) => Math.round(196 + ((((h % 360) + 360) % 360) / 360) * 40);
+
+/** Initials tile (`.av`, `--h`). Works in both themes via --avl/--avc. */
 export function Avatar({ name, hue, size = "md", round, className, style, label }: AvatarProps) {
-  const h = hue ?? hueFrom(name);
+  const h = brandHue(hue ?? hueFrom(name));
   const s = {
     "--h": h,
     ...SIZES[size],
@@ -44,7 +47,7 @@ export function Avatar({ name, hue, size = "md", round, className, style, label 
   );
 }
 
-/** Overlapping stack of round avatars (`.seatstack`). */
+/** Overlapping stack of round avatars (`.seatstack`). Kept for compatibility; currently unused. */
 export function AvatarStack({ names, max = 3, hue = 250 }: { names: string[]; max?: number; hue?: number }) {
   return (
     <div className="seatstack" aria-label={`${names.length} people`}>

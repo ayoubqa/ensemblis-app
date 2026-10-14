@@ -1,7 +1,7 @@
 "use client";
 
 import { createContext, ReactNode, useCallback, useContext, useEffect, useMemo, useState } from "react";
-import { api, ApiError, getToken, setToken, type User } from "./api";
+import { api, ApiError, getToken, setToken, UNAUTHORIZED_EVENT, type User } from "./api";
 
 export type { User };
 
@@ -18,7 +18,7 @@ interface AuthContextValue {
    * Replace the user (or update it functionally). Use it after any API call that
    * returns a fresh `user` (createTask, retryTask, runWorkflow, topUp, updateMe)
    * so the header credits pill stays correct:
-   *   const { task, user } = await api.createTask(...); setUser(user);
+   *   const { user } = await api.updateMe(...); setUser(user);
    */
   setUser: (u: User | null | ((prev: User | null) => User | null)) => void;
   /** Convenience: set the credit balance (cents) without a round-trip. */
@@ -32,7 +32,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   const refresh = useCallback(async () => {
-    if (!getToken()) {
+    const sent = getToken();
+    if (!sent) {
       setUser(null);
       setLoading(false);
       return;
@@ -41,8 +42,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const { user } = await api.me();
       setUser(user);
     } catch (e) {
-      // Only drop the session on an auth failure — keep it on network errors.
-      if (e instanceof ApiError && (e.status === 401 || e.status === 403)) {
+      // Only drop the session on an auth failure — keep it on network errors, and keep a newer
+      // token another tab stored meanwhile.
+      if (e instanceof ApiError && (e.status === 401 || e.status === 403) && getToken() === sent) {
         setToken(null);
         setUser(null);
       }
@@ -54,6 +56,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     refresh();
   }, [refresh]);
+
+  // Any API call that comes back 401 ends the session everywhere (lib/api.ts
+  // already dropped the token); RequireAuth then sends the person to /login.
+  useEffect(() => {
+    const onUnauthorized = () => setUser(null);
+    window.addEventListener(UNAUTHORIZED_EVENT, onUnauthorized);
+    return () => window.removeEventListener(UNAUTHORIZED_EVENT, onUnauthorized);
+  }, []);
 
   const signIn = useCallback((token: string, u: User) => {
     setToken(token);

@@ -3,82 +3,107 @@
 import Link from "next/link";
 import { useAuth } from "@/lib/auth-context";
 import { ROUTES } from "@/lib/routes";
-import { Mark } from "./Logo";
+import { Icon } from "./Icon";
+import { Lockup } from "./Logo";
 
 type Col = { title: string; links: [string, string][] };
 
-function columns(signedIn: boolean): Col[] {
-  return [
-    {
-      title: "Product",
-      links: [
-        ["Work", ROUTES.newTask],
-        ["Agents", ROUTES.agents],
-        ["Examples", ROUTES.examples],
-        ["How it works", ROUTES.howItWorks],
-        ["Pricing", ROUTES.pricing],
-        ...(signedIn ? ([["Team", ROUTES.team]] as [string, string][]) : []),
-      ],
-    },
-    {
-      title: "Developers",
-      links: [
-        ["Publish an agent", ROUTES.publish],
-        ["Economics", ROUTES.economics],
-        ["Developer dashboard", ROUTES.devDashboard],
-      ],
-    },
-    {
-      title: "Company",
-      links: [
-        ["The network", ROUTES.network],
-        ["Brand", ROUTES.brand],
-        ["Changelog", ROUTES.changelog],
-      ],
-    },
-    {
-      title: "Legal",
-      links: [
-        ["Privacy Policy", ROUTES.privacy],
-        ["Terms of Use", ROUTES.terms],
-      ],
-    },
-  ];
-}
-
-/** Site footer (prototype `footer()`, `footer.ft`). Rendered once by the root layout. */
+/** Site footer: brand lockup, one "Footer" navigation with three columns, legal line. Rendered once by the root layout. */
 export function Footer() {
   const { user } = useAuth();
-  const cols = columns(!!user);
+  const isGuest = !!user?.isGuest;
+  const year = new Date().getFullYear();
+
+  const cols: Col[] = user
+    ? [
+        {
+          title: "Workspace",
+          links: [
+            ["Home", ROUTES.dashboard],
+            ["Objectives", ROUTES.objectives],
+            ["AI Team", ROUTES.aiTeam],
+            ["Company Context", ROUTES.context],
+            ["Reports", ROUTES.reports],
+          ],
+        },
+        {
+          title: "Control",
+          links: [
+            ["Approvals", ROUTES.approvals],
+            ["Exceptions", ROUTES.exceptions],
+            ["Usage", ROUTES.usage],
+            ["Recurring objectives", ROUTES.routines],
+            ...(isGuest ? [] : ([["Settings", ROUTES.settings]] as [string, string][])),
+          ],
+        },
+        {
+          title: "About",
+          links: [
+            ["How it works", ROUTES.howItWorksPage],
+            ["Privacy Policy", ROUTES.privacy],
+            ["Terms of Use", ROUTES.terms],
+          ],
+        },
+      ]
+    : [
+        {
+          title: "Product",
+          links: [
+            ["How it works", ROUTES.howItWorksPage],
+            ["Control & trust", ROUTES.trust],
+          ],
+        },
+        {
+          title: "Account",
+          links: [
+            ["Get started", ROUTES.signup],
+            ["Log in", ROUTES.login],
+          ],
+        },
+        {
+          title: "Legal",
+          links: [
+            ["Privacy Policy", ROUTES.privacy],
+            ["Terms of Use", ROUTES.terms],
+          ],
+        },
+      ];
+
   return (
-    <footer className="ft no-print">
+    <footer className="ft sh-ft no-print">
       <div className="wrap">
-        <div className="cols">
-          <div>
-            <Link href={ROUTES.home} className="lockup" style={{ color: "var(--ink)", gap: 10, display: "inline-flex" }} aria-label="Ensemblis home">
-              <Mark size={24} />
-              <span className="wm" style={{ fontSize: 19 }}>
-                Ensemblis
-              </span>
+        <div className="sh-ft-grid">
+          <div className="sh-ft-brand">
+            <Link href={user ? ROUTES.dashboard : ROUTES.home} aria-label="Ensemblis home">
+              <Lockup size={26} />
             </Link>
-            <p className="small" style={{ marginTop: 12, maxWidth: "32ch" }}>
-              The marketplace for AI work. Tell us what you need done. We&apos;ll find the right AI to do it.
+            <p className="sh-ft-tag">
+              <b>The AI operating layer for business.</b>
+              Describe the outcome. We do the work.
             </p>
           </div>
-          {cols.map((c) => (
-            <nav key={c.title} aria-label={c.title}>
-              <h4>{c.title}</h4>
-              {c.links.map(([label, href]) => (
-                <Link key={label} href={href}>
-                  {label}
-                </Link>
-              ))}
-            </nav>
-          ))}
+          <nav aria-label="Footer" className="sh-ft-cols">
+            {cols.map((c) => (
+              <div key={c.title}>
+                <h2 className="sh-ft-h">{c.title}</h2>
+                <ul>
+                  {c.links.map(([label, href]) => (
+                    <li key={label}>
+                      <Link href={href}>{label}</Link>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ))}
+          </nav>
         </div>
-        <div className="row between wrapflex" style={{ marginTop: 28, paddingTop: 18, borderTop: "1px solid var(--line)" }}>
-          <span>© 2026 Ensemblis · a demo project</span>
-          <span>Performance figures shown are illustrative.</span>
+        <div className="sh-ft-base">
+          {/* The year can differ between the server render and the visitor's clock (static pages, New Year). */}
+          <p suppressHydrationWarning>© {year} Ensemblis</p>
+          <p className="sh-ft-note">
+            <Icon name="shield" />
+            AI-generated work can contain mistakes — review the evidence and verification before acting.
+          </p>
         </div>
       </div>
     </footer>

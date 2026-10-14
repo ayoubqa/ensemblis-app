@@ -17,14 +17,15 @@ import { eur } from "./format";
 export const FALLBACK_CONFIG: PublicConfig = {
   demoMode: false,
   inviteRequired: false,
-  topupEnabled: true,
-  topupMaxCents: 0, // unknown — the allowance UI only uses it once `loaded` is true
+  topupEnabled: false,
+  topupMaxCents: 0,
   startingCreditsCents: STARTING_CREDITS_CENTS,
   maxTasksPerUserPerDay: 0, // 0 = unknown / not shown
-  maxDescriptionLength: 8000,
+  maxDescriptionLength: 4000,
   aiProviderLabel: "a third-party AI model provider",
-  sampleCatalogStats: false,
-  // v3 — conservative fallbacks: optional features stay hidden until the server says they're on
+  mockAI: false,
+  verificationCostCents: 150,
+  // Optional features stay hidden until the server says they're on.
   searchEnabled: false,
   searchProviderLabel: "Off",
   emailEnabled: false,
@@ -33,11 +34,8 @@ export const FALLBACK_CONFIG: PublicConfig = {
   guestTrialEnabled: false,
   guestCreditsCents: 0,
   turnstileSiteKey: null,
-  followupCostCents: 200,
-  clarifyEnabled: false,
   maxAttachments: 3,
   maxAttachmentChars: 40000,
-  devTestRunsPerDay: 0,
 };
 
 interface ConfigContextValue {

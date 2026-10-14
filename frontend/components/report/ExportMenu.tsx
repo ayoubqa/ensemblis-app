@@ -23,8 +23,8 @@ type Kind = "pdf" | "docx" | "md" | "copy";
 
 const ITEMS: { kind: Kind; title: string; sub: string; fmt: string; cls?: string }[] = [
   { kind: "pdf", title: "PDF document", sub: "Formatted, with page numbers and a sources appendix", fmt: "PDF", cls: s.fmtPdf },
-  { kind: "docx", title: "Word document", sub: "Editable in Word, Pages or Google Docs", fmt: "DOC", cls: s.fmtDoc },
-  { kind: "md", title: "Markdown file", sub: "Plain text for Notion, GitHub or your wiki", fmt: "MD" },
+  { kind: "docx", title: "Word document", sub: "Editable in any word processor", fmt: "DOC", cls: s.fmtDoc },
+  { kind: "md", title: "Markdown file", sub: "Plain text for your docs or wiki", fmt: "MD" },
   { kind: "copy", title: "Copy to clipboard", sub: "The full report as Markdown, with sources", fmt: "" },
 ];
 
