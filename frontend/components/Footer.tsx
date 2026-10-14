@@ -98,7 +98,8 @@ export function Footer() {
           </nav>
         </div>
         <div className="sh-ft-base">
-          <p>© {year} Ensemblis</p>
+          {/* The year can differ between the server render and the visitor's clock (static pages, New Year). */}
+          <p suppressHydrationWarning>© {year} Ensemblis</p>
           <p className="sh-ft-note">
             <Icon name="shield" />
             AI-generated work can contain mistakes — review the evidence and verification before acting.

@@ -1613,3 +1613,8 @@ a.ws-rep:hover .ws-rep-open .i {
     padding-top: 28px;
   }
 }
+
+/* /reports#earlier (the back-link from an earlier report) lands below the sticky header */
+#earlier {
+  scroll-margin-top: 84px;
+}

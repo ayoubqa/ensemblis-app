@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
+import { ROUTES } from "@/lib/routes";
 
-/** Earlier reports now live under Objectives → Earlier reports. */
+/** Earlier reports now live in Reports → Earlier reports (also under Objectives → Earlier reports). */
 export default function TasksRedirect() {
-  redirect("/objectives?group=earlier");
+  redirect(ROUTES.legacyReports);
 }

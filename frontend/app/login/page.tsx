@@ -7,7 +7,7 @@ import { Icon, useToast } from "@/components";
 import { claimUrl } from "@/components/GuestBanner";
 import { api, ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
-import { useConfig } from "@/lib/config";
+import { CONTACT_EMAIL, useConfig } from "@/lib/config";
 import { firstName } from "@/lib/format";
 import { ROUTES, safeNext, signupUrl } from "@/lib/routes";
 import { AuthHead, AuthLoading, AuthNotice, AuthShell, EMAIL_RE, Field, FormError, PasswordInput, authErrorText, useAutoFocus } from "./_components/AuthUI";
@@ -117,9 +117,12 @@ function LoginForm() {
           label="Password"
           error={pwShown ? pwErr : null}
           aside={
-            <Link href={ROUTES.forgotPassword} className="au-link">
-              Forgot password?
-            </Link>
+            // Only offer recovery that leads somewhere: a reset email, or the operator's address.
+            config.emailEnabled || CONTACT_EMAIL ? (
+              <Link href={ROUTES.forgotPassword} className="au-link">
+                Forgot password?
+              </Link>
+            ) : undefined
           }
         >
           <PasswordInput

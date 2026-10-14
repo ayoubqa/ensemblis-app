@@ -9,7 +9,7 @@ import { ExportMenu, LEGACY_NOTE, ReportView, copyText, reportTitle } from "@/co
 import { eur, longDate } from "@/lib/format";
 import { ROUTES } from "@/lib/routes";
 
-const EARLIER = `${ROUTES.objectives}?group=earlier`;
+const EARLIER = ROUTES.legacyReports;
 
 export default function LegacyReportPage() {
   return (

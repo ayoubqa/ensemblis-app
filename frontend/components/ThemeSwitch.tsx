@@ -13,22 +13,24 @@ const OPTS: { id: ThemePref; label: string; icon: IconName }[] = [
 /**
  * Light / Dark / System segmented control (`.seg`), following the ARIA radio-group
  * pattern: one Tab stop (the checked option), arrow keys move and select.
- * `iconsOnly` for tight spots (the account menu).
+ * `iconsOnly` for tight spots (the account menu). `horizontalOnly` when it sits inside a
+ * panel that owns ↑/↓/Home/End (the account menu): only ←/→ change the theme, and the
+ * other keys bubble so the panel moves focus without switching the theme.
  */
-export function ThemeSwitch({ iconsOnly = false }: { iconsOnly?: boolean }) {
+export function ThemeSwitch({ iconsOnly = false, horizontalOnly = false }: { iconsOnly?: boolean; horizontalOnly?: boolean }) {
   const { theme, setTheme } = useTheme();
   const ref = useRef<HTMLDivElement>(null);
   const current = Math.max(0, OPTS.findIndex((o) => o.id === theme));
 
   const onKey = (e: KeyboardEvent<HTMLDivElement>) => {
     let n = -1;
-    if (e.key === "ArrowRight" || e.key === "ArrowDown") n = (current + 1) % OPTS.length;
-    else if (e.key === "ArrowLeft" || e.key === "ArrowUp") n = (current - 1 + OPTS.length) % OPTS.length;
-    else if (e.key === "Home") n = 0;
-    else if (e.key === "End") n = OPTS.length - 1;
+    if (e.key === "ArrowRight" || (!horizontalOnly && e.key === "ArrowDown")) n = (current + 1) % OPTS.length;
+    else if (e.key === "ArrowLeft" || (!horizontalOnly && e.key === "ArrowUp")) n = (current - 1 + OPTS.length) % OPTS.length;
+    else if (!horizontalOnly && e.key === "Home") n = 0;
+    else if (!horizontalOnly && e.key === "End") n = OPTS.length - 1;
     if (n < 0) return;
     e.preventDefault();
-    e.stopPropagation(); // the account menu uses ↑/↓ too
+    e.stopPropagation();
     setTheme(OPTS[n].id);
     ref.current?.querySelectorAll<HTMLButtonElement>('[role="radio"]')[n]?.focus();
   };

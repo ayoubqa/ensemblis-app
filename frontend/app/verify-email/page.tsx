@@ -16,7 +16,7 @@ function Verify() {
   const params = useSearchParams();
   const token = (params.get("token") || "").trim();
   const router = useRouter();
-  const { user, loading, setUser } = useAuth();
+  const { user, loading, setUser, signOut } = useAuth();
   const [state, setState] = useState<State>(token ? { kind: "working" } : { kind: "bad", message: "This link is missing its code. Open it straight from the email." });
   const sent = useRef(false);
 
@@ -64,22 +64,32 @@ function Verify() {
       </AuthStatus>
     );
   }
-  // 403: the link belongs to a different account than the one logged in here — a new link from Settings wouldn't help.
-  const otherAccount = state.status === 403;
+  // 403: the link belongs to a different account than the one logged in here — a new link from
+  // Settings wouldn't help; the way forward is to sign out and log in to that account.
+  const otherAccount = state.status === 403 && !!user;
+  const switchAccount = () => {
+    signOut();
+    router.push(loginUrl(`${ROUTES.verifyEmail}?token=${encodeURIComponent(token)}`));
+  };
   return (
     <AuthStatus
       icon="clock"
       tone="warn"
       title="This link can't be used"
       actions={
-        <Link className="btn" href={!user ? ROUTES.login : otherAccount ? ROUTES.dashboard : `${ROUTES.settings}#profile`}>
-          {!user ? "Log in" : otherAccount ? "Open your workspace" : "Send a new link from Settings"}
-        </Link>
+        otherAccount ? (
+          <button type="button" className="btn p" onClick={switchAccount}>
+            Log in to the other account
+          </button>
+        ) : (
+          <Link className="btn" href={!user ? ROUTES.login : `${ROUTES.settings}#profile`}>
+            {!user ? "Log in" : "Send a new link from Settings"}
+          </Link>
+        )
       }
     >
-      <p>
-        {state.message} {otherAccount ? "Log in to the account the email was sent to, then open the link again." : "Verification links work once and expire after 48 hours."}
-      </p>
+      {/* The server's 403 text already says what to do; don't repeat it. */}
+      <p>{otherAccount ? state.message : `${state.message} Verification links work once and expire after 48 hours.`}</p>
     </AuthStatus>
   );
 }

@@ -145,7 +145,7 @@ function Reports() {
         )}
       </section>
 
-      <section className="ws-sec" aria-labelledby="ws-early-h">
+      <section className="ws-sec" id="earlier" aria-labelledby="ws-early-h">
         <div className="ws-sec-head">
           <div>
             <h2 id="ws-early-h">Earlier reports</h2>

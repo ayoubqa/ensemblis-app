@@ -24,7 +24,7 @@ export const ROUTES = {
   members: "/team", // organization members (team model)
   joinTeam: (token: string) => `/join/${encodeURIComponent(token)}`,
   legacyReport: (id: string) => `/tasks/${encodeURIComponent(id)}`,
-  legacyReports: "/objectives?group=earlier",
+  legacyReports: "/reports#earlier", // the Earlier reports section of /reports
   sharedReport: (token: string) => `/r/${encodeURIComponent(token)}`,
   login: "/login",
   signup: "/signup",

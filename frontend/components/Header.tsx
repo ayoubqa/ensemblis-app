@@ -116,9 +116,9 @@ export function Header() {
     router.push(ROUTES.home);
   };
 
-  // Disclosure panel keyboard: ↑/↓/Home/End move between controls, Esc closes and returns
-  // focus to the trigger, Tab moves through every control (theme switch included) and
-  // leaving the panel closes it.
+  // Disclosure panel keyboard: ↑/↓/Home/End move between controls (the theme switch keeps
+  // only ←/→), Esc closes and returns focus to the trigger, Tab moves through every
+  // control (theme switch included) and leaving the panel closes it.
   const onAcctKey = (e: ReactKeyboardEvent<HTMLDivElement>) => {
     if (!menu) {
       if (e.key === "ArrowDown" && e.target === triggerRef.current) {
@@ -299,7 +299,7 @@ export function Header() {
 
                     <div className="sh-acct-row">
                       <span id={`${panelId}-theme`}>Theme</span>
-                      <ThemeSwitch iconsOnly />
+                      <ThemeSwitch iconsOnly horizontalOnly />
                     </div>
 
                     <div className="sh-acct-list">
