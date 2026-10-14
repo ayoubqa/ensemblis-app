@@ -7,18 +7,22 @@
 import { Router } from "express";
 import type { NextFunction, Response } from "express";
 import { prisma } from "../db";
-import { config, isAdminEmail, searchProviderLabel } from "../config";
+import { config, isAdminEmail } from "../config";
 import { requireAuth, AuthedRequest } from "../auth/middleware";
 import { ah } from "../lib/http";
 import { globalRunsToday, startOfTodayUTC } from "../lib/usageLimits";
 import { aiProviderLabel } from "../ai/llmProvider";
 import { queueStats } from "../engine/queue";
+import { effectiveSearchProvider, searchProviderLabel } from "../research/search";
 
 const router = Router();
 
-/** The daily search budget only counts paid-provider (Tavily) calls; Wikipedia is free. Match it here. */
-function searchBudgetFilter(): { provider?: string } {
-  return config.search.provider === "tavily" ? { provider: "tavily" } : {};
+/**
+ * The daily search budget only counts successful paid-provider (Tavily) calls; Wikipedia is free.
+ * Match it here, using the provider actually in use (Tavily without a key means Wikipedia).
+ */
+function searchBudgetFilter(): { provider?: string; ok?: boolean } {
+  return effectiveSearchProvider() === "tavily" ? { provider: "tavily", ok: true } : {};
 }
 
 /** Must run after requireAuth. */

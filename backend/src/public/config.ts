@@ -2,11 +2,15 @@
 // adapt to how this server is configured (PublicConfig in frontend/lib/api.ts).
 // Never include secrets here: only on/off flags, limits and public keys.
 
-import { config, searchProviderLabel } from "../config";
-import { aiProviderLabel, currentProvider } from "../ai/llmProvider";
+import { config } from "../config";
+import { aiConfigProblem, aiProviderLabel, currentProvider } from "../ai/llmProvider";
+import { effectiveSearchProvider, searchEnabled, searchProviderLabel } from "../research/search";
 import { VERIFICATION_COST_CENTS } from "../org/registry";
 
 export function publicConfig() {
+  // Why model calls can't work right now (unknown provider, missing key, mock where forbidden), or null.
+  // Names environment variables only — never a key.
+  const aiProblem = aiConfigProblem();
   return {
     demoMode: config.demoMode,
     inviteRequired: !!config.signupInviteCode,
@@ -16,6 +20,8 @@ export function publicConfig() {
     maxTasksPerUserPerDay: config.maxTasksPerUserPerDay,
     maxDescriptionLength: config.maxDescriptionLength,
     aiProviderLabel: aiProviderLabel(),
+    aiConfigured: aiProblem === null,
+    aiProblem,
     sampleCatalogStats: false, // v4: no seeded catalog statistics are shown anywhere
     mockAI: (() => {
       try {
@@ -25,8 +31,9 @@ export function publicConfig() {
       }
     })(),
     verificationCostCents: VERIFICATION_COST_CENTS,
-    // v3
-    searchEnabled: config.search.provider !== "off",
+    // v3. The provider actually used: SEARCH_PROVIDER=tavily without a key means Wikipedia.
+    searchEnabled: searchEnabled(),
+    searchProvider: effectiveSearchProvider(),
     searchProviderLabel: searchProviderLabel(),
     emailEnabled: config.email.enabled,
     paymentsEnabled: config.stripe.enabled,

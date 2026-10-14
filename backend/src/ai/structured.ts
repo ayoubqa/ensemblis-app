@@ -3,13 +3,22 @@
 // token budget) or not quite the requested JSON. Instead of giving up on the
 // first reply, the model is asked once more — told what was wrong, with a
 // larger output budget — and the reply is validated again. Never throws.
+//
+// A failure says what kind it was: errorKind is the provider error class
+// (ai/errors.ts: config, quota, rate_limit, too_large, transient, unknown)
+// when a model call failed, and null when the replies were unusable output.
 
 import type { ZodType, ZodTypeDef } from "zod";
 import { runLLM, type LLMOptions } from "./llmProvider";
 import { parseStructured } from "./json";
 import { log } from "../lib/log";
+import { classifyProviderError, type ProviderErrorKind } from "./errors";
 
-export type StructuredRun<T> = { ok: true; data: T; attempts: number; firstError?: string } | { ok: false; error: string; attempts: number };
+export type StructuredRun<T> =
+  | { ok: true; data: T; attempts: number; firstError?: string }
+  | { ok: false; error: string; attempts: number; errorKind: ProviderErrorKind | null };
+
+const messageOf = (err: unknown) => (err instanceof Error ? err.message : String(err));
 
 export async function runStructured<T>(
   system: string,
@@ -25,7 +34,8 @@ export async function runStructured<T>(
     first = parsed.error;
   } catch (err) {
     // Provider errors (auth, quota, timeout) are not output problems: don't spend a second call.
-    return { ok: false, error: err instanceof Error ? err.message : String(err), attempts: 1 };
+    const error = messageOf(err);
+    return { ok: false, error, attempts: 1, errorKind: classifyProviderError(error) };
   }
   log.warn("llm.structured_retry", { purpose: opts.purpose, executionId: opts.executionId ?? undefined, error: first });
   const repair = `${user}\n\n<previous_reply_problem trust="internal">\nYour previous reply could not be used: ${first}.\nReply again with ONLY the complete JSON object in the required shape — no prose, no code fences, nothing after the closing brace. Keep text fields short.\n</previous_reply_problem>`;
@@ -33,8 +43,9 @@ export async function runStructured<T>(
     const { text } = await runLLM(system, repair, { ...opts, maxTokens: Math.min(8192, Math.round(opts.maxTokens * 1.5)) });
     const parsed = parseStructured(text, schema);
     if (parsed.ok) return { ok: true, data: parsed.data, attempts: 2, firstError: first };
-    return { ok: false, error: `${parsed.error} (after one retry; first reply: ${first})`, attempts: 2 };
+    return { ok: false, error: `${parsed.error} (after one retry; first reply: ${first})`, attempts: 2, errorKind: null };
   } catch (err) {
-    return { ok: false, error: `${err instanceof Error ? err.message : String(err)} (retry after: ${first})`, attempts: 2 };
+    const error = messageOf(err);
+    return { ok: false, error: `${error} (retry after: ${first})`, attempts: 2, errorKind: classifyProviderError(error) };
   }
 }
