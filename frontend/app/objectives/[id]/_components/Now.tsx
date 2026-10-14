@@ -107,7 +107,7 @@ export function NowCard({
   return (
     <section className={`cs-now tone-${tone}`} aria-labelledby="cs-now-h" data-testid="live-card">
       <div className="cs-now-top">
-        <h2 id="cs-now-h" className="cs-now-k">
+        <h2 id="cs-now-h" className="cs-now-k" tabIndex={-1}>
           Now
         </h2>
         <StreamBadge stream={stream} />

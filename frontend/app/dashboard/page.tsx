@@ -62,7 +62,8 @@ function ChiefOfStaff() {
   // An overview, not a ticker: refresh every 30s while visible.
   usePolling(load, 30_000);
   // After an approval or exception is handled on this page.
-  const refresh = useCallback(() => void load().catch(() => undefined), [load]);
+  // Returns the reload so a decision card can wait for it before it moves focus.
+  const refresh = useCallback(() => load().catch(() => undefined), [load]);
 
   if (!b) {
     return failed ? (
@@ -250,7 +251,8 @@ function ChiefOfStaff() {
                   <ul className="ws-panel ws-outcomes">
                     {b.recentOutcomes.map((r) => (
                       <li key={r.executionId}>
-                        <Link href={ROUTES.objective(r.objectiveId)} className="ws-out-row">
+                        {/* This attempt's report, even after a newer attempt was started (the console shows the latest at its plain URL). */}
+                        <Link href={`${ROUTES.objective(r.objectiveId)}?execution=${encodeURIComponent(r.executionId)}`} className="ws-out-row">
                           <span className="ws-out-main">
                             <span className="ws-out-t">{r.objectiveTitle}</span>
                             {r.outcomeSummary && <span className="ws-out-s">{r.outcomeSummary}</span>}

@@ -20,7 +20,11 @@ const JUDGMENTS = [
   ["NOT_ACHIEVED", "Not achieved"],
 ] as const;
 
-export function OutcomePanel({ objective, execution, onExecution }: { objective: Objective; execution: Execution; onExecution: () => void }) {
+/**
+ * `readOnly` (an earlier attempt): confirming an outcome also sets the objective's outcome,
+ * so only the current attempt takes a judgment; an earlier one shows the recorded one.
+ */
+export function OutcomePanel({ objective, execution, onExecution, readOnly = false }: { objective: Objective; execution: Execution; onExecution: () => void; readOnly?: boolean }) {
   const toast = useToast();
   const [busy, setBusy] = useState<OutcomeStatus | null>(null);
   const byCriterion = new Map(execution.measurements.map((m) => [m.criterionId, m]));
@@ -55,6 +59,15 @@ export function OutcomePanel({ objective, execution, onExecution }: { objective:
         )}
       </div>
 
+      {/* An earlier attempt is shown against the objective's current criteria. When none of them
+          has a measurement from this attempt (criteria replaced since — their results go with them),
+          say so instead of labelling every current criterion "Not measured". */}
+      {readOnly && objective.criteria.length > 0 && !objective.criteria.some((c) => byCriterion.has(c.id)) ? (
+        <p className="cs-crit-gone">
+          The per-criterion results of this attempt are no longer available: the success criteria may have changed since it ran. Its verification,
+          evidence and report are unchanged.
+        </p>
+      ) : (
       <ol className="cs-crit" aria-label="Success criteria results">
         {objective.criteria.map((c, i) => {
           const m = byCriterion.get(c.id);
@@ -78,7 +91,20 @@ export function OutcomePanel({ objective, execution, onExecution }: { objective:
           );
         })}
       </ol>
+      )}
 
+      {readOnly ? (
+        <div className="cs-judge">
+          <div className="cs-judge-tt">
+            <p className="cs-judge-l">Your judgment</p>
+            <p className="cs-judge-h">
+              {execution.outcomeConfirmedAt
+                ? `Confirmed as ${outcomeLabel(status).toLowerCase()} ${relativeTime(execution.outcomeConfirmedAt)}.`
+                : "Not confirmed by a person for this attempt."}
+            </p>
+          </div>
+        </div>
+      ) : (
       <div className="cs-judge" role="group" aria-labelledby={`judge-${execution.id}`}>
         <div className="cs-judge-tt">
           <p id={`judge-${execution.id}`} className="cs-judge-l">
@@ -98,6 +124,7 @@ export function OutcomePanel({ objective, execution, onExecution }: { objective:
           })}
         </div>
       </div>
+      )}
     </div>
   );
 }

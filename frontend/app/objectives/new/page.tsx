@@ -4,11 +4,12 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useRef, useState } from "react";
 import { api, type Autonomy, type ContextPayload, type Organization } from "@/lib/api";
+import { useAuth } from "@/lib/auth-context";
 import { useConfig } from "@/lib/config";
 import { EXAMPLE_OBJECTIVES } from "@/lib/data";
-import { eur } from "@/lib/format";
-import { useLocalStorage } from "@/lib/hooks";
+import { eur, plural } from "@/lib/format";
 import { ROUTES } from "@/lib/routes";
+import { storage } from "@/lib/utils";
 import { CharCount, Icon, RequireAuth, useToast, type IconName } from "@/components";
 
 export default function NewObjectivePage() {
@@ -21,9 +22,28 @@ export default function NewObjectivePage() {
   );
 }
 
+/** Unsent drafts are kept per account (`<key>:<user id>`), so a shared browser never offers one person's objective to the next. */
 const DRAFT_KEY = "ensemblis_objective_draft";
 const MIN_BUDGET = 5;
 const MAX_BUDGET = 500;
+const MAX_CRITERIA = 6;
+
+type Draft = { statement: string; criteria: string[]; notes: string };
+
+function readDraft(key: string): Draft | null {
+  const raw = storage.get(key);
+  if (!raw) return null;
+  try {
+    const d = JSON.parse(raw) as Partial<Draft>;
+    return {
+      statement: typeof d.statement === "string" ? d.statement : "",
+      criteria: Array.isArray(d.criteria) ? d.criteria.filter((c): c is string => typeof c === "string").slice(0, MAX_CRITERIA) : [],
+      notes: typeof d.notes === "string" ? d.notes : "",
+    };
+  } catch {
+    return null;
+  }
+}
 
 /** Today's date in the visitor's time zone, as yyyy-mm-dd (the date input's `min`). */
 function localToday(): string {
@@ -36,7 +56,8 @@ function DefineOutcome() {
   const params = useSearchParams();
   const toast = useToast();
   const { config } = useConfig();
-  const [draft, setDraft] = useLocalStorage<{ statement: string; criteria: string[]; notes: string }>(DRAFT_KEY, { statement: "", criteria: [], notes: "" });
+  const uid = useAuth().user?.id ?? null;
+  const draftKey = `${DRAFT_KEY}:${uid}`;
   const [statement, setStatement] = useState("");
   const [criteria, setCriteria] = useState<string[]>([]);
   const [notes, setNotes] = useState("");
@@ -53,7 +74,13 @@ function DefineOutcome() {
   const [questions, setQuestions] = useState<string[]>([]);
   const [busy, setBusy] = useState<"plan" | "draft" | null>(null);
   const [restored, setRestored] = useState(false);
+  // An unsent draft of this account was put back: say so, and offer a clean start.
+  const [fromDraft, setFromDraft] = useState(false);
   const statementRef = useRef<HTMLTextAreaElement>(null);
+  const critListRef = useRef<HTMLOListElement>(null);
+  const addCritRef = useRef<HTMLButtonElement>(null);
+  // After adding or removing a criterion, focus moves to this row (-1: the Add button) instead of falling to <body>.
+  const [focusCrit, setFocusCrit] = useState<number | null>(null);
 
   useEffect(() => {
     api.getOrg().then(({ organization }) => {
@@ -69,26 +96,59 @@ function DefineOutcome() {
     if (window.matchMedia("(min-width: 860px)").matches) statementRef.current?.focus({ preventScroll: true });
   }, []);
 
-  // Restore an unsent draft once (or apply ?example=n).
+  // Restore this account's unsent draft once (or apply ?example=n).
   useEffect(() => {
-    if (restored) return;
+    if (restored || !uid) return;
+    // A draft saved before drafts were kept per account: there is no telling whose it is.
+    storage.set(DRAFT_KEY, null);
     // Only an explicit ?example=n applies an example (Number(null) would be 0).
     const raw = params.get("example");
     const ex = raw !== null && /^\d+$/.test(raw) ? Number(raw) : -1;
+    const draft = readDraft(draftKey);
     if (ex >= 0 && EXAMPLE_OBJECTIVES[ex]) {
       setStatement(EXAMPLE_OBJECTIVES[ex].statement);
       setCriteria(EXAMPLE_OBJECTIVES[ex].criteria);
-    } else if (draft.statement) {
+    } else if (draft?.statement) {
       setStatement(draft.statement);
       setCriteria(draft.criteria);
       setNotes(draft.notes);
+      setFromDraft(true);
     }
     setRestored(true);
-  }, [draft, params, restored]);
+  }, [draftKey, params, restored, uid]);
 
   useEffect(() => {
-    if (restored) setDraft({ statement, criteria, notes });
-  }, [statement, criteria, notes, restored, setDraft]);
+    if (!restored || !uid) return;
+    const empty = !statement.trim() && !criteria.some((c) => c.trim()) && !notes.trim();
+    storage.set(draftKey, empty ? null : JSON.stringify({ statement, criteria, notes } satisfies Draft));
+  }, [statement, criteria, notes, restored, uid, draftKey]);
+
+  useEffect(() => {
+    if (focusCrit === null) return;
+    const inputs = critListRef.current?.querySelectorAll<HTMLInputElement>('[data-testid="criterion-input"]');
+    ((focusCrit >= 0 ? inputs?.[focusCrit] : undefined) ?? addCritRef.current)?.focus();
+    setFocusCrit(null);
+  }, [focusCrit, criteria.length]);
+
+  const startOver = () => {
+    setStatement("");
+    setCriteria([]);
+    setNotes("");
+    setSuggested(null);
+    setQuestions([]);
+    setFromDraft(false);
+    statementRef.current?.focus();
+  };
+
+  const removeCriterion = (i: number) => {
+    const left = criteria.length - 1;
+    setCriteria((x) => x.filter((_, j) => j !== i));
+    setFocusCrit(left > 0 ? Math.min(i, left - 1) : -1);
+  };
+  const addCriterion = () => {
+    setCriteria((x) => [...x, ""]);
+    setFocusCrit(criteria.length);
+  };
 
   const max = config.maxDescriptionLength || 4000;
   const valid = statement.trim().length >= 10 && statement.length <= max;
@@ -114,7 +174,28 @@ function DefineOutcome() {
     setSuggesting(true);
     try {
       const { suggestion } = await api.suggestObjective(statement);
-      setCriteria(suggestion.criteria.map((c) => c.description));
+      // Keep what is already written; add the suggestions it doesn't already cover.
+      const kept = criteria.filter((c) => c.trim());
+      const seen = new Set(kept.map((c) => c.trim().toLowerCase()));
+      const fresh = suggestion.criteria
+        .map((c) => c.description.trim())
+        .filter((d) => {
+          const k = d.toLowerCase();
+          if (!d || seen.has(k)) return false;
+          seen.add(k);
+          return true;
+        });
+      const added = fresh.slice(0, Math.max(0, MAX_CRITERIA - kept.length));
+      setCriteria([...kept, ...added]);
+      if (kept.length) {
+        toast(
+          added.length
+            ? `Added ${plural(added.length, "suggested criterion", "suggested criteria")} below yours${added.length < fresh.length ? ` (up to ${MAX_CRITERIA} in all)` : ""}`
+            : fresh.length
+              ? `Your list already has ${MAX_CRITERIA} success criteria — remove one to add a suggestion`
+              : "Your success criteria already cover the suggestions"
+        );
+      }
       setSuggested({ title: suggestion.title, for: statement.trim() });
       setQuestions(suggestion.questions);
     } catch (e) {
@@ -138,7 +219,7 @@ function DefineOutcome() {
         autonomy,
         draft: asDraft,
       });
-      setDraft({ statement: "", criteria: [], notes: "" });
+      storage.set(draftKey, null);
       toast(asDraft ? "Saved as a draft" : "Sent to the Chief of Staff");
       router.push(ROUTES.objective(objective.id));
     } catch (e) {
@@ -181,6 +262,18 @@ function DefineOutcome() {
               <Icon name="info" size={16} />
               <p>
                 Ensemblis doesn&apos;t know your business yet. <Link href={ROUTES.context}>Add your Company Context</Link> once and every objective uses it — or the Chief of Staff will ask what it needs.
+              </p>
+            </div>
+          )}
+
+          {fromDraft && statement && (
+            <div className="ws-callout" role="note">
+              <Icon name="edit" size={16} />
+              <p>
+                Your unsent draft is back where you left it.{" "}
+                <button type="button" className="ws-link" onClick={startOver}>
+                  Start over
+                </button>
               </p>
             </div>
           )}
@@ -264,7 +357,7 @@ function DefineOutcome() {
                 )}
               </p>
               {criteria.length > 0 && (
-                <ol className="ws-crit">
+                <ol className="ws-crit" ref={critListRef}>
                   {criteria.map((c, i) => (
                     <li key={i}>
                       <span className="ws-crit-n" aria-hidden="true">
@@ -279,19 +372,19 @@ function DefineOutcome() {
                         placeholder="e.g. 3 markets, ranked with a rationale"
                         data-testid="criterion-input"
                       />
-                      <button type="button" className="ibtn" aria-label={`Remove success criterion ${i + 1}`} onClick={() => setCriteria((x) => x.filter((_, j) => j !== i))}>
+                      <button type="button" className="ibtn" aria-label={`Remove success criterion ${i + 1}`} onClick={() => removeCriterion(i)}>
                         <Icon name="x" />
                       </button>
                     </li>
                   ))}
                 </ol>
               )}
-              {criteria.length < 6 ? (
-                <button type="button" className="btn ghost sm ws-add" onClick={() => setCriteria((x) => [...x, ""])}>
+              {criteria.length < MAX_CRITERIA ? (
+                <button type="button" className="btn ghost sm ws-add" onClick={addCriterion} ref={addCritRef}>
                   <Icon name="plus" /> Add a criterion
                 </button>
               ) : (
-                <p className="ws-fs-hint">Up to 6 success criteria.</p>
+                <p className="ws-fs-hint">Up to {MAX_CRITERIA} success criteria.</p>
               )}
               <div aria-live="polite">
                 {questions.length > 0 && (

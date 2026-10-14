@@ -5,7 +5,7 @@
 // dashboard and the Approval / Exception centers. Styles: app/styles/console.css (cs-*).
 
 import Link from "next/link";
-import { useId, useState, type ReactNode } from "react";
+import { useId, useRef, useState, type ReactNode } from "react";
 import { api, type Approval, type Evidence, type ExceptionAction, type ExceptionItem, type ExecutionEvent, type ExecutiveKey, type TaskSource } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { eur, relativeTime } from "@/lib/format";
@@ -83,6 +83,48 @@ export function Section({ id, title, count, right, children, style }: { id?: str
 
 const KIND_LABEL: Record<Approval["kind"], string> = { PLAN: "Plan review", BUDGET: "Budget", ACTION: "External action" };
 
+const CARDS = '[data-testid="approval-card"], [data-testid="exception-card"]';
+
+function focusEl(el: HTMLElement) {
+  if (!el.matches("a[href], button, input, select, textarea, [tabindex]")) el.setAttribute("tabindex", "-1");
+  el.focus();
+}
+
+/**
+ * A decision reloads the list it was made in, which removes the card (or at least its
+ * buttons), so focus would fall back to <body>. Before the reload, note where focus should
+ * go; the returned function moves it there once the list has re-rendered, unless focus has
+ * already landed somewhere. Order: this card's heading (when it stays, shown decided), the
+ * next decision card, the previous one, the caller's `focusAfter` element, the heading of
+ * the section (or tab panel) that held the card, and finally the page's h1.
+ */
+function planFocus(card: HTMLElement | null, focusAfter?: string): () => void {
+  const cards = Array.from(document.querySelectorAll<HTMLElement>(CARDS));
+  const i = card ? cards.indexOf(card) : -1;
+  const order = i < 0 ? cards : [cards[i], ...cards.slice(i + 1), ...cards.slice(0, i).reverse()];
+  const ids = order.map((c) => c.querySelector<HTMLElement>(".cs-dc-title")?.id).filter((x): x is string => !!x);
+  if (focusAfter) ids.push(focusAfter);
+  const holders: HTMLElement[] = [];
+  for (let el = card?.parentElement ?? null; el && el !== document.body; el = el.parentElement) {
+    const label = el.getAttribute("aria-labelledby");
+    if (label) ids.push(label.split(" ")[0]);
+    if (el.getAttribute("role") === "tabpanel") holders.push(el);
+  }
+  return () => {
+    const run = () => {
+      const active = document.activeElement;
+      if (active && active !== document.body && active.isConnected) return;
+      const target =
+        ids.map((x) => document.getElementById(x)).find((el): el is HTMLElement => !!el) ??
+        holders.find((el) => el.isConnected) ??
+        document.querySelector<HTMLElement>("main h1");
+      if (target) focusEl(target);
+    };
+    // After the reload resolves React still has to commit the new list.
+    requestAnimationFrame(() => requestAnimationFrame(run));
+  };
+}
+
 /**
  * "Approve — The plan is…". The backend text often opens with the decision
  * itself ("Approve. The plan is…"): that word is shown once, as the verdict.
@@ -99,11 +141,19 @@ function Recommendation({ decision, text }: { decision: Approval["recommendedDec
   );
 }
 
+/** Props shared by the decision cards. `onDone` reloads the list (awaited when it returns a promise); `focusAfter` is the id of the element that takes focus when no other decision card is left. */
+interface DecisionProps {
+  onDone?: () => unknown;
+  focusAfter?: string;
+  showObjective?: boolean;
+}
+
 /** A decision with the context needed to make it, and Approve / Reject. Also renders the decided record. */
-export function ApprovalCard({ approval, onDone, showObjective = false }: { approval: Approval; onDone?: () => void; showObjective?: boolean }) {
+export function ApprovalCard({ approval, onDone, focusAfter, showObjective = false }: DecisionProps & { approval: Approval }) {
   const toast = useToast();
   const { refresh } = useAuth();
   const uid = useId().replace(/:/g, "");
+  const ref = useRef<HTMLElement>(null);
   const [busy, setBusy] = useState<"approve" | "reject" | null>(null);
   const [note, setNote] = useState("");
   const pending = approval.status === "PENDING";
@@ -115,7 +165,9 @@ export function ApprovalCard({ approval, onDone, showObjective = false }: { appr
       toast(d === "approve" ? "Approved — the AI Team is starting" : "Rejected — nothing was charged");
       refreshAttention();
       refresh().catch(() => undefined);
-      onDone?.();
+      const restore = planFocus(ref.current, focusAfter);
+      await Promise.resolve(onDone?.()).catch(() => undefined);
+      restore();
     } catch (e) {
       toast.error((e as Error).message);
     } finally {
@@ -124,7 +176,7 @@ export function ApprovalCard({ approval, onDone, showObjective = false }: { appr
   };
   const decided = approval.status === "APPROVED" ? "Approved" : approval.status === "REJECTED" ? "Rejected" : "Withdrawn";
   return (
-    <article className={`cs-dc cs-dc-approval${pending ? " is-open" : " is-closed"}`} data-testid="approval-card" aria-labelledby={`${uid}-t`}>
+    <article ref={ref} className={`cs-dc cs-dc-approval${pending ? " is-open" : " is-closed"}`} data-testid="approval-card" aria-labelledby={`${uid}-t`}>
       <div className="cs-dc-top">
         <span className="cs-dc-ic" aria-hidden="true">
           <Icon name="check" size={16} />
@@ -135,7 +187,7 @@ export function ApprovalCard({ approval, onDone, showObjective = false }: { appr
         <RiskTag risk={approval.risk} />
         <span className="cs-dc-time">{relativeTime(approval.createdAt)}</span>
       </div>
-      <h3 id={`${uid}-t`} className="cs-dc-title">
+      <h3 id={`${uid}-t`} className="cs-dc-title" tabIndex={-1}>
         {approval.title}
       </h3>
       {showObjective && approval.objectiveTitle && (
@@ -214,16 +266,19 @@ const EXC_KIND: Record<ExceptionItem["kind"], string> = {
 };
 
 /** An exception: what happened, why it matters, the recommendation, what is needed — and the actions that resolve it. */
-export function ExceptionCard({ exception, onDone, showObjective = false }: { exception: ExceptionItem; onDone?: () => void; showObjective?: boolean }) {
+export function ExceptionCard({ exception, onDone, focusAfter, showObjective = false }: DecisionProps & { exception: ExceptionItem }) {
   const toast = useToast();
   const { refresh } = useAuth();
   const uid = useId().replace(/:/g, "");
+  const ref = useRef<HTMLElement>(null);
   const [busy, setBusy] = useState<ExceptionAction | null>(null);
   const [response, setResponse] = useState("");
   const open = exception.status === "OPEN";
   const needsText = exception.actions.includes("provide_info");
   const allowsGuidance = exception.kind === "VERIFICATION_FAILED";
   const high = exception.severity === "HIGH";
+  // "Send answer" stays disabled until the answer says something; the hint says why.
+  const tooShort = needsText && response.trim().length < 3;
   const act = async (a: ExceptionAction) => {
     if (a === "cancel" && !window.confirm("Cancel this execution? Work that wasn't executed is refunded.")) return;
     setBusy(a);
@@ -232,7 +287,9 @@ export function ExceptionCard({ exception, onDone, showObjective = false }: { ex
       toast(a === "cancel" ? "Execution cancelled" : a === "provide_info" ? "Thanks — the Chief of Staff is re-planning" : "Resumed");
       refreshAttention();
       refresh().catch(() => undefined);
-      onDone?.();
+      const restore = planFocus(ref.current, focusAfter);
+      await Promise.resolve(onDone?.()).catch(() => undefined);
+      restore();
     } catch (e) {
       toast.error((e as Error).message);
     } finally {
@@ -240,7 +297,7 @@ export function ExceptionCard({ exception, onDone, showObjective = false }: { ex
     }
   };
   return (
-    <article className={`cs-dc cs-dc-exception${high ? " is-high" : ""}${open ? " is-open" : " is-closed"}`} data-testid="exception-card" aria-labelledby={`${uid}-t`}>
+    <article ref={ref} className={`cs-dc cs-dc-exception${high ? " is-high" : ""}${open ? " is-open" : " is-closed"}`} data-testid="exception-card" aria-labelledby={`${uid}-t`}>
       <div className="cs-dc-top">
         <span className="cs-dc-ic" aria-hidden="true">
           <Icon name="alert" size={16} />
@@ -251,7 +308,7 @@ export function ExceptionCard({ exception, onDone, showObjective = false }: { ex
         {high && <Tag variant="bad">High severity</Tag>}
         <span className="cs-dc-time">{relativeTime(exception.createdAt)}</span>
       </div>
-      <h3 id={`${uid}-t`} className="cs-dc-title">
+      <h3 id={`${uid}-t`} className="cs-dc-title" tabIndex={-1}>
         {exception.title}
       </h3>
       {showObjective && exception.objectiveTitle && (
@@ -307,7 +364,13 @@ export function ExceptionCard({ exception, onDone, showObjective = false }: { ex
                 value={response}
                 maxLength={4000}
                 onChange={(e) => setResponse(e.target.value)}
+                aria-describedby={tooShort ? `${uid}-why` : undefined}
               />
+              {tooShort && (
+                <p id={`${uid}-why`} className="cs-dc-why">
+                  Write at least 3 characters to send your answer.
+                </p>
+              )}
             </>
           )}
           <div className="cs-dc-btns">
@@ -318,7 +381,8 @@ export function ExceptionCard({ exception, onDone, showObjective = false }: { ex
                 className={i === 0 ? "btn p" : a === "cancel" ? "btn bad" : "btn"}
                 onClick={() => act(a)}
                 aria-busy={busy === a}
-                disabled={!!busy || (a === "provide_info" && response.trim().length < 3)}
+                disabled={!!busy || (a === "provide_info" && tooShort)}
+                aria-describedby={a === "provide_info" && tooShort ? `${uid}-why` : undefined}
               >
                 {ACTION_LABEL[a]}
               </button>

@@ -92,7 +92,7 @@ function Reports() {
       <PageHead
         eyebrow="Reports"
         title="Reports"
-        sub="Your verified deliverables: every completed objective with its outcome, verification and evidence — and the reports produced before objectives existed."
+        sub="Your verified deliverables: every objective whose latest attempt completed, with its outcome, verification and evidence — and the reports produced before objectives existed. Results of earlier attempts stay in each objective's Attempts list."
         actions={
           <Link href={ROUTES.objectives} className="btn">
             <Icon name="list" />
