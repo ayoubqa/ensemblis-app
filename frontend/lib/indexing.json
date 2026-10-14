@@ -1,5 +1,5 @@
 {
-  "_comment": "Which URLs search engines may index. publicPages = indexable + sitemap. privatePrefixes = signed-in or one-time-token pages: noindex header (next.config.js) and disallowed in robots.txt. noindexOnly = reachable by link, never indexed (shared results).",
+  "_comment": "Which URLs search engines may index. publicPages = indexable + sitemap. privatePrefixes = signed-in app pages: noindex header (next.config.js) and disallowed in robots.txt. noindexOnly = pages reachable from public links or emails (auth pages, invitations, shared results): noindex header only, NOT disallowed, so crawlers can fetch them and see the noindex.",
   "publicPages": [
     { "path": "/", "changeFrequency": "weekly", "priority": 1 },
     { "path": "/how-it-works", "changeFrequency": "monthly", "priority": 0.8 },
@@ -8,8 +8,7 @@
   ],
   "privatePrefixes": [
     "/dashboard", "/objectives", "/new", "/approvals", "/exceptions", "/usage", "/billing", "/context", "/ai-team",
-    "/routines", "/workflows", "/reports", "/settings", "/team", "/join", "/admin", "/tasks",
-    "/login", "/signup", "/forgot-password", "/reset-password", "/verify-email"
+    "/routines", "/workflows", "/reports", "/settings", "/team", "/admin", "/tasks"
   ],
-  "noindexOnly": ["/r"]
+  "noindexOnly": ["/r", "/login", "/signup", "/forgot-password", "/reset-password", "/verify-email", "/join"]
 }
