@@ -96,13 +96,13 @@ export function unsupportedReason(name: string): string {
     odt: "OpenDocument files aren't supported. Save it as .docx or PDF instead.",
     ods: "OpenDocument spreadsheets aren't supported. Save it as .xlsx or CSV instead.",
     zip: "Archives can't be attached. Attach the documents inside it instead.",
-    json: "JSON files aren't supported. Save the data as CSV or paste the relevant part into your brief.",
-    html: "Web pages are attached as links. Paste the page's address in “Add a link” instead.",
-    htm: "Web pages are attached as links. Paste the page's address in “Add a link” instead.",
+    json: "JSON files aren't supported. Save the data as CSV, or paste the relevant part into the Company profile.",
+    html: "Web pages are added as links. Paste the page's address and choose “Add link” instead.",
+    htm: "Web pages are added as links. Paste the page's address and choose “Add link” instead.",
   };
   if (fix[ext]) return fix[ext];
   if (["png", "jpg", "jpeg", "gif", "webp", "heic", "svg", "bmp", "tif", "tiff"].includes(ext))
-    return "Images can't be read yet — agents work from text. Attach a PDF or document instead.";
+    return "Images can't be read yet — the AI Team works from text. Attach a PDF or document instead.";
   if (["mp3", "wav", "m4a", "mp4", "mov", "avi", "webm"].includes(ext)) return "Audio and video files can't be read. Attach a transcript instead.";
   return "This file type isn't supported. Use PDF, Word (.docx), Excel (.xlsx), CSV, TXT or Markdown.";
 }
@@ -398,7 +398,7 @@ export async function pdfToText(
     const joined = parts.join("\n\n");
     const textOnly = joined.replace(/\[Page \d+\]/g, "").trim();
     if (textOnly.length < 20)
-      throw new ExtractError("This PDF has no selectable text — it's probably a scan. Try a text-based PDF, or paste the key parts into your brief.");
+      throw new ExtractError("This PDF has no selectable text — it's probably a scan. Try a text-based PDF, or paste the key parts into the Company profile.");
     const c = clampText(joined, opts.maxChars);
     const capped = limit < total && read === limit;
     const truncated = c.truncated || full || capped;

@@ -1,12 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import { useParams, useRouter } from "next/navigation";
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { api, type Approval, type Execution, type MemoryItem, type Objective } from "@/lib/api";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { api, type Approval, type Execution, type ExecutionSummary, type MemoryItem, type Objective, type ObjectiveDetail } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { useConfig } from "@/lib/config";
-import { EmptyState, Icon, OutcomeTag, PageSkeleton, RequireAuth, StatusTag, Tag, VerificationTag, useToast } from "@/components";
+import { EmptyState, Icon, OutcomeTag, PageSkeleton, RequireAuth, StatusTag, Tag, VerificationTag, statusLabel, useToast } from "@/components";
 import { ExportMenu, ReportView, copyText } from "@/components/report";
 import { ApprovalCard, EventFeed, ExceptionCard, evidenceToSources } from "@/components/ops";
 import { eur, longDate, relativeTime } from "@/lib/format";
@@ -23,9 +23,43 @@ import { NowCard } from "./_components/Now";
 export default function ObjectivePage() {
   return (
     <RequireAuth>
-      <ObjectiveConsole />
+      <Suspense fallback={<PageSkeleton />}>
+        <ObjectiveConsole />
+      </Suspense>
     </RequireAuth>
   );
+}
+
+/** The latest attempt lives at the objective's URL; an earlier one at `?execution=<id>` (no decisions, no live stream; its report can still be shared). */
+function attemptHref(objectiveId: string, executionId: string, latestId: string | null) {
+  const base = ROUTES.objective(objectiveId);
+  return executionId === latestId ? base : `${base}?execution=${encodeURIComponent(executionId)}`;
+}
+
+/**
+ * An earlier attempt picked with `?execution=<id>`. The objective snapshot only carries the
+ * latest attempt in full; an earlier one (always finished) is fetched once — it has no live stream.
+ * An id that isn't one of this objective's attempts, or is the latest, shows the current attempt.
+ */
+function useEarlierAttempt(requested: string | null, detail: ObjectiveDetail | null) {
+  const latestId = detail?.execution?.id ?? null;
+  const summary: ExecutionSummary | null = (requested && requested !== latestId && detail?.executions.find((e) => e.id === requested)) || null;
+  const wanted = summary?.id ?? null;
+  const [got, setGot] = useState<{ id: string; execution: Execution | null; failed: boolean } | null>(null);
+  const load = useCallback(async () => {
+    if (!wanted) return;
+    try {
+      const r = await api.getExecution(wanted);
+      setGot({ id: wanted, execution: r.execution, failed: false });
+    } catch {
+      setGot((g) => ({ id: wanted, execution: g?.id === wanted ? g.execution : null, failed: true }));
+    }
+  }, [wanted]);
+  useEffect(() => {
+    void load();
+  }, [load]);
+  const mine = got?.id === wanted ? got : null;
+  return { summary, execution: mine?.execution ?? null, failed: !!mine?.failed, reload: load };
 }
 
 function ObjectiveConsole() {
@@ -36,11 +70,29 @@ function ObjectiveConsole() {
   const { config } = useConfig();
   const { detail, error, reload, stream, partials } = useObjectiveLive(id);
   const [busy, setBusy] = useState<string | null>(null);
+  const earlier = useEarlierAttempt(useSearchParams().get("execution"), detail);
+  /** The earlier attempt being viewed, or null for the current one. */
+  const viewing = earlier.summary;
 
-  const ex = detail?.execution ?? null;
+  const ex = viewing ? earlier.execution : (detail?.execution ?? null);
+  const latestId = detail?.execution?.id ?? null;
   const objective = detail?.objective ?? null;
   const evidence = ex?.evidence;
   const sources = useMemo(() => evidenceToSources(evidence ?? []), [evidence]);
+
+  // Switching attempts swaps the whole story: when focus was lost on the way (or sits on the
+  // link that switched), land on what changed — the earlier-attempt banner, or the title.
+  const shownId = ex?.id ?? null;
+  const lastShown = useRef(shownId);
+  useEffect(() => {
+    if (!shownId) return;
+    const before = lastShown.current;
+    lastShown.current = shownId;
+    if (!before || before === shownId) return;
+    const active = document.activeElement;
+    if (active && active !== document.body && !active.closest(".cs-attempts, .cs-past")) return;
+    document.getElementById(viewing ? "cs-past" : "cs-title")?.focus();
+  }, [shownId, viewing]);
 
   useEffect(() => {
     if (!objective) return;
@@ -87,8 +139,32 @@ function ObjectiveConsole() {
     }
     return <PageSkeleton />;
   }
+  if (viewing && !earlier.execution) {
+    return earlier.failed ? (
+      <div className="narrow" style={{ paddingBlock: 56 }}>
+        <EmptyState
+          icon="alert"
+          titleAs="h1"
+          title={`Attempt #${viewing.attempt} couldn't be loaded`}
+          action={
+            <button type="button" className="btn p" onClick={() => void earlier.reload()}>
+              Try again
+            </button>
+          }
+        >
+          Something went wrong on our side. Nothing was changed.{" "}
+          <Link href={ROUTES.objective(id)} className="cs-inline-link">
+            Back to the current attempt
+          </Link>
+        </EmptyState>
+      </div>
+    ) : (
+      <PageSkeleton />
+    );
+  }
 
   const o = objective!;
+  const current = detail.execution;
   const pendingApproval = ex?.approvals.find((a) => a.status === "PENDING") ?? null;
   const openException = ex?.exceptions.find((x) => x.status === "OPEN") ?? null;
   const terminal = !!ex && ["COMPLETED", "FAILED", "CANCELLED"].includes(ex.status);
@@ -127,12 +203,32 @@ function ObjectiveConsole() {
           </Link>
           <span aria-hidden="true">/</span>
           <span className="cs-crumb-here">
-            Objective{ex && ex.attempt > 1 ? ` · attempt ${ex.attempt}` : ""}
+            Objective{ex && (ex.attempt > 1 || viewing) ? ` · attempt ${ex.attempt}` : ""}
           </span>
         </div>
+        {viewing && (
+          <div className="cs-past" id="cs-past" tabIndex={-1}>
+            <Icon name="clock" size={16} />
+            <p>
+              <b>Viewing attempt #{viewing.attempt}</b>, an earlier attempt of this objective.
+              {current && (
+                <span className="cs-past-sub">
+                  {" "}
+                  The current attempt is #{current.attempt}: {statusLabel(current.status).toLowerCase()}.
+                </span>
+              )}
+            </p>
+            <Link href={ROUTES.objective(o.id)} className="btn sm">
+              <Icon name="back" />
+              Back to the current attempt
+            </Link>
+          </div>
+        )}
         <div className="cs-head-row">
           <div className="cs-head-main">
-            <h1>{o.title}</h1>
+            <h1 id="cs-title" tabIndex={-1}>
+              {o.title}
+            </h1>
             <div className="cs-status" data-testid="execution-status" data-status={ex?.status ?? o.status} data-verification={ex?.verificationStatus ?? ""}>
               <StatusTag status={ex?.status ?? o.status} />
               {ex?.verificationStatus && <VerificationTag status={ex.verificationStatus} score={ex.verificationScore} />}
@@ -141,14 +237,14 @@ function ObjectiveConsole() {
             </div>
           </div>
           <div className="cs-actions">
-            {ex?.status === "COMPLETED" && <ShareControls execution={ex} onChange={reload} />}
+            {ex?.status === "COMPLETED" && <ShareControls execution={ex} onChange={viewing ? earlier.reload : reload} />}
             {cancellable && (
               <button type="button" className="btn sm" onClick={() => act("cancel")} aria-busy={busy === "cancel"} disabled={!!busy}>
                 <Icon name="x" />
                 Cancel execution
               </button>
             )}
-            {terminal && (
+            {terminal && !viewing && (
               <button type="button" className="btn sm" onClick={() => act("again")} aria-busy={busy === "again"} disabled={!!busy}>
                 <Icon name="redo" />
                 New attempt
@@ -210,15 +306,15 @@ function ObjectiveConsole() {
       <LifecycleStepper stages={stages} present={present} />
 
       {/* ---------------------------------------------------------------- needs you */}
-      {(pendingApproval || openException) && (
+      {!viewing && (pendingApproval || openException) && (
         <section className="cs-attn" id="cs-attention" aria-labelledby="cs-attn-h">
           <h2 id="cs-attn-h" className="cs-attn-h">
             <span className="cs-attn-dot" aria-hidden="true" />
             Needs your decision
           </h2>
           <div className="cs-attn-list">
-            {pendingApproval && <ApprovalCard approval={pendingApproval} onDone={reload} />}
-            {openException && <ExceptionCard exception={openException} onDone={reload} />}
+            {pendingApproval && <ApprovalCard approval={pendingApproval} onDone={reload} focusAfter="cs-now-h" />}
+            {openException && <ExceptionCard exception={openException} onDone={reload} focusAfter="cs-now-h" />}
           </div>
         </section>
       )}
@@ -247,7 +343,7 @@ function ObjectiveConsole() {
                   <p className="cs-ctx">{o.contextNotes}</p>
                 </details>
               )}
-              <SuccessCriteria objective={o} execution={ex} onSaved={reload} />
+              <SuccessCriteria objective={o} execution={ex} onSaved={reload} readOnly={!!viewing} />
             </div>
           </Stage>
 
@@ -270,7 +366,7 @@ function ObjectiveConsole() {
 
           {ex && (
             <Stage id="cs-execution" n={4} state={st.execution.state} title="Execution" meta={st.execution.note || undefined}>
-              <ExecutionTimeline execution={ex} partials={partials} />
+              <ExecutionTimeline execution={ex} partials={viewing ? {} : partials} />
             </Stage>
           )}
 
@@ -326,7 +422,7 @@ function ObjectiveConsole() {
           {ex && (
             <Stage id="outcome" n={7} state={st.outcome.state} title="Outcome" meta={st.outcome.note || undefined}>
               {ex.status === "COMPLETED" ? (
-                <OutcomePanel objective={o} execution={ex} onExecution={reload} />
+                <OutcomePanel objective={o} execution={ex} onExecution={reload} readOnly={!!viewing} />
               ) : (
                 <div className="cs-empty">
                   <Icon name="target" size={16} />
@@ -348,7 +444,8 @@ function ObjectiveConsole() {
         </div>
 
         <div className="cs-side">
-          <NowCard objective={o} execution={ex} stream={stream} openException={openException} />
+          {/* "Now" is the current attempt; an earlier one has the banner above instead. */}
+          {!viewing && <NowCard objective={o} execution={ex} stream={stream} openException={openException} />}
           {ex && (
             <section className="cs-panel cs-activity" aria-labelledby="cs-act-h">
               <div className="cs-panel-h">
@@ -367,12 +464,16 @@ function ObjectiveConsole() {
               <ol className="cs-attempts">
                 {detail.executions.map((e) => (
                   <li key={e.id} className={e.id === ex?.id ? "is-on" : undefined}>
-                    <span className="cs-attempt-n">#{e.attempt}</span>
-                    <span className="cs-attempt-t">
-                      {relativeTime(e.createdAt)}
-                      {e.id === ex?.id && <span className="sr-only"> (shown)</span>}
-                    </span>
-                    <StatusTag status={e.status} />
+                    <Link href={attemptHref(o.id, e.id, latestId)} className="cs-attempt" aria-current={e.id === ex?.id ? "page" : undefined}>
+                      <span className="cs-attempt-n">
+                        <span className="sr-only">Attempt </span>#{e.attempt}
+                      </span>
+                      <span className="cs-attempt-t">
+                        {relativeTime(e.createdAt)}
+                        {e.id === latestId && <span className="cs-attempt-cur"> · current</span>}
+                      </span>
+                      <StatusTag status={e.status} />
+                    </Link>
                   </li>
                 ))}
               </ol>
@@ -443,7 +544,7 @@ function ApprovalRecord({ objective, execution, pending, blocked }: { objective:
       )}
       {!pending && decided.length === 0 && !onHold && (
         <div className="cs-empty">
-          <Icon name="check" size={16} />
+          <Icon name={["FAILED", "CANCELLED"].includes(execution.status) ? "info" : "check"} size={16} />
           <p>
             {["PLANNING", "PLANNED"].includes(execution.status) || (execution.status === "BLOCKED" && !execution.costCents)
               ? "The plan and its cost are reviewed here before the AI Team starts."
@@ -485,17 +586,40 @@ function MemoryList({ items }: { items: MemoryItem[] }) {
   );
 }
 
-function SuccessCriteria({ objective, execution, onSaved }: { objective: Objective; execution: Execution | null; onSaved: () => void }) {
+function SuccessCriteria({ objective, execution, onSaved, readOnly = false }: { objective: Objective; execution: Execution | null; onSaved: () => void; readOnly?: boolean }) {
   const toast = useToast();
-  const editable = ["DRAFT", "WAITING_FOR_APPROVAL", "PLANNED"].includes(objective.status) || (objective.status === "BLOCKED" && !execution?.costCents);
+  const editable = !readOnly && (["DRAFT", "WAITING_FOR_APPROVAL", "PLANNED"].includes(objective.status) || (objective.status === "BLOCKED" && !execution?.costCents));
   const [editing, setEditing] = useState(false);
   const [rows, setRows] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
+  // Edit, Save, Cancel and Remove each unmount the control that had focus: say where it goes
+  // instead (a row's input, -1 for Add, "edit" for the Edit button) so it never drops to <body>.
+  const [focusTo, setFocusTo] = useState<number | "edit" | null>(null);
+  const editRef = useRef<HTMLButtonElement>(null);
+  const addRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (focusTo === null) return;
+    const el = focusTo === "edit" ? editRef.current : ((focusTo >= 0 ? document.getElementById(`crit-${focusTo}`) : null) ?? addRef.current);
+    el?.focus();
+    setFocusTo(null);
+  }, [focusTo, editing, rows.length]);
   const start = () => {
-    setRows(objective.criteria.map((c) => c.description));
+    const r = objective.criteria.map((c) => c.description);
+    setRows(r);
     setEditing(true);
+    setFocusTo(r.length ? 0 : -1);
   };
-  const tooShort = rows.some((r) => r.trim().length > 0 && r.trim().length < 3);
+  const stop = () => {
+    setEditing(false);
+    setFocusTo("edit");
+  };
+  const remove = (i: number) => {
+    const left = rows.length - 1;
+    setRows((x) => x.filter((_, j) => j !== i));
+    setFocusTo(left > 0 ? Math.min(i, left - 1) : -1);
+  };
+  const short = (r: string) => r.trim().length > 0 && r.trim().length < 3;
+  const tooShort = rows.some(short);
   const save = async () => {
     setSaving(true);
     try {
@@ -503,7 +627,7 @@ function SuccessCriteria({ objective, execution, onSaved }: { objective: Objecti
         objective.id,
         rows.filter((r) => r.trim().length >= 3).map((description) => ({ description }))
       );
-      setEditing(false);
+      stop();
       toast("Success criteria updated");
       onSaved();
     } catch (e) {
@@ -519,7 +643,7 @@ function SuccessCriteria({ objective, execution, onSaved }: { objective: Objecti
           Success criteria <span className="cs-count">{objective.criteria.length}</span>
         </h3>
         {editable && !editing && (
-          <button type="button" className="cs-linkbtn" onClick={start}>
+          <button type="button" className="cs-linkbtn" onClick={start} ref={editRef}>
             <Icon name="edit" size={13} />
             Edit
           </button>
@@ -533,23 +657,52 @@ function SuccessCriteria({ objective, execution, onSaved }: { objective: Objecti
                 <span className="sr-only">Criterion </span>
                 {i + 1}
               </label>
-              <input id={`crit-${i}`} className="f" value={r} maxLength={300} onChange={(e) => setRows((x) => x.map((y, j) => (j === i ? e.target.value : y)))} />
-              <button type="button" className="ibtn" aria-label={`Remove criterion ${i + 1}`} onClick={() => setRows((x) => x.filter((_, j) => j !== i))}>
+              <input
+                id={`crit-${i}`}
+                className="f"
+                value={r}
+                maxLength={300}
+                onChange={(e) => setRows((x) => x.map((y, j) => (j === i ? e.target.value : y)))}
+                aria-invalid={short(r) || undefined}
+                aria-describedby={short(r) ? "crit-warn" : undefined}
+              />
+              <button type="button" className="ibtn" aria-label={`Remove criterion ${i + 1}`} onClick={() => remove(i)}>
                 <Icon name="x" />
               </button>
             </div>
           ))}
-          {tooShort && <p className="cs-sc-warn">Each criterion needs at least 3 characters.</p>}
+          <div role="status" className="cs-sc-live">
+            {tooShort && (
+              <p className="cs-sc-warn" id="crit-warn">
+                Each criterion needs at least 3 characters.
+              </p>
+            )}
+          </div>
           <div className="cs-sc-btns">
             {rows.length < 6 && (
-              <button type="button" className="btn sm" onClick={() => setRows((x) => [...x, ""])}>
+              <button
+                type="button"
+                className="btn sm"
+                ref={addRef}
+                onClick={() => {
+                  setRows((x) => [...x, ""]);
+                  setFocusTo(rows.length);
+                }}
+              >
                 <Icon name="plus" /> Add
               </button>
             )}
-            <button type="button" className="btn p sm" onClick={save} aria-busy={saving} disabled={saving || tooShort || !rows.some((r) => r.trim().length >= 3)}>
+            <button
+              type="button"
+              className="btn p sm"
+              onClick={save}
+              aria-busy={saving}
+              disabled={saving || tooShort || !rows.some((r) => r.trim().length >= 3)}
+              aria-describedby={tooShort ? "crit-warn" : undefined}
+            >
               Save
             </button>
-            <button type="button" className="btn ghost sm" onClick={() => setEditing(false)}>
+            <button type="button" className="btn ghost sm" onClick={stop}>
               Cancel
             </button>
           </div>

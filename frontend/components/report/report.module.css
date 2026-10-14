@@ -307,6 +307,16 @@ a.srcTitle:hover {
 .exportMenu [role="menuitem"] {
   align-items: flex-start;
 }
+/* The shared menu style only tints the focused item (about 1.05:1 against the menu); arrow-key
+   focus here needs a ring a keyboard user can see. The wrapper raises specificity above it. */
+.exportWrap .exportMenu [role="menuitem"]:hover {
+  background: var(--accent-soft);
+}
+.exportWrap .exportMenu [role="menuitem"]:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+  background: var(--accent-soft);
+}
 .exportMenu [role="menuitem"][aria-disabled="true"] {
   opacity: 0.55;
   cursor: progress;

@@ -52,10 +52,14 @@ function blockedAt(ex: Execution, x: ExceptionItem | null): number {
   return ex.plan && ex.steps.length ? 2 : 1;
 }
 
-/** Furthest stage a failed or cancelled execution reached. */
+/**
+ * Furthest stage a failed or cancelled execution reached. Rejecting or cancelling a
+ * plan marks its untouched steps SKIPPED: only a step that actually started counts as
+ * execution, so a rejected plan stops at Approval instead of reading as approved.
+ */
 function reachedAt(ex: Execution): number {
   if (ex.verification) return 4;
-  if (ex.costCents > 0 || ex.steps.some((s) => s.status !== "PENDING")) return 3;
+  if (ex.costCents > 0 || ex.steps.some((s) => s.status !== "PENDING" && s.status !== "SKIPPED")) return 3;
   return ex.plan ? 2 : 1;
 }
 

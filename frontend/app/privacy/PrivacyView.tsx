@@ -107,7 +107,7 @@ export function PrivacyView() {
                     <b>Company Context and memory</b> — the business profile, documents and website you provide, and learnings you confirm
                   </>
                 }
-                why="To ground your objectives in your business. Documents are treated as data, never as instructions to the AI."
+                why="To ground your objectives in your business. Documents are passed to the AI as untrusted data, not as instructions."
                 basis="Art. 6(1)(b)"
               />
               <DataRow
