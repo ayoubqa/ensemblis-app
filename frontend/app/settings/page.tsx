@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react"
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Avatar, Icon, Modal, PageHead, RequireAuth, Tag, ThemeSwitch, useToast } from "@/components";
+import { leavingAfterSignOut } from "@/components/RequireAuth";
 import { api, setToken, type Autonomy, type Organization, type User } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { CONTACT_EMAIL, useConfig } from "@/lib/config";
@@ -136,8 +137,12 @@ function ProfileCard({ user }: { user: User }) {
           <label className="l" htmlFor="pf-name">
             Full name
           </label>
-          <input id="pf-name" className="f" value={form.name} onChange={set("name")} autoComplete="name" aria-invalid={!!nameErr} maxLength={120} />
-          {nameErr && <div className="err">{nameErr}</div>}
+          <input id="pf-name" className="f" value={form.name} onChange={set("name")} autoComplete="name" aria-invalid={!!nameErr} aria-describedby={nameErr ? "pf-name-err" : undefined} maxLength={120} />
+          {nameErr && (
+            <div className="err" id="pf-name-err" role="alert">
+              {nameErr}
+            </div>
+          )}
         </div>
         <div>
           <label className="l" htmlFor="pf-role">
@@ -186,6 +191,8 @@ function ProfileCard({ user }: { user: User }) {
 }
 
 // ------------------------------------------------------------- password
+const PW_INPUT = { cur: "pw-cur", next: "pw-new", confirm: "pw-confirm" } as const;
+
 function PasswordCard() {
   const toast = useToast();
   const [cur, setCur] = useState("");
@@ -194,6 +201,12 @@ function PasswordCard() {
   const [show, setShow] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<{ field: "cur" | "next" | "confirm" | "form"; msg: string } | null>(null);
+  // Field errors are announced (role="alert") and tied to their field (aria-describedby);
+  // once rendered, focus moves to the field that needs fixing.
+  useEffect(() => {
+    if (err && err.field !== "form") document.getElementById(PW_INPUT[err.field])?.focus();
+  }, [err]);
+  const errFor = (f: keyof typeof PW_INPUT) => (err?.field === f ? { "aria-invalid": true, "aria-describedby": `${PW_INPUT[f]}-err` } : { "aria-invalid": false });
 
   const strength = useMemo(() => {
     let s = 0;
@@ -237,16 +250,22 @@ function PasswordCard() {
           <label className="l" htmlFor="pw-cur">
             Current password
           </label>
-          <input id="pw-cur" className="f" type={type} value={cur} onChange={(e) => setCur(e.target.value)} autoComplete="current-password" aria-invalid={err?.field === "cur"} />
-          {err?.field === "cur" && <div className="err">{err.msg}</div>}
+          <input id="pw-cur" className="f" type={type} value={cur} onChange={(e) => setCur(e.target.value)} autoComplete="current-password" {...errFor("cur")} />
+          {err?.field === "cur" && (
+            <div className="err" id="pw-cur-err" role="alert">
+              {err.msg}
+            </div>
+          )}
         </div>
         <div>
           <label className="l" htmlFor="pw-new">
             New password
           </label>
-          <input id="pw-new" className="f" type={type} value={next} onChange={(e) => setNext(e.target.value)} autoComplete="new-password" aria-invalid={err?.field === "next"} aria-describedby="pw-strength" />
+          <input id="pw-new" className="f" type={type} value={next} onChange={(e) => setNext(e.target.value)} autoComplete="new-password" aria-describedby="pw-strength" {...errFor("next")} />
           {err?.field === "next" ? (
-            <div className="err">{err.msg}</div>
+            <div className="err" id="pw-new-err" role="alert">
+              {err.msg}
+            </div>
           ) : (
             <div className="hint row" id="pw-strength" style={{ gap: 8 }}>
               <span className="meter" style={{ width: 90 }} aria-hidden="true">
@@ -260,8 +279,12 @@ function PasswordCard() {
           <label className="l" htmlFor="pw-confirm">
             Confirm new password
           </label>
-          <input id="pw-confirm" className="f" type={type} value={confirm} onChange={(e) => setConfirm(e.target.value)} autoComplete="new-password" aria-invalid={err?.field === "confirm"} />
-          {err?.field === "confirm" && <div className="err">{err.msg}</div>}
+          <input id="pw-confirm" className="f" type={type} value={confirm} onChange={(e) => setConfirm(e.target.value)} autoComplete="new-password" {...errFor("confirm")} />
+          {err?.field === "confirm" && (
+            <div className="err" id="pw-confirm-err" role="alert">
+              {err.msg}
+            </div>
+          )}
         </div>
         <label className="row small" style={{ gap: 8, cursor: "pointer" }}>
           <input type="checkbox" checked={show} onChange={(e) => setShow(e.target.checked)} />
@@ -602,6 +625,7 @@ function GuestSettings({ user }: { user: User }) {
 
   const endSession = () => {
     setConfirmEnd(false);
+    leavingAfterSignOut();
     signOut();
     toast("Guest session ended");
     router.push(ROUTES.home);
@@ -700,6 +724,7 @@ function DangerCard() {
 
   const doSignOut = () => {
     setConfirmOut(false);
+    leavingAfterSignOut();
     signOut();
     toast("Signed out");
     router.push(ROUTES.home);

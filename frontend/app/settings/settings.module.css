@@ -5,7 +5,8 @@
   width: 44px;
   height: 26px;
   border-radius: 999px;
-  border: 1px solid var(--line2);
+  /* Off: the boundary and the knob carry the state (3:1 non-text contrast on the card). */
+  border: 1px solid var(--field-line);
   background: var(--line2);
   cursor: pointer;
   padding: 0;
@@ -19,9 +20,9 @@
   width: 20px;
   height: 20px;
   border-radius: 50%;
-  background: var(--surface);
+  background: var(--muted);
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
-  transition: transform 0.18s ease;
+  transition: transform 0.18s ease, background 0.18s;
 }
 .switch[aria-checked="true"] {
   background: var(--accent-fill);

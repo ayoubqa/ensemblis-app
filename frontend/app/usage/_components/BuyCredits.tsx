@@ -75,9 +75,9 @@ export function AddFunds({ packs, transactions, orgName }: { packs: CreditPack[]
                 onClick={() => pay(p)}
                 disabled={!!busy}
                 aria-busy={busy === p.id}
-                aria-label={`Add ${eur(p.credits)} to your balance for ${eur(p.priceCents)}`}
               >
                 Pay {eur(p.priceCents)}
+                <span className="sr-only"> to add {eur(p.credits)} to your balance</span>
               </button>
             </div>
           </li>

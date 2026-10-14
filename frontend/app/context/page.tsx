@@ -119,7 +119,7 @@ function CompanyContextView() {
       <PageHead
         eyebrow="Company Context"
         title="What Ensemblis knows about your business"
-        sub="Stable knowledge every objective uses automatically, so you never repeat it. Documents and your website are read as evidence the AI Team can cite — never as instructions."
+        sub="Stable knowledge every objective uses automatically, so you never repeat it. Documents and your website are read as evidence the AI Team can cite, and passed to the AI as untrusted data, not as instructions."
       />
 
       <nav className="op-glance" aria-label="Company Context at a glance">
@@ -164,7 +164,7 @@ function CompanyContextView() {
             Memory
           </span>
           <span className="op-kpi-v">{memory ? num(active) : "—"}</span>
-          <span className="op-kpi-m">{waiting ? `${plural(waiting, "item")} waiting for you` : "active items, used in every plan"}</span>
+          <span className="op-kpi-m">{waiting ? `${plural(waiting, "item")} waiting for you` : "active · the most relevant are used in each plan"}</span>
         </a>
       </nav>
 
@@ -248,7 +248,16 @@ function CompanyContextView() {
                 <p className="op-sec-sub">Public information the AI Team can cite as evidence.</p>
               </div>
             </div>
-            <WebsiteCard data={data} value={String(form.website ?? "")} onChange={(v) => setField("website", v)} onData={onData} />
+            <WebsiteCard
+              data={data}
+              value={String(form.website ?? "")}
+              onChange={(v) => setField("website", v)}
+              // Reading the website saves only its address: keep unsaved profile edits.
+              onData={(d) => {
+                setData(d);
+                setForm((f) => ({ ...f, website: d.context.website }));
+              }}
+            />
           </section>
 
           <section id="documents" className="op-sec" aria-labelledby="h-docs">
@@ -507,8 +516,14 @@ function Memory({ items, reload }: { items: MemoryItem[] | null; reload: () => P
   const [newKind, setNewKind] = useState<MemoryItem["kind"]>("PREFERENCE");
   const [newText, setNewText] = useState("");
   const [deleting, setDeleting] = useState<MemoryItem | null>(null);
+  // One change at a time: a second click or Enter while a request is out must not add a duplicate.
+  const [busy, setBusy] = useState<string | null>(null);
+  const inFlight = useRef(false);
 
-  const run = async (fn: () => Promise<unknown>, ok: string) => {
+  const run = async (key: string, fn: () => Promise<unknown>, ok: string) => {
+    if (inFlight.current) return false;
+    inFlight.current = true;
+    setBusy(key);
     try {
       await fn();
       toast(ok);
@@ -517,22 +532,41 @@ function Memory({ items, reload }: { items: MemoryItem[] | null; reload: () => P
     } catch (e) {
       toast.error((e as Error).message);
       return false;
+    } finally {
+      inFlight.current = false;
+      setBusy(null);
     }
   };
+  // The list re-renders after each change and the control that held focus is often gone
+  // (Confirm, the edit field, a deleted row): keep the keyboard on the same item, its
+  // neighbour at the same position, or the add field.
+  const refocus = (id: string, at: number, prefer = "[data-mem-edit]") =>
+    requestAnimationFrame(() =>
+      requestAnimationFrame(() => {
+        const rows = Array.from(document.querySelectorAll<HTMLElement>('#memory [data-testid="memory-item"]'));
+        const row = rows.find((r) => r.dataset.memId === id) ?? rows[Math.min(at, rows.length - 1)];
+        (row?.querySelector<HTMLElement>(prefer) ?? row?.querySelector<HTMLElement>("[data-mem-edit]") ?? document.getElementById("mem-new"))?.focus();
+      })
+    );
   const pending = items?.filter((m) => m.status === "PENDING_CONFIRMATION") ?? [];
   const active = items?.filter((m) => m.status === "ACTIVE") ?? [];
-  const shown = [...pending, ...active].filter((m) => filter === "ALL" || (filter === "WAITING" ? m.status === "PENDING_CONFIRMATION" : m.kind === filter));
   const filters: { id: string; label: string; n: number }[] = [
     { id: "ALL", label: "All", n: pending.length + active.length },
     ...(pending.length ? [{ id: "WAITING", label: "Waiting for you", n: pending.length }] : []),
     ...KINDS.map((k) => ({ id: k, label: kindLabel(k), n: [...pending, ...active].filter((m) => m.kind === k).length })).filter((f) => f.n > 0),
   ];
+  // A chip disappears when its last item is confirmed or deleted: fall back to All rather than an empty, chip-less view.
+  const current = filters.some((f) => f.id === filter) ? filter : "ALL";
+  useEffect(() => {
+    if (items && current !== filter) setFilter(current);
+  }, [items, current, filter]);
+  const shown = [...pending, ...active].filter((m) => current === "ALL" || (current === "WAITING" ? m.status === "PENDING_CONFIRMATION" : m.kind === current));
   const short = (s: string) => (s.length > 48 ? `${s.slice(0, 48)}…` : s);
 
-  const row = (m: MemoryItem) => {
+  const row = (m: MemoryItem, i: number) => {
     const isPending = m.status === "PENDING_CONFIRMATION";
     return (
-      <li key={m.id} className={isPending ? "op-memrow is-pending" : "op-memrow"} data-testid="memory-item">
+      <li key={m.id} className={isPending ? "op-memrow is-pending" : "op-memrow"} data-testid="memory-item" data-mem-id={m.id}>
         <div style={{ minWidth: 0 }}>
           <div className="op-tags">
             <Tag variant="gray">{kindLabel(m.kind)}</Tag>
@@ -559,20 +593,32 @@ function Memory({ items, reload }: { items: MemoryItem[] | null; reload: () => P
                   if (e.key === "Escape") {
                     e.preventDefault();
                     setEditing(null);
+                    refocus(m.id, i);
                   }
                 }}
               />
               <button
                 type="button"
                 className="btn sm p"
-                disabled={text.trim().length < 5}
+                disabled={text.trim().length < 5 || !!busy}
+                aria-busy={busy === `save:${m.id}`}
                 onClick={async () => {
-                  if (await run(() => api.updateMemory(m.id, { content: text.trim() }), "Memory updated")) setEditing(null);
+                  if (await run(`save:${m.id}`, () => api.updateMemory(m.id, { content: text.trim() }), "Memory updated")) {
+                    setEditing(null);
+                    refocus(m.id, i);
+                  } else refocus(m.id, i, `#mem-edit-${m.id}`);
                 }}
               >
                 Save
               </button>
-              <button type="button" className="btn sm ghost" onClick={() => setEditing(null)}>
+              <button
+                type="button"
+                className="btn sm ghost"
+                onClick={() => {
+                  setEditing(null);
+                  refocus(m.id, i);
+                }}
+              >
                 Cancel
               </button>
             </div>
@@ -583,7 +629,17 @@ function Memory({ items, reload }: { items: MemoryItem[] | null; reload: () => P
         </div>
         <div className="op-memrow-act">
           {isPending && (
-            <button type="button" className="btn sm p" onClick={() => run(() => api.updateMemory(m.id, { status: "ACTIVE" }), "Confirmed — it will be used from now on")}>
+            <button
+              type="button"
+              className="btn sm p"
+              data-mem-confirm
+              disabled={!!busy}
+              aria-busy={busy === `confirm:${m.id}`}
+              onClick={async () => {
+                const ok = await run(`confirm:${m.id}`, () => api.updateMemory(m.id, { status: "ACTIVE" }), "Confirmed — it will be used from now on");
+                refocus(m.id, i, ok ? "[data-mem-edit]" : "[data-mem-confirm]");
+              }}
+            >
               <Icon name="check" />
               Confirm
             </button>
@@ -591,6 +647,7 @@ function Memory({ items, reload }: { items: MemoryItem[] | null; reload: () => P
           <button
             type="button"
             className="ibtn"
+            data-mem-edit
             aria-label={`Edit memory: ${short(m.content)}`}
             onClick={() => {
               setEditing(m.id);
@@ -617,7 +674,7 @@ function Memory({ items, reload }: { items: MemoryItem[] | null; reload: () => P
             {pending.length > 0 && <span className="op-count is-warn">{num(pending.length)} waiting</span>}
           </h2>
           <p className="op-sec-sub">
-            What Ensemblis learned from operations: preferences, decisions, lessons, constraints and facts. Only active items are used. Low-risk preferences are remembered automatically; anything consequential or sensitive waits for your confirmation.
+            What Ensemblis learned from operations: preferences, decisions, lessons, constraints and facts. Only active items are used, and each plan draws on the ones most relevant to its objective. Low-risk preferences are remembered automatically; anything consequential or sensitive waits for your confirmation.
           </p>
         </div>
       </div>
@@ -626,7 +683,7 @@ function Memory({ items, reload }: { items: MemoryItem[] | null; reload: () => P
         <div className="op-mem-tools">
           <div className="op-tags" role="group" aria-label="Filter memory">
             {filters.map((f) => (
-              <button key={f.id} type="button" className={filter === f.id ? "chip on" : "chip"} aria-pressed={filter === f.id} onClick={() => setFilter(f.id)}>
+              <button key={f.id} type="button" className={current === f.id ? "chip on" : "chip"} aria-pressed={current === f.id} onClick={() => setFilter(f.id)}>
                 {f.label} <span className="op-meta">{num(f.n)}</span>
               </button>
             ))}
@@ -643,7 +700,7 @@ function Memory({ items, reload }: { items: MemoryItem[] | null; reload: () => P
       ) : (
         <div className="op-panel op-quiet">
           <Icon name="layers" />
-          {filter === "ALL" ? "Nothing remembered yet. Completed executions propose what is worth keeping; you can also add items below." : "Nothing in this group."}
+          {current === "ALL" ? "Nothing remembered yet. Completed executions propose what is worth keeping; you can also add items below." : "Nothing in this group."}
         </div>
       )}
 
@@ -652,7 +709,12 @@ function Memory({ items, reload }: { items: MemoryItem[] | null; reload: () => P
         onSubmit={async (e) => {
           e.preventDefault();
           if (newText.trim().length < 5) return;
-          if (await run(() => api.addMemory({ kind: newKind, content: newText.trim() }), "Remembered")) setNewText("");
+          if (await run("add", () => api.addMemory({ kind: newKind, content: newText.trim() }), "Remembered")) {
+            setNewText("");
+            // Show the new item: a filter on another group would hide it.
+            if (current !== newKind) setFilter("ALL");
+          }
+          document.getElementById("mem-new")?.focus();
         }}
       >
         <div>
@@ -673,7 +735,7 @@ function Memory({ items, reload }: { items: MemoryItem[] | null; reload: () => P
           </label>
           <input id="mem-new" className="f" placeholder="e.g. Board decks use euros, not dollars" value={newText} maxLength={600} onChange={(e) => setNewText(e.target.value)} />
         </div>
-        <button type="submit" className="btn" disabled={newText.trim().length < 5}>
+        <button type="submit" className="btn" disabled={newText.trim().length < 5 || !!busy} aria-busy={busy === "add"}>
           <Icon name="plus" />
           Add to memory
         </button>
@@ -683,7 +745,13 @@ function Memory({ items, reload }: { items: MemoryItem[] | null; reload: () => P
         what={deleting ? "Delete this memory?" : null}
         detail={deleting ? `“${short(deleting.content)}” will no longer be used when planning or executing objectives.` : ""}
         onConfirm={async () => {
-          if (deleting && (await run(() => api.deleteMemory(deleting.id), "Memory deleted"))) setDeleting(null);
+          if (!deleting) return;
+          const at = shown.findIndex((m) => m.id === deleting.id);
+          if (await run("delete", () => api.deleteMemory(deleting.id), "Memory deleted")) {
+            setDeleting(null);
+            // The dialog can't return focus to the deleted row: go to the next item instead.
+            refocus(deleting.id, at);
+          }
         }}
         onClose={() => setDeleting(null)}
       />

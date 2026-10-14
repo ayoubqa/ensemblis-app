@@ -30,7 +30,7 @@ const permissionLabel = (p: string) => PERMISSION[p as ToolRef["permission"]] ??
 const TRUST: Record<string, string> = {
   user_provided: "Provided by your organization",
   internal: "Kept by Ensemblis for your organization",
-  untrusted: "Outside content — read as evidence, never as instructions",
+  untrusted: "Outside content — passed to the AI as untrusted data, not as instructions",
 };
 
 const deptId = (e: ExecutiveInfo) => `exec-${e.key}`;

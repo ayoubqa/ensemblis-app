@@ -1,10 +1,12 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
-import { api, type ExceptionItem, type RiskLevel } from "@/lib/api";
-import { EmptyState, Icon, PageHead, RequireAuth, SkeletonText, Tabs } from "@/components";
+import { api, type Attention, type ExceptionItem, type RiskLevel } from "@/lib/api";
+import { EmptyState, Icon, PageHead, refreshAttention, RequireAuth, SkeletonText, Tabs, useShell } from "@/components";
 import { ExceptionCard } from "@/components/ops";
 import { num, plural } from "@/lib/format";
+import { ROUTES } from "@/lib/routes";
 
 export default function ExceptionsPage() {
   return (
@@ -38,9 +40,18 @@ const KIND_SHORT: Record<ExceptionItem["kind"], string> = {
 };
 
 function ExceptionCenter() {
+  // With no open exception, pending approvals still pause work. The header's counts are polled
+  // only every 60s, so the banner reads a fresh count on every load (and nudges the header).
+  const { attention } = useShell();
   const [tab, setTab] = useState<"OPEN" | "ALL">("OPEN");
   const [rows, setRows] = useState<ExceptionItem[] | null>(null);
-  const load = useCallback(async () => setRows((await api.listExceptions(tab)).exceptions), [tab]);
+  const [fresh, setFresh] = useState<Attention | null>(null);
+  const load = useCallback(async () => {
+    const [list, counts] = await Promise.all([api.listExceptions(tab), api.attention().catch(() => null)]);
+    setRows(list.exceptions);
+    setFresh(counts);
+    refreshAttention();
+  }, [tab]);
   useEffect(() => {
     setRows(null);
     load().catch(() => setRows([]));
@@ -49,6 +60,10 @@ function ExceptionCenter() {
   const open = rows?.filter((x) => x.status === "OPEN") ?? [];
   const kinds = Array.from(new Set(open.map((x) => KIND_SHORT[x.kind])));
   const executions = new Set(open.map((x) => x.executionId)).size;
+  const counts = fresh ?? attention;
+  const approvals = counts?.approvals ?? 0;
+  // Only say nothing needs the person once the approval count is known to be zero.
+  const allClear = !open.length && counts !== null && approvals === 0;
 
   const groups: { key: string; title: string; sub?: string; items: ExceptionItem[] }[] =
     tab === "OPEN"
@@ -77,18 +92,38 @@ function ExceptionCenter() {
       />
 
       {tab === "OPEN" && rows !== null && (
-        <div className={open.length ? "op-attn is-warn" : "op-attn is-clear"} role="status">
+        <div id="exceptions-status" tabIndex={-1} className={open.length ? "op-attn is-warn" : allClear ? "op-attn is-clear" : "op-attn"} role="status">
           <span className="op-ico" aria-hidden="true">
-            <Icon name={open.length ? "alert" : "shield"} />
+            <Icon name={open.length ? "alert" : approvals ? "check" : "shield"} />
           </span>
           <div className="op-attn-main">
             <div className="op-attn-t">
-              {open.length ? `${plural(executions, "execution")} ${executions === 1 ? "is" : "are"} waiting for you` : "Nothing needs you right now"}
+              {open.length
+                ? `${plural(executions, "execution")} ${executions === 1 ? "is" : "are"} waiting for you`
+                : allClear
+                  ? "Nothing needs you right now"
+                  : approvals
+                    ? `${plural(approvals, "decision")} waiting for your approval`
+                    : "No open exceptions"}
             </div>
             <div className="op-attn-d">
-              {open.length ? `${plural(open.length, "open exception")}: ${kinds.join(", ")}. The work stays paused until you respond.` : "Every execution is either progressing on its own or finished."}
+              {open.length
+                ? `${plural(open.length, "open exception")}: ${kinds.join(", ")}. The work stays paused until you respond.`
+                : allClear
+                  ? "Every execution is either progressing on its own or finished."
+                  : approvals
+                    ? "There are no open exceptions. That work stays paused until you decide in Approvals."
+                    : "Nothing is blocked waiting for an answer from you."}
             </div>
           </div>
+          {!open.length && approvals > 0 && (
+            <div className="op-attn-act">
+              <Link href={ROUTES.approvals} className="btn sm">
+                Review approvals
+                <Icon name="arrow" />
+              </Link>
+            </div>
+          )}
         </div>
       )}
 
@@ -125,7 +160,7 @@ function ExceptionCenter() {
               </div>
               <div className="op-stack">
                 {g.items.map((x) => (
-                  <ExceptionCard key={x.id} exception={x} onDone={load} showObjective />
+                  <ExceptionCard key={x.id} exception={x} onDone={load} focusAfter="exceptions-status" showObjective />
                 ))}
               </div>
             </section>

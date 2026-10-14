@@ -63,7 +63,8 @@ function ApprovalCenter() {
       <PageHead eyebrow="Approval Center" title="Approvals" sub="Plans and spending that need a person's authorization before the AI Team acts. Nothing is charged until you approve." />
 
       {tab === "PENDING" && rows !== null && (
-        <div className={pending.length ? "op-attn is-warn" : "op-attn is-clear"} role="status">
+        // Takes focus after the last pending decision is made, so keyboard users keep their place.
+        <div id="approvals-status" tabIndex={-1} className={pending.length ? "op-attn is-warn" : "op-attn is-clear"} role="status">
           <span className="op-ico" aria-hidden="true">
             <Icon name={pending.length ? "alert" : "check"} />
           </span>
@@ -123,7 +124,7 @@ function ApprovalCenter() {
               </div>
               <div className="op-stack">
                 {g.items.map((a) => (
-                  <ApprovalCard key={a.id} approval={a} onDone={load} showObjective />
+                  <ApprovalCard key={a.id} approval={a} onDone={load} focusAfter="approvals-status" showObjective />
                 ))}
               </div>
             </section>
