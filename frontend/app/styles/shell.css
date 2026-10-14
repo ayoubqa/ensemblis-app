@@ -479,6 +479,12 @@
 .seg.sh-seg.icons button {
   padding: 6px 9px;
 }
+/* The selected option must stand out from its neighbours (≥3:1), not only by text colour. */
+.seg.sh-seg button[aria-checked="true"] {
+  background: var(--accent-soft);
+  color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
 .sh-top .seg.sh-seg button[aria-checked="true"] {
   background: var(--surface3);
   color: var(--ink-strong);
@@ -1726,6 +1732,28 @@ h1.sh-empty-t {
   font-size: 14px;
   font-weight: 550;
   box-shadow: 0 18px 44px rgba(3, 8, 16, 0.4);
+}
+/* Dismiss control on errors and action toasts (the toast is navy in both themes). */
+#toasts .toast .sh-toast-x {
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  margin: -6px -8px -6px 2px;
+  border-radius: 8px;
+  color: var(--ens-slate-300);
+  text-decoration: none;
+  transition: background var(--dur) var(--ease), color var(--dur) var(--ease);
+}
+#toasts .toast .sh-toast-x:hover {
+  color: var(--ens-slate-50);
+  background: rgba(183, 195, 209, 0.12);
+}
+#toasts .toast .sh-toast-x .i {
+  width: 15px;
+  height: 15px;
+  color: inherit;
 }
 @media (max-width: 859px) {
   #toasts {

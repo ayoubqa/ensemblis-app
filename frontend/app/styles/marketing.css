@@ -615,6 +615,10 @@
 .mk-shift-col > .mk-k {
   margin-bottom: 4px;
 }
+.mk-shift > .mk-caption {
+  grid-column: 1 / -1;
+  margin-top: 6px;
+}
 .mk-ghost {
   display: flex;
   align-items: center;

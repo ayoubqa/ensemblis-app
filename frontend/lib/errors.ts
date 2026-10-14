@@ -17,12 +17,12 @@ export function errorText(e: unknown, fallback = "Something went wrong"): string
 }
 
 /**
- * Show an API error as a toast. Limit errors (429/403) stay on screen longer
- * with a clock/lock icon so the server's explanation can actually be read.
+ * Show an API error as a toast (error toasts stay until dismissed). Limit errors
+ * (429/403) carry a clock/lock icon next to the server's explanation.
  */
 export function toastApiError(toast: ToastFn, e: unknown, fallback?: string) {
   const msg = errorText(e, fallback);
-  if (e instanceof ApiError && e.status === 429) toast.error(msg, { icon: "clock", duration: 8000 });
-  else if (e instanceof ApiError && e.status === 403) toast.error(msg, { icon: "lock", duration: 8000 });
+  if (e instanceof ApiError && e.status === 429) toast.error(msg, { icon: "clock" });
+  else if (e instanceof ApiError && e.status === 403) toast.error(msg, { icon: "lock" });
   else toast.error(msg);
 }

@@ -37,7 +37,7 @@ export function Home() {
             <ul className="mk-assure" aria-label="Built in">
               <li>
                 <Icon name="check" size={14} />
-                You approve before work starts
+                You approve the plan — or pre-approve a budget
               </li>
               <li>
                 <Icon name="shield" size={14} />

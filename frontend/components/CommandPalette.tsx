@@ -10,6 +10,7 @@ import { useTheme } from "@/lib/theme";
 import { fuzzyScore } from "@/lib/utils";
 import { Icon, type IconName } from "./Icon";
 import { Modal } from "./Modal";
+import { leavingAfterSignOut } from "./RequireAuth";
 import { statusLabel } from "./Tags";
 import { useModKey } from "./UI";
 
@@ -102,6 +103,7 @@ export function CommandPalette({ open, onClose, onShortcuts }: CommandPalettePro
         ? { ...A("save", "Save your work", "userPlus", () => router.push(`${ROUTES.signup}?claim=1`), "create account sign up keep trial"), href: `${ROUTES.signup}?claim=1` }
         : user
           ? A("out", "Sign out", "out", () => {
+              leavingAfterSignOut();
               signOut();
               router.push(ROUTES.home);
             }, "log out logout")

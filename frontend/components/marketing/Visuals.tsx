@@ -155,7 +155,7 @@ export function ToolSprawl() {
 // ------------------------------------------------------------------ Shift: tools → intelligence → execution → outcome
 export function ToolsToOutcome() {
   return (
-    <figure className="mk-shift" aria-labelledby="mk-shift-cap">
+    <figure className="mk-shift" aria-labelledby="mk-shift-cap" aria-describedby="mk-shift-desc">
       <div className="mk-shift-col mk-shift-tools">
         <span className="mk-k">Tools</span>
         {TOOLS.slice(0, 4).map((t) => (
@@ -203,12 +203,16 @@ export function ToolsToOutcome() {
             Verified
           </span>
           <b>Objective achieved</b>
-          <small>Every success criterion measured, every claim cited.</small>
+          <small>Each success criterion measured, claims checked against cited evidence.</small>
         </div>
       </div>
-      <figcaption id="mk-shift-cap" className="sr-only">
-        Fragmented tools give way to an operating layer: the Chief of Staff and your Company Context plan the work, the AI Team executes it across Marketing, Sales, Finance and Operations, and the result is a verified outcome.
-      </figcaption>
+      <Caption>
+        <span id="mk-shift-cap">Illustration — Ensemblis doesn&apos;t connect to these tools; it takes on the research, analysis and reporting people do between them.</span>
+        <span id="mk-shift-desc" className="sr-only">
+          The Chief of Staff and your Company Context plan the work, the AI Team executes it across Marketing, Sales, Finance and Operations, and the result is a verified
+          outcome.
+        </span>
+      </Caption>
     </figure>
   );
 }
@@ -391,7 +395,7 @@ export function EvidenceLayer() {
     { n: 1, kind: "Company Context", label: "Products, customers and goals", icon: "file" },
     { n: 2, kind: "Document", label: "Your uploaded market study", icon: "file" },
     { n: 3, kind: "Web source", label: "Public market statistics", icon: "globe" },
-    { n: 4, kind: "Calculation", label: "Entry economics per market", icon: "chart" },
+    { n: 4, kind: "Company website", label: "Your product pages", icon: "building" },
   ];
   return (
     <figure className="mk-evl" aria-labelledby="mk-evl-cap">
@@ -479,7 +483,7 @@ export function ContextLayer({ fields, memory }: { fields: string[]; memory: str
       <div className="mk-ctx-target">
         <span className="mk-k">Every objective</span>
         <b>Planned and executed with your context</b>
-        <small>Documents are treated as data — never as instructions to the AI.</small>
+        <small>Documents are passed to the AI as untrusted data, not as instructions.</small>
       </div>
       <figcaption id="mk-ctx-cap" className="sr-only">
         Company profile, website, documents and organizational memory feed every objective Ensemblis plans and executes.

@@ -71,8 +71,8 @@ export default function HowItWorksPage() {
             <section id="what" aria-labelledby="h-what">
               <h2 id="h-what">What Ensemblis is</h2>
               <p>
-                <strong>Ensemblis is an AI operating layer for business.</strong> It sits between business intent and execution: you describe the outcome you need, and
-                Ensemblis coordinates AI-powered planning, execution, verification and evidence around it.
+                <strong>{SITE.definition}</strong> It sits between business intent and execution: you describe the outcome you need, and Ensemblis coordinates
+                AI-powered planning, execution, verification and evidence around it.
               </p>
               <p>
                 It is designed for businesses that want AI to execute operational and knowledge work — research, analysis and recommendations — rather than simply
@@ -190,7 +190,8 @@ export default function HowItWorksPage() {
               <h2 id="h-execution">Execution</h2>
               <p>
                 Once a plan is approved, the specialists work through its steps in order. They research and analyse with <strong>read-only tools</strong> — web research,
-                your documents, your Company Context and calculations — and every source they use becomes numbered <strong>evidence</strong>.
+                your documents, your company website, your Company Context and your organization&apos;s memory. Every web page, document and piece of company
+                information they draw on becomes numbered <strong>evidence</strong>.
               </p>
               <p>
                 You can watch each step as it happens. Progress is rebuilt from a persistent activity log, so refreshing the page or closing the tab loses nothing.
@@ -227,7 +228,7 @@ export default function HowItWorksPage() {
               <h2 id="h-context">Company Context and memory</h2>
               <p>
                 <strong>Company Context</strong> is what Ensemblis knows about your business, entered once and used by every objective: {CONTEXT_FIELDS.slice(0, 6).join(", ").toLowerCase()}, your website and your
-                documents (PDF, Word, Excel, CSV and text). Documents are treated as data — never as instructions to the AI.
+                documents (PDF, Word, Excel, CSV and text). Documents are passed to the AI as untrusted data, not as instructions.
               </p>
               <p>
                 <strong>Memory</strong> holds what your organization wants Ensemblis to keep in mind — {MEMORY_KINDS.join(", ").toLowerCase()}. After an execution, Ensemblis

@@ -12,6 +12,7 @@ import { Avatar } from "./Avatar";
 import { Icon, type IconName } from "./Icon";
 import { Logo } from "./Logo";
 import { Modal } from "./Modal";
+import { leavingAfterSignOut } from "./RequireAuth";
 import { refreshAttention, useAttention, useModKey, useShell } from "./Shell";
 import { ThemeSwitch } from "./ThemeSwitch";
 import { useToast } from "./Toast";
@@ -111,6 +112,7 @@ export function Header() {
   const doSignOut = () => {
     setMenu(false);
     setConfirmExit(false);
+    leavingAfterSignOut(); // land on the home page, not /login?next=<this page>
     signOut();
     toast(isGuest ? "Guest session ended" : "Signed out");
     router.push(ROUTES.home);

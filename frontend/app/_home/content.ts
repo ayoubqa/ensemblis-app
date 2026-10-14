@@ -5,6 +5,7 @@
 // app/context/page.tsx. No metrics, customers, testimonials or integrations
 // exist, so none appear. Examples are labelled as examples wherever shown.
 import type { IconName } from "@/components/Icon";
+import { SITE } from "@/lib/site";
 
 /** The product story, in the order Ensemblis runs it. */
 export const STORY: { key: string; title: string; body: string }[] = [
@@ -97,7 +98,7 @@ export const VERIFICATION_CHECKS = ["Objective alignment", "Evidence support", "
 
 export const TRUST: { icon: IconName; title: string; body: string }[] = [
   { icon: "check", title: "You approve before anything is spent", body: "Every plan arrives with its estimated cost. Execution starts only after your approval — or automatically within a budget you set." },
-  { icon: "link", title: "Evidence behind every claim", body: "Web sources, your documents and your Company Context are numbered and cited, so you can see what supports each conclusion." },
+  { icon: "link", title: "Numbered, cited evidence", body: "Web sources, your documents and your Company Context are numbered and cited, so you can see what supports each conclusion." },
   { icon: "shield", title: "A real verification gate", body: "Claims are checked against the cited evidence and every success criterion is assessed. Results that fail are revised or escalated — never quietly passed." },
   { icon: "alert", title: "Exceptions, not guesses", body: "When information is missing or a step fails, Ensemblis stops and tells you what happened, why it matters and what it needs from you." },
   { icon: "lock", title: "Read-only by design", body: "The AI Team researches, analyses, drafts and recommends. It never sends email, publishes, changes your systems or spends money on its own." },
@@ -130,7 +131,7 @@ export const ANSWER_VS_OUTCOME: { answer: string; outcome: string }[] = [
 export const FAQ: { q: string; a: string }[] = [
   {
     q: "What is Ensemblis?",
-    a: "Ensemblis is an AI operating layer for business that turns business objectives into planned, executed and verified work. You describe the outcome; a Chief of Staff plans it, an AI Team executes it, and the result is verified against evidence and your success criteria.",
+    a: `${SITE.definition} You describe the outcome; a Chief of Staff plans it, an AI Team executes it, and the result is verified against evidence and your success criteria.`,
   },
   {
     q: "What does Ensemblis do?",
@@ -154,6 +155,6 @@ export const FAQ: { q: string; a: string }[] = [
   },
   {
     q: "Is my company's data kept separate?",
-    a: "Yes. Each organization's objectives, Company Context, documents and memory are isolated from every other organization, and documents are treated as data — never as instructions to the AI.",
+    a: "Yes. Each organization's objectives, Company Context, documents and memory are isolated from every other organization, and documents are passed to the AI as untrusted data, not as instructions.",
   },
 ];
