@@ -592,6 +592,8 @@ export interface Briefing {
     completedAt: string | null;
     costCents: number;
     outcomeStatus: OutcomeStatus | null;
+    /** True when a person confirmed the outcome (otherwise it is the AI verifier's assessment). */
+    outcomeConfirmed?: boolean;
     outcomeSummary: string | null;
     verificationStatus: VerificationStatus | null;
     verificationScore: number | null;

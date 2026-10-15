@@ -261,7 +261,7 @@ function ChiefOfStaff() {
                             </span>
                           </span>
                           <span className="ws-tags">
-                            <OutcomeTag outcome={r.outcomeStatus} />
+                            <OutcomeTag outcome={r.outcomeStatus} confirmed={!!r.outcomeConfirmed} />
                             <VerificationTag status={r.verificationStatus} score={r.verificationScore} />
                           </span>
                         </Link>

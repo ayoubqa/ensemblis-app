@@ -212,7 +212,7 @@ function ReportCard({ o }: { o: Objective }) {
         <h3 className="ws-rep-t">{o.title}</h3>
         {ex?.outcomeSummary && <p className="ws-rep-s">{ex.outcomeSummary}</p>}
         <span className="ws-tags ws-rep-tags">
-          <OutcomeTag outcome={o.outcomeStatus ?? ex?.outcomeStatus} />
+          <OutcomeTag outcome={o.outcomeStatus ?? ex?.outcomeStatus} confirmed={!!ex?.confirmedOutcomeStatus} />
           <VerificationTag status={ex?.verificationStatus} score={ex?.verificationScore} />
         </span>
         <span className="ws-rep-foot">
