@@ -5,6 +5,11 @@
 //
 // `content` keeps the bounded text agents read; the verifier checks claims
 // against it. `excerpt` is what people see.
+//
+// Provenance is stored with each row: which search provider returned it and
+// for which query, when it was retrieved, and how (`retrieval`): a search
+// snippet, the company website, an uploaded document or company context the
+// organization provided. Only WEB and WIKIPEDIA rows are external evidence.
 
 import type { Evidence, EvidenceKind, Prisma } from "@prisma/client";
 import { prisma } from "../db";
@@ -14,20 +19,39 @@ import { collapse, domainOf, normalizeUrl, truncateChars } from "../research/tex
 export const EVIDENCE_CONTENT_CHARS = 2400;
 const EXCERPT_CHARS = 500;
 
+/** How a source's text was obtained. */
+export type EvidenceRetrieval = "search_snippet" | "website" | "upload" | "provided" | "page_fetch";
+
 export interface EvidenceDraft {
   kind: EvidenceKind;
   title: string;
   url?: string | null;
   content: string;
   publishedAt?: string | null;
+  /** Search provider that returned it (tavily | wikipedia). */
+  provider?: string | null;
+  /** The query that found it. */
+  query?: string | null;
+  /** When the text was retrieved (search time, website fetch time). */
+  retrievedAt?: Date | null;
+  retrieval?: EvidenceRetrieval | null;
+}
+
+/** An evidence row as addEvidence returns it: `created` is false when an existing row was reused. */
+export type AddedEvidence = Evidence & { created: boolean };
+
+/** External evidence: what a web or Wikipedia search returned. Company context, documents and the company website are not. */
+export function isExternalEvidence(kind: EvidenceKind | string): boolean {
+  return kind === "WEB" || kind === "WIKIPEDIA";
 }
 
 /**
  * Adds evidence to an execution, numbering it after what already exists.
  * A URL (or document title) already collected in this execution is reused,
- * not duplicated. Returns the rows in the order of `drafts`, deduplicated.
+ * not duplicated (created: false). Returns the rows in the order of `drafts`,
+ * deduplicated.
  */
-export async function addEvidence(args: { executionId: string; orgId: string; stepId: string | null; drafts: EvidenceDraft[] }): Promise<Evidence[]> {
+export async function addEvidence(args: { executionId: string; orgId: string; stepId: string | null; drafts: EvidenceDraft[] }): Promise<AddedEvidence[]> {
   if (!args.drafts.length) return [];
   return prisma.$transaction(async (tx) => {
     // Serialise numbering per execution (steps of one execution never run concurrently, but be safe).
@@ -36,7 +60,8 @@ export async function addEvidence(args: { executionId: string; orgId: string; st
     const keyOf = (kind: string, url: string | null | undefined, title: string) => (url ? `u:${normalizeUrl(url)}` : `t:${kind}:${title.toLowerCase()}`);
     const byKey = new Map(existing.map((e) => [keyOf(e.kind, e.url, e.title), e]));
     let next = existing.reduce((m, e) => Math.max(m, e.n), 0) + 1;
-    const out: Evidence[] = [];
+    const out: AddedEvidence[] = [];
+    const seen = new Set<string>();
     for (const d of args.drafts) {
       const title = truncateChars(collapse(d.title) || "Untitled source", 200);
       const content = truncateChars(d.content.trim(), EVIDENCE_CONTENT_CHARS);
@@ -44,7 +69,10 @@ export async function addEvidence(args: { executionId: string; orgId: string; st
       const key = keyOf(d.kind, d.url, title);
       const found = byKey.get(key);
       if (found) {
-        if (!out.includes(found)) out.push(found);
+        if (!seen.has(found.id)) {
+          seen.add(found.id);
+          out.push({ ...found, created: false });
+        }
         continue;
       }
       const row = await tx.evidence.create({
@@ -60,10 +88,15 @@ export async function addEvidence(args: { executionId: string; orgId: string; st
           excerpt: truncateChars(collapse(content), EXCERPT_CHARS),
           content,
           publishedAt: d.publishedAt ?? null,
+          provider: d.provider ?? null,
+          query: d.query ? truncateChars(collapse(d.query), 300) : null,
+          retrievedAt: d.retrievedAt ?? null,
+          retrieval: d.retrieval ?? null,
         },
       });
       byKey.set(key, row);
-      out.push(row);
+      seen.add(row.id);
+      out.push({ ...row, created: true });
     }
     return out;
   });
@@ -104,5 +137,11 @@ export function toPublicEvidence(e: Evidence, opts: { publicView?: boolean } = {
     publishedAt: e.publishedAt,
     stepId: e.stepId,
     createdAt: e.createdAt.toISOString(),
+    /** Search provider that returned it (tavily | wikipedia), or null. */
+    provider: e.provider ?? null,
+    /** The search query that found it (withheld on public pages: queries can echo private context). */
+    query: opts.publicView ? null : (e.query ?? null),
+    retrievedAt: e.retrievedAt ? e.retrievedAt.toISOString() : null,
+    retrieval: (e.retrieval ?? null) as EvidenceRetrieval | null,
   };
 }
