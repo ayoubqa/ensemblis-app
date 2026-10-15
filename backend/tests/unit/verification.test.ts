@@ -23,6 +23,20 @@ describe("claim checks (deterministic evidence matching)", () => {
     expect(r[1].note).toMatch(/1 of 1 figure/);
   });
 
+  it("reads ';' lists and ranges in citation markers", () => {
+    const r = checkClaims(extractClaims("Germany is the largest market with 2,450 MW of capacity [1; 2]."), evidence);
+    expect(r[0].evidenceNs).toEqual([1, 2]);
+    expect(r[0].status).toBe("SUPPORTED");
+  });
+
+  it("stores the best-matching evidence sentence as the claim's quote", () => {
+    const r = checkClaims(extractClaims("- Germany is the largest market with 2,450 MW of capacity [1]."), [
+      { n: 1, title: "EU", content: "Data centers are growing. Germany is the largest European data center market with 2,450 MW of operational capacity in 2025. Other markets follow." },
+    ]);
+    expect(r[0].quote).toBe("Germany is the largest European data center market with 2,450 MW of operational capacity in 2025.");
+    expect(r[0].claimType).toBeNull();
+  });
+
   it("flags citations to evidence that doesn't exist", () => {
     const r = checkClaims(extractClaims("Germany leads with 2,450 MW [7]."), evidence);
     expect(r[0].status).toBe("UNSUPPORTED");
@@ -57,12 +71,19 @@ describe("verification gate", () => {
     expect(combineVerification({ report: "", evidenceCount: 0, claimResults: [], criteria: [], model: null }).status).toBe("FAIL");
   });
 
-  it("without the AI verifier, judgement checks are 'not assessed' — never a pass", () => {
+  it("without the AI verifier, the result is UNVERIFIED and judgement checks are 'not assessed' — never a pass", () => {
     const md = report("- Germany is the largest market with 2,450 MW of capacity [1].");
     const v = combineVerification({ report: md, evidenceCount: 2, claimResults: checkClaims(extractClaims(md), evidence), criteria: ["market"], model: null });
-    expect(v.status).toBe("PASS_WITH_WARNINGS");
+    expect(v.status).toBe("UNVERIFIED");
+    expect(v.summary).toMatch(/^Not verified/);
     expect(v.checks.find((c) => c.key === "objective_alignment")!.status).toBe("not_assessed");
+    expect(v.checks.find((c) => c.key === "consistency")!.status).toBe("not_assessed");
     expect(v.humanJudgment.join(" ")).toMatch(/verifier was unavailable/);
+  });
+
+  it("a deterministic failure still FAILs without the AI verifier (UNVERIFIED never hides a failure)", () => {
+    const md = "# R\n\n## Executive summary\n- Germany leads with 2,450 MW [1].\n";
+    expect(combineVerification({ report: md, evidenceCount: 2, claimResults: [], criteria: [], model: null }).status).toBe("FAIL");
   });
 
   it("fails when most success criteria are not met", () => {

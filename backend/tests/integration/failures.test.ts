@@ -50,7 +50,8 @@ describe("step failures and recovery paths", () => {
     expect(ex.steps.filter((s: { status: string }) => s.status === "COMPLETED")).toHaveLength(2);
     const exceptions = (await api().get("/api/exceptions").set(auth).expect(200)).body.exceptions;
     expect(exceptions).toHaveLength(1);
-    expect(exceptions[0]).toMatchObject({ kind: "STEP_FAILED", objectiveId, actions: ["retry", "cancel"] });
+    // A failed work step (not the synthesis) can also be skipped: "Continue without this step".
+    expect(exceptions[0]).toMatchObject({ kind: "STEP_FAILED", objectiveId, actions: ["retry", "skip", "cancel"] });
     expect(exceptions[0].whatHappened).toMatch(/Competitive Intelligence Analyst/);
     const afterCharge = await balance(user.id);
 
