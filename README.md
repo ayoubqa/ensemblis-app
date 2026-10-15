@@ -116,10 +116,11 @@ the console, exports and shared reports, and the mock refuses to run in
 production. Charges shown are Ensemblis prices, not what the AI provider
 billed. The only check of real model output with real search is the live
 smoke (`npm run smoke:real`, scenario E), which needs real keys and network
-access — see [DEPLOYMENT.md §5a](DEPLOYMENT.md). Known limits: sources are
-search excerpts (no page fetch), and a search result URL is accepted if it is
-any `http(s)` address (it is never fetched by the server; tracked as a known
-gap in `tests/integration/researchFailures.test.ts`).
+access — see [DEPLOYMENT.md §5a](DEPLOYMENT.md). Known limit: sources are
+search excerpts returned by the provider (no page fetch). Result URLs on
+non-public hosts (loopback, private ranges, the cloud metadata address,
+`.internal`/`.local` names) or with embedded credentials are dropped, and
+evidence URLs are never fetched by the server.
 
 ### Run a brief yourself
 

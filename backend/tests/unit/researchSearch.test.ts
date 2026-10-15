@@ -259,3 +259,31 @@ describe("Tavily reliability", () => {
     expect(stub.tavilyCalls()).toBe(3);
   });
 });
+
+describe("safeHttpUrl (search result URLs)", () => {
+  it("keeps public http(s) URLs", async () => {
+    const { safeHttpUrl } = await import("../../src/research/search");
+    expect(safeHttpUrl("https://www.example.com/report?id=1")).toBe("https://www.example.com/report?id=1");
+    expect(safeHttpUrl("http://93.184.216.34/page")).toBe("http://93.184.216.34/page");
+  });
+  it("drops non-http schemes, embedded credentials and non-public hosts", async () => {
+    const { safeHttpUrl } = await import("../../src/research/search");
+    for (const bad of [
+      "javascript:alert(1)",
+      "ftp://example.com/file",
+      "https://user:pass@example.com/",
+      "http://169.254.169.254/latest/meta-data/",
+      "http://127.0.0.1:8080/",
+      "http://10.0.0.5/admin",
+      "http://192.168.1.1/",
+      "http://[::1]/",
+      "http://[::ffff:169.254.169.254]/",
+      "http://localhost/",
+      "http://metadata.google.internal/",
+      "http://printer.local/",
+      "not a url",
+    ]) {
+      expect(safeHttpUrl(bad), bad).toBeNull();
+    }
+  });
+});

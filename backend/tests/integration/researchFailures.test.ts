@@ -291,22 +291,18 @@ describe("research brief failure modes (mock AI, stub search)", () => {
     expect(ex.result).not.toMatch(/javascript:|169\.254\.169\.254/i);
   });
 
-  // KNOWN GAP (reported, not fixed here): research/search.ts accepts any http(s) result URL, so a search
-  // result pointing at the cloud metadata address (http://169.254.169.254/…) is stored as an Evidence URL
-  // and the console renders it as a link. The server never fetches evidence URLs (fetchUrl/netGuard only
-  // serve the company website and link documents), but the plan requires such URLs to be dropped.
-  // `it.fails` runs the check and keeps the suite green while the gap exists; it starts failing as soon
-  // as search.ts rejects non-public hosts — then change it to `it`.
-  it.fails("(7b) KNOWN GAP: a search result URL on the cloud metadata address is never stored as evidence", async () => {
+  // research/search.ts drops result URLs on non-public hosts (safeHttpUrl), so a search result pointing
+  // at the cloud metadata address never becomes an Evidence URL or a link in the console.
+  it("(7b) a search result URL on the cloud metadata address is never stored as evidence", async () => {
     stub = await startStubSearch({ results: [...STUB_RESULTS, ...UNSAFE_RESULTS] });
     const { auth } = await createUser({ credits: 5000 });
     await fillContext(auth);
     const executionId = await launchBrief(auth);
     await runWorker();
-    // Preconditions return instead of throwing, so `it.fails` can only pass on the metadata-URL check itself.
-    if ((await getExecution(auth, executionId)).status !== "COMPLETED") return;
+    expect((await getExecution(auth, executionId)).status).toBe("COMPLETED");
     const urls = (await prisma.evidence.findMany({ where: { executionId } })).map((e) => e.url ?? "");
-    if (!urls.some((u) => u.startsWith("https://research.example.org/"))) return;
+    // The safe results are kept; the metadata-address result is dropped before it becomes evidence.
+    expect(urls.some((u) => u.startsWith("https://research.example.org/"))).toBe(true);
     expect(urls.some((u) => u.includes("169.254.169.254"))).toBe(false);
   });
 

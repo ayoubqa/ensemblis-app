@@ -20,6 +20,8 @@ import { config } from "../config";
 import { prisma } from "../db";
 import { log, redact } from "../lib/log";
 import { recordUsage, startOfTodayUTC } from "../lib/usage";
+import { isIP } from "node:net";
+import { isPublicAddress } from "./netGuard";
 import { collapse } from "./text";
 
 export type SearchKind = "web" | "wikipedia";
@@ -111,11 +113,25 @@ function userAgent(): string {
   return `Ensemblis/1.0 (+${config.appUrl})`;
 }
 
-function safeHttpUrl(raw: unknown): string | null {
+/** Hostnames that never name a public web page (loopback, local or internal-only names). */
+const NON_PUBLIC_HOST = /^(localhost|.*\.localhost|.*\.local|.*\.internal|.*\.lan|.*\.home\.arpa)$/i;
+
+/**
+ * A search result URL is kept only when it is an http(s) URL on a public host: no embedded
+ * credentials, no loopback/internal names and no IP literal outside public unicast space (e.g.
+ * the cloud metadata address 169.254.169.254). Evidence URLs are shown and linked, never fetched
+ * by the server, so a hostname is not resolved here.
+ */
+export function safeHttpUrl(raw: unknown): string | null {
   if (typeof raw !== "string" || raw.length > 2048) return null;
   try {
     const u = new URL(raw);
-    return u.protocol === "https:" || u.protocol === "http:" ? u.toString() : null;
+    if (u.protocol !== "https:" && u.protocol !== "http:") return null;
+    if (u.username || u.password) return null;
+    const host = u.hostname.replace(/^\[|\]$/g, "");
+    if (!host || NON_PUBLIC_HOST.test(host)) return null;
+    if (isIP(host) && !isPublicAddress(host)) return null;
+    return u.toString();
   } catch {
     return null;
   }
