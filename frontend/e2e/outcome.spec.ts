@@ -8,7 +8,7 @@ import { defineObjective, expectStatus, signUpViaAPI, signUpViaUI, uniqueEmail }
 test("define → plan → approve → execute (with refresh) → verify → share", async ({ page, browser, request }) => {
   await signUpViaUI(page, { name: "Alex Morgan", company: "Northwind Cooling", email: uniqueEmail("owner") });
 
-  // Company Context: the evidence the AI Team works from (web search is off in E2E).
+  // Company Context: the evidence the AI Team works from (web search goes to a local stub in E2E: fixed fixtures, not live results).
   await page.getByLabel("What the company does").fill(
     "Northwind Cooling builds liquid cooling systems for high-density data centers. Our systems cut cooling energy use by 30% compared with air cooling."
   );

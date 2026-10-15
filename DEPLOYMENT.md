@@ -60,7 +60,7 @@ the Blueprint sync creates it:
 | `APP_URL` | ✔ | ✔ | frontend URL, no trailing slash — used in email and share links |
 | `CORS_ORIGIN` | ✔ | – | frontend URL(s), comma-separated |
 | `ADMIN_EMAILS` | ✔ | – | operators; must also verify their email (see §6) |
-| `TAVILY_API_KEY` | ✔ | ✔ | optional web search (otherwise Wikipedia) |
+| `TAVILY_API_KEY` | ✔ | ✔ | web search — **required for research briefs**; without it search falls back to Wikipedia only (briefs are labelled limited evidence) |
 | `RESEND_API_KEY`, `EMAIL_FROM` | ✔ | ✔ | optional email: verification, notifications, password reset |
 | `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` | ✔ | – | optional real payments |
 | `TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET_KEY` | ✔ | – | optional bot check |
@@ -81,6 +81,22 @@ trailing slash) for canonical URLs, `sitemap.xml`, `robots.txt` and Open Graph
 links — when unset, the build uses Vercel's `VERCEL_PROJECT_PRODUCTION_URL`
 (the project's production domain). `NEXT_PUBLIC_*` values are baked in at build
 time: redeploy the frontend after changing them.
+
+Research and verification settings (same value on the API **and** the worker;
+defaults shown — none needs setting for a normal deploy):
+
+| Variable | Default | What it does |
+|---|---|---|
+| `SEARCH_PROVIDER` | `tavily` when `TAVILY_API_KEY` is set, else `wikipedia` | `tavily` \| `wikipedia` \| `off`. Tavily without a key quietly becomes Wikipedia (the define page then labels a brief "limited evidence"); `off` blocks research briefs at planning (`PROVIDER_UNAVAILABLE`, nothing charged). |
+| `SEARCH_DAILY_BUDGET` | `30` | Successful Tavily calls per UTC day, server-wide (failed calls no longer count). A research step makes 3 searches and other web steps 2 each (plus 2 when a brief's one automatic revision researches again), so a brief typically uses 3–9 and 30 allows only a few briefs a day: raise it (e.g. `200`) for demos and the live smoke. When it is spent, searches fall back to Wikipedia and the research is recorded as `degraded`. |
+| `VERIFY_RETRY_DELAY_MS` | `60000` | When the AI verifier can't run (key, quota, timeout, unusable reply) the result is **not verified** (`UNVERIFIED`): it is checked again once after this pause, then handed to a person as "The result could not be verified" (accept / retry / cancel). Accepting keeps it `UNVERIFIED`, the outcome `UNKNOWN`, and refunds the verification fee. |
+| `TAVILY_BASE_URL` | `https://api.tavily.com` | **Tests only** (points search at a local stub). Never set it in production. |
+
+Model-layer behaviour to know: HTTP 500 and connection errors from the AI
+provider are now retried like 502/503/504; an exhausted quota (OpenAI
+`insufficient_quota`, a long `Retry-After`, Anthropic credit errors) is *not*
+retried and says "The AI provider's quota is exhausted for now — retry after
+~N min"; a missing or rejected key blocks planning before anything is charged.
 
 `AI_PROVIDER=mock` cannot run in production: the API and worker refuse to
 start with it when `NODE_ENV=production` **or** on Render (`RENDER` is set) —
@@ -106,7 +122,7 @@ if `NODE_ENV` was forgotten. The provider refuses the mock again at call time.
 3. Optionally run the API against the branch (`DATABASE_URL=… NODE_ENV=development
    JWT_SECRET=<prod value> npm start`) and log in with a real account: balance,
    reports and share links should be unchanged.
-4. Run the real-model smoke test with the production model (§5).
+4. Run the real-model smoke test with the production model and real web search (§5a).
 
 Never point `npm run smoke:real` or any test at the production URL: they
 reset their database (the scripts refuse names without `smoke`/`test`).
@@ -161,18 +177,125 @@ but pages can error until both are live — deploy at a quiet time.
     source of `/` has a canonical link and an `og:image`; a signed-in page such
     as `/dashboard` answers with `X-Robots-Tag: noindex, nofollow`.
 
-Real-model check before inviting users (spends tokens, ≈ one objective):
+12. A **research brief** (Define → Deliverable: *Research brief
+    (evidence-backed)*) plans a web-research step, shows its sources with
+    provider, query and retrieval time, and ends with a result state
+    (verified / verified with warnings / partial / not verified / accepted
+    without passing verification) shown separately from the AI-assessed
+    outcome. See the live procedure below.
 
-```bash
-cd backend && npm run build
-AI_PROVIDER=openai OPENAI_API_KEY=<groq key> OPENAI_BASE_URL=https://api.groq.com/openai/v1 \
-OPENAI_MODEL=openai/gpt-oss-120b OPENAI_FAST_MODEL=openai/gpt-oss-20b OPENAI_REASONING_EFFORT=low \
-npm run smoke:real            # needs a local Postgres with a database named ensemblis_smoke
-```
+### 5a. Live smoke with a real model and real web search (release evidence)
 
-or run the **Real-model smoke** workflow in GitHub Actions after adding the
-repository secret `SMOKE_OPENAI_API_KEY`. The report lists every check, the
-plans the model produced, tokens, failures and latency.
+Every automated suite in this repository runs on the **mock** model and a
+**stub** search (or the Groq-format stub in `e2e:prod-like`). The only check
+of real Groq/Anthropic output and real Tavily results is this live smoke. It
+**has not been run from the development sandbox** (no network access to
+api.groq.com, api.tavily.com or en.wikipedia.org, and no keys there) — run it
+from GitHub Actions or a machine with network access, and never record it as
+done before it has run. It spends real tokens and searches (≈ two objectives).
+
+**A. Automated (preferred)**
+
+1. In GitHub → *Settings → Secrets and variables → Actions*, add
+   `SMOKE_OPENAI_API_KEY` (Groq) and `SMOKE_TAVILY_API_KEY`. (Optional:
+   `SMOKE_ANTHROPIC_API_KEY`; variables `SMOKE_OPENAI_BASE_URL`,
+   `SMOKE_OPENAI_MODEL`, `SMOKE_OPENAI_FAST_MODEL`.) Without the Tavily secret,
+   scenario E is reported **SKIPPED**, never passed.
+2. *Actions → Real-model smoke → Run workflow*: provider `openai`, scenarios
+   `E,A,D` (the default `E,A,B,C,D` adds the missing-information and
+   cross-functional checks), e_expect `run`, full off. Download the
+   `real-model-smoke-report` artifact.
+3. Or locally (needs Postgres with a database named `ensemblis_smoke`):
+
+   ```bash
+   cd backend && npm ci && npm run build
+   AI_PROVIDER=openai OPENAI_API_KEY=<groq key> OPENAI_REASONING_EFFORT=low \
+   TAVILY_API_KEY=<tavily key> SEARCH_DAILY_BUDGET=200 \
+   SMOKE_DATABASE_URL=postgresql://ensemblis:ensemblis@localhost:5432/ensemblis_smoke \
+   SMOKE_SCENARIOS=E,A,D npm run smoke:real
+   ```
+
+Scenario E (research brief) hard checks — any failure exits 1:
+
+- the planner's plan is used (`planSource=planner`), and a web-research step
+  has research status `ok` or `degraded`;
+- a `RESEARCH_COMPLETED` event names provider `tavily` and lists its queries;
+- at least 3 WEB evidence rows, each with url, title, excerpt, provider, query
+  and retrieval time;
+- every `[n]` in the brief maps to this execution's evidence, and every link
+  is on an evidence domain;
+- every claim has a claim type, and no claim is SUPPORTED without evidence;
+- verification method `deterministic+model` with the verifier's provider and
+  model recorded;
+- one outcome measurement per success criterion, citing only existing evidence;
+- the result state and the AI-assessed outcome are both reported, separately,
+  and agree with the verdict;
+- step token counts were reported by the provider (`tokensEstimated=false` —
+  Groq sends `x_groq.usage`), and usage by purpose is present;
+- the instruction planted in a company document (a canary) is absent;
+- no piece of any API key appears in events, step errors, exceptions, the
+  result or the public report.
+
+How to read the report: a scenario is **PASS** only when every hard check
+passed on a real model with real search. It can also read **SKIPPED** (search
+off), **UNVERIFIED** (the AI verifier could not run — an honest state, reported
+but not counted as passed), **VERIFICATION FAILED** (the stricter brief gate
+failed the result after its one automatic revision; the smoke accepts it so the
+outcome is recorded, and it stays failed), **SELF-TEST** (mock model),
+**LOCAL MODEL ENDPOINT** (`OPENAI_BASE_URL` on the same machine, possibly a
+stub) or **STUB SEARCH** (`TAVILY_BASE_URL` set). The report also lists model
+calls and tokens by purpose and web searches by provider (ok / failed, first
+errors).
+
+Negative live checks — one run each, with scenarios `E` only. In the workflow
+pick `e_expect` = `neg-a-model-key`, `neg-b-search-key` or `neg-c-search-off`
+(it swaps in the invalid key or turns search off for that run); locally set the
+variables below:
+
+| Run | Local settings | Expected |
+|---|---|---|
+| (a) rejected model key | `OPENAI_API_KEY=gsk_invalid SMOKE_E_EXPECT=blocked` | BLOCKED at planning with `PROVIDER_UNAVAILABLE`, `costCents=0`, no `FUNDS_CHARGED` |
+| (b) rejected search key | `TAVILY_API_KEY=tvly-invalid SMOKE_E_EXPECT=degraded` | attempts show Tavily 401 and the Wikipedia fallback, research `degraded`, and the brief is not labelled verified unless external evidence exists |
+| (c) search off | `SEARCH_PROVIDER=off SMOKE_E_EXPECT=blocked` | the brief is blocked before any charge |
+
+Settings that matter for these runs (see the table in §2): `SEARCH_DAILY_BUDGET`
+(the workflow sets `200`; the default `30` can run out mid-smoke, which turns
+research `degraded`), and `VERIFY_RETRY_DELAY_MS` (default `60000`: when the AI
+verifier can't run, the smoke waits through one re-check before it reports the
+result as **UNVERIFIED**).
+
+The script logic was exercised offline only, against local stubs: with the
+mock model, E was reported SKIPPED with search off and SELF-TEST with the
+search stub (`scripts/search-stub.mjs`); against the Groq-format stub
+(`scripts/openai-stub.mjs`) plus the search stub it was reported LOCAL MODEL
+ENDPOINT; negative check (a) (the stub answering 401) and (c) behaved as
+expected. (b) needs the real Wikipedia API, so it has not been exercised.
+None of that is evidence of real-model behaviour.
+
+**B. UI walkthrough with real keys** (covers "launched from the UI")
+
+1. Start the API, the worker and the frontend with the env above:
+   `cd backend && EMBEDDED_WORKER=false npm run dev`, `npm run dev:worker`, and
+   `cd frontend && NEXT_PUBLIC_API_URL=http://localhost:4000 npm run dev`.
+2. Sign up, fill in Company Context, open **/objectives/new**.
+3. Choose *Research brief (evidence-backed)*, enter an objective (e.g. "Brief:
+   regulatory and competitive landscape for B2B payroll software in
+   Germany"), constraints ("EU sources only; no paid databases") and three
+   success criteria.
+4. Launch, approve the plan using only the keyboard (Tab to *Approve*, Enter),
+   and wait for a terminal state.
+5. Screenshot at 1280px and 390px: the plan with progress; the step rows
+   (provider · model · tokens · latency, research badge); evidence (provider,
+   query, retrieved); verification (per criterion with evidence chips, claim
+   types); Open issues; Usage; the header state tags.
+6. Export a PDF and check it carries the result-state label.
+
+Evidence to keep (commit or attach as release evidence once it exists):
+`smoke-results/<timestamp>.json` and `.md` (the workflow artifact); `GET
+/api/executions/:id` JSON for the E run; its UsageEvent rows
+(`SELECT kind, provider, model, purpose, "tokensIn", "tokensOut", "latencyMs", ok, estimated FROM "UsageEvent" WHERE "executionId" = '…'`);
+the screenshot set; and the exception rows and wallet transactions of the
+negative runs.
 
 ## 6. Operators
 
@@ -210,6 +333,35 @@ To roll forward again, set the branch back to `main` and resume the worker;
 
 v4 data created before a rollback (objectives, executions, company context)
 stays in its tables, invisible to v3, and reappears after rolling forward.
+
+**Before rolling back past "real execution v1"** (migration
+`20261014120000_real_execution_v1`) — to an earlier v4 build or to v3: that
+release added two enum values, `VerificationStatus.UNVERIFIED` and
+`ExceptionKind.PROVIDER_UNAVAILABLE`. An older Prisma client throws when it
+reads a row that uses them, so map those rows to values the old build knows
+first (Postgres can't drop enum values; the unused values are harmless). Keep
+the ids so the honest states can be restored when you roll forward:
+
+```sql
+-- before the rollback
+CREATE TABLE IF NOT EXISTS "_rollback_v1_unverified" AS SELECT id FROM "Verification" WHERE status = 'UNVERIFIED';
+CREATE TABLE IF NOT EXISTS "_rollback_v1_unverified_exec" AS SELECT id FROM "Execution" WHERE "verificationStatus" = 'UNVERIFIED';
+CREATE TABLE IF NOT EXISTS "_rollback_v1_provider_unavailable" AS SELECT id FROM "Exception" WHERE kind = 'PROVIDER_UNAVAILABLE';
+UPDATE "Verification" SET status = 'PASS_WITH_WARNINGS' WHERE status = 'UNVERIFIED';
+UPDATE "Execution" SET "verificationStatus" = 'PASS_WITH_WARNINGS' WHERE "verificationStatus" = 'UNVERIFIED';
+UPDATE "Exception" SET kind = 'STEP_FAILED' WHERE kind = 'PROVIDER_UNAVAILABLE';
+
+-- after rolling forward again
+UPDATE "Verification" SET status = 'UNVERIFIED' WHERE id IN (SELECT id FROM "_rollback_v1_unverified");
+UPDATE "Execution" SET "verificationStatus" = 'UNVERIFIED' WHERE id IN (SELECT id FROM "_rollback_v1_unverified_exec");
+UPDATE "Exception" SET kind = 'PROVIDER_UNAVAILABLE' WHERE id IN (SELECT id FROM "_rollback_v1_provider_unavailable");
+DROP TABLE "_rollback_v1_unverified", "_rollback_v1_unverified_exec", "_rollback_v1_provider_unavailable";
+```
+
+While rolled back, the old build shows those results as "verified with
+warnings" although they were never verified — tell affected users, or roll
+forward promptly. The other v1 columns are nullable additions the old build
+ignores.
 
 ## 8. If the migration step fails at boot
 

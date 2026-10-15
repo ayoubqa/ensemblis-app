@@ -41,12 +41,100 @@ ensemblis-app/
 | Durable queue + worker | `engine/queue.ts`, `engine/worker.ts`, `src/worker.ts` | Postgres `Job` table (`FOR UPDATE SKIP LOCKED`, leases, heartbeats, dead-lettering). Runs embedded in the API in development or as a separate process in production. |
 | Recovery | `engine/recovery.ts` | Orphaned executions are re-enqueued, stalled ones failed and refunded, waits expire; nothing stays `RUNNING` forever. |
 | Evidence & trust boundary | `engine/evidence.ts`, `engine/prompts.ts`, `engine/executor.ts` | Company context, document passages, website and web results become numbered `Evidence`. Untrusted content is fenced and neutralised in prompts; documents can't override instructions. |
-| Verification gate | `engine/verification/*` | Deterministic claim ↔ evidence matching, citation checks, completeness and criteria coverage, plus a model assessment. PASS / PASS_WITH_WARNINGS / FAIL with a score; FAIL triggers one automatic revision, then an exception. An LLM agreeing is never enough on its own. |
+| Verification gate | `engine/verification/*` | Deterministic claim ↔ evidence matching, citation checks, completeness and criteria coverage, an AI claim-support check (it can only downgrade), plus a model assessment per criterion with the evidence it relied on. PASS / PASS_WITH_WARNINGS / FAIL with a score, or UNVERIFIED when the AI verifier could not run (never shown as passed). FAIL triggers one automatic revision, then an exception. An LLM agreeing is never enough on its own. |
 | Outcome & value | `engine/outcome.ts` | Per-criterion measurement (deterministic where a numeric target exists), overall ACHIEVED / PARTIALLY / NOT / UNKNOWN, user confirmation, and value records (cost, criteria met, cycle time; time saved only as a labelled estimate). |
 | Memory | `memory/*`, `engine/learning.ts` | Learnings proposed after each execution; low-risk preferences are active, anything sensitive waits for confirmation. Review, edit, delete. |
 | Live updates | `api/stream.ts`, `frontend/lib/stream.ts` | SSE tail of the persistent `ExecutionEvent` log, resumable from the last event id. |
 | Billing | `engine/billing.ts`, `lib/wallet.ts`, `billing/*` | EUR wallet, atomic debit at execution start inside the same transaction as the status change, capped refunds, idempotent Stripe webhooks. |
 | Tenancy | `org/organization.ts` | Every objective, execution, document and memory item belongs to an Organization (derived from the existing Team/wallet model). |
+
+Every execution also gets a **result state**, separate from the AI-assessed
+outcome: `verified`, `verified_with_warnings`, `partial` (a step was skipped or
+research came back incomplete), `unverified`, `accepted_failed_verification`
+(a person accepted a result that failed verification), or `in_progress` /
+`blocked` / `failed` / `cancelled`. An outcome the AI measured is labelled
+"(AI-assessed)" until a person confirms it.
+
+---
+
+## Research briefs (evidence-backed)
+
+The one business outcome that runs end to end on real research: a brief from
+an objective you define.
+
+1. **Define** (`/objectives/new`): choose *Deliverable → Research brief
+   (evidence-backed)*, write the objective, optional **constraints** (e.g. "EU
+   sources only; no paid databases" — passed to every prompt as instructions)
+   and success criteria. Launch is disabled, with the reason, when the AI
+   provider isn't configured or web search is off.
+2. **Plan**: the Chief of Staff plans framing → a *Business Research* step
+   (Research Analyst, web search) → the brief. If the model key is missing or
+   rejected, the quota is exhausted, or search is off, planning stops with a
+   *Provider unavailable* exception and **nothing is charged**; Retry plans
+   again once it is fixed.
+3. **Research**: the step writes search queries and runs them on Tavily
+   (falling back to Wikipedia when Tavily fails or its daily budget is spent —
+   recorded as `degraded`). Every attempt is recorded (provider, HTTP status,
+   result count, time) and every source becomes numbered **Evidence** with its
+   provider, query, retrieval time and retrieval type (`search_snippet`: the
+   search result's excerpt; pages are not fetched). A retried step reuses
+   research that already succeeded instead of searching again.
+4. **Write**: the brief has fixed sections — executive summary, key findings,
+   analysis & inference, uncertainties, evidence gaps, recommendations,
+   success criteria, next steps. Citations to sources that don't exist are
+   removed, and links to domains that aren't evidence are unlinked, before it
+   is stored.
+5. **Verify**: claims are typed (`source`, `inference`, `uncertainty`,
+   `recommendation`) and checked against the cited evidence; a recommendation
+   or inference is never "supported" outright. A brief with **no external
+   source** fails ("Insufficient evidence") and gets one automatic revision
+   that researches again; company context alone never verifies a brief. If
+   the AI verifier can't run, the result is re-checked once after
+   `VERIFY_RETRY_DELAY_MS`, then handed to you as "could not be verified"
+   (accepting keeps it `UNVERIFIED`, the outcome `UNKNOWN`, and refunds the
+   verification fee).
+6. **Read the console**: the result state, research badges per step,
+   evidence provenance, per-criterion verdicts with evidence chips, claim
+   types, **Open issues** (pending decisions, research gaps and failed
+   searches, failed checks, unsupported or uncited claims, unmet criteria,
+   open questions) and **Usage** (model calls by purpose, tokens — marked
+   "est." when the provider reported none — latency and web searches by
+   provider). A failed research or work step can be retried, or skipped with
+   *Continue without this step* (refunded; the result is then `partial`).
+
+### What is real, what is mocked
+
+| | In production (real keys) | In this repository's automated tests |
+|---|---|---|
+| Planner, step executor, verifier | the configured model (Groq / OpenAI-compatible, Anthropic, Ollama) | the deterministic **mock** model (`AI_PROVIDER=mock`), or in `e2e:prod-like` the real OpenAI-compatible provider code against a local Groq-format **stub** that replays the mock's text |
+| Web search | Tavily, else Wikipedia | local **stubs** with fixed fixtures (`tests/stubSearch.ts`, `scripts/search-stub.mjs`) |
+| Queue, worker, wallet, state machine, Postgres | real | real (throwaway databases) |
+| Token counts | measured when the provider reports usage (Groq, OpenAI, Anthropic), otherwise estimated and labelled "est." | estimated (mock) / measured from the stub's usage (prod-like) |
+
+Anything produced by the mock model is labelled **"Mock AI — test output"** in
+the console, exports and shared reports, and the mock refuses to run in
+production. Charges shown are Ensemblis prices, not what the AI provider
+billed. The only check of real model output with real search is the live
+smoke (`npm run smoke:real`, scenario E), which needs real keys and network
+access — see [DEPLOYMENT.md §5a](DEPLOYMENT.md). Known limits: sources are
+search excerpts (no page fetch), and a search result URL is accepted if it is
+any `http(s)` address (it is never fetched by the server; tracked as a known
+gap in `tests/integration/researchFailures.test.ts`).
+
+### Run a brief yourself
+
+```bash
+# backend/.env: a real model and real search (see backend/.env.example)
+AI_PROVIDER=openai OPENAI_API_KEY=<groq key>       # or anthropic / ollama
+TAVILY_API_KEY=<tavily key>                         # without it: Wikipedia only ("limited evidence")
+SEARCH_DAILY_BUDGET=200                             # default 30 successful Tavily calls a day
+
+cd backend && npm run dev                           # API + embedded worker on :4000
+cd frontend && npm run dev                          # http://localhost:3000 → Define → Research brief
+```
+
+Without keys, `AI_PROVIDER=mock` runs the same flow on mock output (labelled
+as such) — useful for UI work, not as evidence of research quality.
 
 ---
 
@@ -100,7 +188,7 @@ cd backend && npm run lint && npm run typecheck && npm test
 # frontend — unit tests
 cd frontend && npm run lint && npm run typecheck && npm test
 
-# end to end — real browser, real API, separate worker, mock AI
+# end to end — real browser, real API, separate worker, mock AI, stub web search
 cd backend && npm run build && cd ../frontend && npm run e2e
 # …and production-like: NODE_ENV=production, the real OpenAI-compatible provider code
 # against a local stub that speaks Groq's streaming format
@@ -109,15 +197,19 @@ cd frontend && npm run e2e:prod-like
 # worker crash/deploy recovery with real processes (SIGKILL and SIGTERM mid-step)
 cd backend && npm run build && npm run check:worker-restart
 
-# REAL model (spends tokens): planner, executor and verifier on 4 scenarios
-cd backend && AI_PROVIDER=openai OPENAI_API_KEY=… npm run smoke:real
+# REAL model and REAL web search (spends tokens and searches): scenarios E,A,B,C,D
+cd backend && AI_PROVIDER=openai OPENAI_API_KEY=… TAVILY_API_KEY=… npm run smoke:real
 ```
 
 The mock suites prove the execution architecture; `smoke:real` (also a manual
-GitHub Actions workflow, "Real-model smoke") checks the intelligence: valid
-plans with real capabilities, exceptions instead of invented facts,
-cross-functional staffing, evidence-linked verification and resistance to an
-instruction planted in a company document.
+GitHub Actions workflow, "Real-model smoke") checks the intelligence: a
+research brief with real search (E: provenance, citation ↔ evidence mapping,
+typed claims, per-criterion evidence, measured usage, no key leaks — reported
+SKIPPED, never passed, when search is off), valid plans with real
+capabilities, exceptions instead of invented facts, cross-functional staffing,
+evidence-linked verification and resistance to an instruction planted in a
+company document. Its report labels a mock, stub or local endpoint run as
+such, and an unverified result as UNVERIFIED rather than passed.
 
 What the suites cover: the full objective lifecycle; step retries, exhausted
 retries → exception → retry without double charge; config errors; crash
@@ -127,9 +219,16 @@ approvals; missing information → answer → re-plan; verification failure →
 automatic revision → exception → accept/retry/cancel; cancel refunds;
 organization isolation (API and browser); wallet atomicity, refund caps and
 Stripe idempotency; email verification and admin gating; SSE resume; legacy
-report sharing; and in the browser: sign up → context → define → plan →
+report sharing; research briefs (mock model, stub search): provenance,
+citation mapping, per-criterion evidence, and every failure mode — search off,
+planner key/quota errors, step quota, Tavily 401 → Wikipedia, all searches
+failing, verifier unavailable, injected instructions and unsafe URLs in
+results, keys in provider errors, retry without re-searching, skipping a
+step; and in the browser: sign up → context → define → plan →
 approve → refresh mid-execution → verified result → evidence → outcome →
-public link → sharing off, plus the exception and cancel/refund paths.
+public link → sharing off, a keyboard-only research brief (research badge,
+evidence provenance, per-criterion verdicts, open issues, usage, mock label,
+390px), plus the exception and cancel/refund paths.
 
 CI (`.github/workflows/ci.yml`) runs backend lint, typecheck, a schema ↔
 migrations drift check, tests and build; frontend lint, typecheck, unit tests
@@ -181,7 +280,7 @@ run against the production database). Signing up with a listed address grants
 nothing by itself.
 
 Optional services (all off until configured; see `backend/.env.example`):
-`TAVILY_API_KEY` (web search; otherwise Wikipedia, or `SEARCH_PROVIDER=off`),
+`TAVILY_API_KEY` (web search — needed for research briefs; otherwise Wikipedia, or `SEARCH_PROVIDER=off`, which blocks briefs),
 `RESEND_API_KEY` + `EMAIL_FROM` (verification, notifications, password reset),
 `STRIPE_SECRET_KEY` + `STRIPE_WEBHOOK_SECRET` (real top-ups; webhook
 `/api/billing/stripe/webhook`), `TURNSTILE_*` (bot check), `GUEST_*` (trial

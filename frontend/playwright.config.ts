@@ -1,6 +1,10 @@
 // End-to-end suite: drives the real frontend against the real API + a separate
-// worker process (backend/scripts/e2e-stack.mjs), with the deterministic mock
-// AI provider and a throwaway database (ensemblis_e2e, reset on every run).
+// worker process (backend/scripts/e2e-stack.mjs), with the deterministic MOCK
+// AI provider, web search answered by a local search STUB
+// (backend/scripts/search-stub.mjs, fixed fixtures) and a throwaway database
+// (ensemblis_e2e, reset on every run). Nothing it produces is real research.
+// PROD_LIKE=1 (npm run e2e:prod-like) swaps the mock for the real
+// OpenAI-compatible provider code against a local Groq-format stub.
 //
 //   cd backend && npm run build && cd ../frontend && npm run e2e
 //
