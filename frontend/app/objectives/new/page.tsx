@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useRef, useState } from "react";
-import { api, type Autonomy, type ContextPayload, type Organization } from "@/lib/api";
+import { api, type Autonomy, type ContextPayload, type ObjectiveKind, type Organization } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { useConfig } from "@/lib/config";
 import { EXAMPLE_OBJECTIVES } from "@/lib/data";
@@ -27,8 +27,12 @@ const DRAFT_KEY = "ensemblis_objective_draft";
 const MIN_BUDGET = 5;
 const MAX_BUDGET = 500;
 const MAX_CRITERIA = 6;
+const MAX_CONSTRAINTS = 4000;
 
-type Draft = { statement: string; criteria: string[]; notes: string };
+/** The deliverable asked for: the default decision memo, or an evidence-backed research brief. */
+type Deliverable = "memo" | ObjectiveKind;
+
+type Draft = { statement: string; criteria: string[]; notes: string; deliverable?: Deliverable; constraints?: string };
 
 function readDraft(key: string): Draft | null {
   const raw = storage.get(key);
@@ -39,6 +43,8 @@ function readDraft(key: string): Draft | null {
       statement: typeof d.statement === "string" ? d.statement : "",
       criteria: Array.isArray(d.criteria) ? d.criteria.filter((c): c is string => typeof c === "string").slice(0, MAX_CRITERIA) : [],
       notes: typeof d.notes === "string" ? d.notes : "",
+      deliverable: d.deliverable === "research_brief" ? "research_brief" : "memo",
+      constraints: typeof d.constraints === "string" ? d.constraints.slice(0, MAX_CONSTRAINTS) : "",
     };
   } catch {
     return null;
@@ -55,12 +61,15 @@ function DefineOutcome() {
   const router = useRouter();
   const params = useSearchParams();
   const toast = useToast();
-  const { config } = useConfig();
+  const { config, loaded: configLoaded } = useConfig();
   const uid = useAuth().user?.id ?? null;
   const draftKey = `${DRAFT_KEY}:${uid}`;
   const [statement, setStatement] = useState("");
   const [criteria, setCriteria] = useState<string[]>([]);
   const [notes, setNotes] = useState("");
+  // The default stays the decision memo, so existing flows are unchanged.
+  const [deliverable, setDeliverable] = useState<Deliverable>("memo");
+  const [constraints, setConstraints] = useState("");
   const [deadline, setDeadline] = useState("");
   const [budget, setBudget] = useState<number | null>(null);
   // What the budget field shows while it is being edited (clamped to €5–€500 on blur).
@@ -112,6 +121,8 @@ function DefineOutcome() {
       setStatement(draft.statement);
       setCriteria(draft.criteria);
       setNotes(draft.notes);
+      setDeliverable(draft.deliverable ?? "memo");
+      setConstraints(draft.constraints ?? "");
       setFromDraft(true);
     }
     setRestored(true);
@@ -119,9 +130,9 @@ function DefineOutcome() {
 
   useEffect(() => {
     if (!restored || !uid) return;
-    const empty = !statement.trim() && !criteria.some((c) => c.trim()) && !notes.trim();
-    storage.set(draftKey, empty ? null : JSON.stringify({ statement, criteria, notes } satisfies Draft));
-  }, [statement, criteria, notes, restored, uid, draftKey]);
+    const empty = !statement.trim() && !criteria.some((c) => c.trim()) && !notes.trim() && !constraints.trim();
+    storage.set(draftKey, empty ? null : JSON.stringify({ statement, criteria, notes, deliverable, constraints } satisfies Draft));
+  }, [statement, criteria, notes, deliverable, constraints, restored, uid, draftKey]);
 
   useEffect(() => {
     if (focusCrit === null) return;
@@ -134,6 +145,8 @@ function DefineOutcome() {
     setStatement("");
     setCriteria([]);
     setNotes("");
+    setDeliverable("memo");
+    setConstraints("");
     setSuggested(null);
     setQuestions([]);
     setFromDraft(false);
@@ -156,6 +169,17 @@ function DefineOutcome() {
   const contextEmpty = !!ctx && ctx.completeness.filled === 0 && ctx.documents.length === 0;
   // A suggested title only applies to the statement it was suggested for.
   const title = suggested && suggested.for === statement.trim() ? suggested.title : undefined;
+  const brief = deliverable === "research_brief";
+  // What this server can do, once /api/config has answered (nothing is blocked on a guess).
+  const aiProblem = configLoaded && !config.aiConfigured ? config.aiProblem || "The AI provider isn't configured on this server." : null;
+  const searchOff = configLoaded && !config.searchEnabled;
+  const wikipediaOnly = configLoaded && config.searchEnabled && config.searchProvider === "wikipedia";
+  // Why the objective can't be sent to the Chief of Staff right now (a draft can still be saved).
+  const launchBlock = aiProblem
+    ? `It can't be planned right now. ${aiProblem}`
+    : brief && searchOff
+      ? "A research brief needs web search, and web search is off on this server. Choose a decision memo, or save a draft until search is turned on."
+      : null;
 
   const chooseAutonomy = (a: Autonomy) => {
     autonomyTouched.current = true;
@@ -206,7 +230,7 @@ function DefineOutcome() {
   };
 
   const submit = async (asDraft: boolean) => {
-    if (!valid) return;
+    if (!valid || (!asDraft && launchBlock)) return;
     setBusy(asDraft ? "draft" : "plan");
     try {
       const { objective } = await api.createObjective({
@@ -216,6 +240,8 @@ function DefineOutcome() {
         deadline: deadline || null,
         budgetCents,
         contextNotes: notes.trim() || undefined,
+        kind: brief ? "research_brief" : undefined,
+        constraints: constraints.trim() || undefined,
         autonomy,
         draft: asDraft,
       });
@@ -240,7 +266,13 @@ function DefineOutcome() {
         ? `You chose to start automatically: it begins once the estimate is within ${eur(budgetCents)}${org ? ` and your ${eur(org.approvalThresholdCents)} threshold` : ""}. Anything above waits for you.`
         : "You review the plan and its cost. Nothing is executed or charged before you approve.",
     },
-    { icon: "layers", title: "Execution", body: "Specialists in your AI Team research and analyse with read-only tools. You can follow every step as it happens." },
+    {
+      icon: "layers",
+      title: "Execution",
+      body: brief
+        ? "Specialists in your AI Team search the web with read-only tools, keep each source as numbered evidence and write the brief citing it as [n]. You can follow every step as it happens."
+        : "Specialists in your AI Team research and analyse with read-only tools. You can follow every step as it happens.",
+    },
     { icon: "shield", title: "Verification", body: "Claims are checked against the evidence and each success criterion is assessed before the outcome is delivered." },
   ];
 
@@ -262,6 +294,24 @@ function DefineOutcome() {
               <Icon name="info" size={16} />
               <p>
                 Ensemblis doesn&apos;t know your business yet. <Link href={ROUTES.context}>Add your Company Context</Link> once and every objective uses it — or the Chief of Staff will ask what it needs.
+              </p>
+            </div>
+          )}
+
+          {configLoaded && config.mockAI && (
+            <div className="ws-callout" role="note">
+              <Icon name="info" size={16} />
+              <p>
+                <b>Mock AI.</b> This server uses the mock AI provider: plans and results are placeholders for development and testing, not real analysis.
+              </p>
+            </div>
+          )}
+
+          {aiProblem && (
+            <div className="ws-callout" role="note" data-testid="ai-problem">
+              <Icon name="alert" size={16} />
+              <p>
+                <b>Objectives can&apos;t be planned on this server right now.</b> {aiProblem} You can still save a draft and send it once the server owner has fixed this.
               </p>
             </div>
           )}
@@ -325,12 +375,66 @@ function DefineOutcome() {
               </div>
             </section>
 
-            {/* 02 — success criteria */}
+            {/* 02 — deliverable & constraints */}
+            <section className="ws-fs" aria-labelledby="ws-fs-kind">
+              <h2 className="ws-fs-title" id="ws-fs-kind">
+                <span className="ws-fs-n" aria-hidden="true">
+                  02
+                </span>
+                Deliverable
+              </h2>
+              <div className="ws-choice" role="radiogroup" aria-labelledby="ws-fs-kind">
+                <label className={!brief ? "ws-choice-o on" : "ws-choice-o"}>
+                  <input type="radio" name="deliverable" value="memo" checked={!brief} onChange={() => setDeliverable("memo")} />
+                  <span>
+                    <b>Decision memo</b>
+                    <span>A recommendation for a decision, built from your Company Context and the research the plan needs.</span>
+                  </span>
+                </label>
+                <label className={brief ? "ws-choice-o on" : "ws-choice-o"}>
+                  <input type="radio" name="deliverable" value="research_brief" checked={brief} onChange={() => setDeliverable("research_brief")} aria-describedby="brief-hint" />
+                  <span>
+                    <b>Research brief (evidence-backed)</b>
+                    <span id="brief-hint">
+                      Findings from web sources, each one cited as [n], with inferences, uncertainty and open questions stated as such.
+                      {searchOff
+                        ? " Not available on this server right now: web search is off."
+                        : wikipediaOnly
+                          ? " Limited evidence on this server: it searches Wikipedia only (no web search key), so sources are encyclopedia summaries."
+                          : ""}
+                    </span>
+                  </span>
+                </label>
+              </div>
+              <div className="ws-fields">
+                <div style={{ gridColumn: "1 / -1" }}>
+                  <label className="l" htmlFor="constraints">
+                    Constraints <span className="ws-opt-l">(optional)</span>
+                  </label>
+                  <textarea
+                    id="constraints"
+                    className="f"
+                    rows={2}
+                    value={constraints}
+                    maxLength={MAX_CONSTRAINTS}
+                    onChange={(e) => setConstraints(e.target.value)}
+                    placeholder="e.g. EU sources only; no paid databases"
+                    aria-describedby="constraints-hint"
+                    data-testid="constraints-input"
+                  />
+                  <p className="hint" id="constraints-hint">
+                    The Chief of Staff and every step treat these as instructions.
+                  </p>
+                </div>
+              </div>
+            </section>
+
+            {/* 03 — success criteria */}
             <section className="ws-fs" aria-labelledby="ws-fs-2">
               <div className="ws-fs-row">
                 <h2 className="ws-fs-title" id="ws-fs-2">
                   <span className="ws-fs-n" aria-hidden="true">
-                    02
+                    03
                   </span>
                   Success criteria
                 </h2>
@@ -404,11 +508,11 @@ function DefineOutcome() {
               </div>
             </section>
 
-            {/* 03 — deadline & budget */}
+            {/* 04 — deadline & budget */}
             <section className="ws-fs" aria-labelledby="ws-fs-3">
               <h2 className="ws-fs-title" id="ws-fs-3">
                 <span className="ws-fs-n" aria-hidden="true">
-                  03
+                  04
                 </span>
                 Deadline &amp; budget
               </h2>
@@ -450,28 +554,28 @@ function DefineOutcome() {
               </div>
             </section>
 
-            {/* 04 — context */}
+            {/* 05 — context */}
             <section className="ws-fs" aria-labelledby="ws-fs-4">
               <h2 className="ws-fs-title" id="ws-fs-4">
                 <span className="ws-fs-n" aria-hidden="true">
-                  04
+                  05
                 </span>
                 <label htmlFor="notes">
                   Context for this objective <span className="ws-opt-l">(optional)</span>
                 </label>
               </h2>
-              <textarea id="notes" className="f" rows={3} value={notes} maxLength={8000} onChange={(e) => setNotes(e.target.value)} placeholder="Constraints, what has been tried, who the result is for…" aria-describedby="notes-hint" />
+              <textarea id="notes" className="f" rows={3} value={notes} maxLength={8000} onChange={(e) => setNotes(e.target.value)} placeholder="What has been tried, who the result is for, anything the AI Team should know…" aria-describedby="notes-hint" />
               <p className="hint" id="notes-hint">
                 Your <Link href={ROUTES.context}>Company Context</Link>
                 {ctx ? ` (${ctx.completeness.filled}/${ctx.completeness.total} sections, ${ctx.documents.length} document${ctx.documents.length === 1 ? "" : "s"})` : ""} and confirmed memory are used automatically.
               </p>
             </section>
 
-            {/* 05 — autonomy */}
+            {/* 06 — autonomy */}
             <section className="ws-fs" aria-labelledby="ws-fs-5">
               <h2 className="ws-fs-title" id="ws-fs-5">
                 <span className="ws-fs-n" aria-hidden="true">
-                  05
+                  06
                 </span>
                 Autonomy
               </h2>
@@ -499,9 +603,9 @@ function DefineOutcome() {
                   type="button"
                   className="btn p lg"
                   onClick={() => submit(false)}
-                  disabled={!valid || !!busy}
+                  disabled={!valid || !!busy || !!launchBlock}
                   aria-busy={busy === "plan"}
-                  aria-describedby={valid ? undefined : "submit-why"}
+                  aria-describedby={valid && !launchBlock ? undefined : "submit-why"}
                   data-testid="submit-objective"
                 >
                   Send to the Chief of Staff
@@ -511,9 +615,14 @@ function DefineOutcome() {
                   Save as draft
                 </button>
               </div>
-              {!valid && (
+              {(!valid || launchBlock) && (
                 <p className="ws-why" id="submit-why">
-                  {statement.length > max ? `Shorten the outcome to ${max.toLocaleString("en-US")} characters.` : "Describe the outcome (at least 10 characters) to send it."}
+                  {[
+                    launchBlock,
+                    valid ? null : statement.length > max ? `Shorten the outcome to ${max.toLocaleString("en-US")} characters.` : "Describe the outcome (at least 10 characters) to send it.",
+                  ]
+                    .filter(Boolean)
+                    .join(" ")}
                 </p>
               )}
             </div>

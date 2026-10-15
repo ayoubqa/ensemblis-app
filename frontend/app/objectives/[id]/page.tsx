@@ -7,6 +7,8 @@ import { api, type Approval, type Execution, type ExecutionSummary, type MemoryI
 import { useAuth } from "@/lib/auth-context";
 import { useConfig } from "@/lib/config";
 import { EmptyState, Icon, OutcomeTag, PageSkeleton, RequireAuth, StatusTag, Tag, VerificationTag, statusLabel, useToast } from "@/components";
+import { ResultStateTag, resultReportLabel, resultStateLabel } from "@/components/Tags";
+import { MOCK_EXPORT_NOTE, resultStateOf, usedMockAI } from "@/lib/openIssues";
 import { ExportMenu, ReportView, copyText } from "@/components/report";
 import { ApprovalCard, EventFeed, ExceptionCard, evidenceToSources } from "@/components/ops";
 import { eur, longDate, relativeTime } from "@/lib/format";
@@ -19,6 +21,8 @@ import { OutcomePanel } from "./_components/Outcome";
 import { LifecycleStepper, lifecycle, type StageKey } from "./_components/Lifecycle";
 import { Stage } from "./_components/Stage";
 import { NowCard } from "./_components/Now";
+import { OpenIssuesCard } from "./_components/OpenIssues";
+import { UsagePanel } from "./_components/Usage";
 
 export default function ObjectivePage() {
   return (
@@ -173,7 +177,17 @@ function ObjectiveConsole() {
   const stages = lifecycle(o, ex, openException);
   const st = Object.fromEntries(stages.map((s) => [s.key, s])) as Record<StageKey, (typeof stages)[number]>;
   const present = new Set<StageKey>(ex ? ["objective", "plan", "approval", "execution", "verification", "evidence", "outcome"] : ["objective", "plan"]);
-  const verified = ex?.status === "COMPLETED" && (ex.verificationStatus === "PASS" || ex.verificationStatus === "PASS_WITH_WARNINGS");
+  const result = ex ? resultStateOf(ex) : null;
+  const completed = ex?.status === "COMPLETED";
+  // Labelled from what this execution actually ran on, and from the server's current setting.
+  const mock = usedMockAI(ex, config.mockAI);
+  const outcome = ex ? (ex.confirmedOutcomeStatus ?? ex.outcomeStatus) : null;
+  // A completed result carries its result state; its verification verdict shows separately
+  // only when the state doesn't already say it (a partial result).
+  const score = ex?.verificationScore != null && ex.verificationStatus !== "UNVERIFIED" ? `${ex.verificationScore}` : null;
+  const showVerificationTag = !!ex?.verificationStatus && (!completed || result === "partial");
+  const reportMeta = !completed ? "Draft" : result === "verified" ? "Verified deliverable" : resultStateLabel(result);
+  const openIssuesShown = !!ex && (!!ex.verification || ["COMPLETED", "FAILED", "CANCELLED", "BLOCKED"].includes(ex.status));
 
   const act = async (what: "cancel" | "again" | "plan") => {
     if (what === "cancel" && !window.confirm("Cancel this execution? Work that hasn't been executed is refunded.")) return;
@@ -229,11 +243,22 @@ function ObjectiveConsole() {
             <h1 id="cs-title" tabIndex={-1}>
               {o.title}
             </h1>
-            <div className="cs-status" data-testid="execution-status" data-status={ex?.status ?? o.status} data-verification={ex?.verificationStatus ?? ""}>
+            <div
+              className="cs-status"
+              data-testid="execution-status"
+              data-status={ex?.status ?? o.status}
+              data-verification={ex?.verificationStatus ?? ""}
+              data-result-state={result ?? ""}
+            >
               <StatusTag status={ex?.status ?? o.status} />
-              {ex?.verificationStatus && <VerificationTag status={ex.verificationStatus} score={ex.verificationScore} />}
-              {ex?.outcomeStatus && <OutcomeTag outcome={ex.outcomeStatus} />}
-              {config.mockAI && <Tag variant="warn">Mock AI — test output</Tag>}
+              {completed && result && <ResultStateTag state={result} suffix={result === "partial" ? null : score} />}
+              {showVerificationTag && <VerificationTag status={ex!.verificationStatus} score={ex!.verificationScore} />}
+              {outcome && <OutcomeTag outcome={outcome} confirmed={!!ex?.confirmedOutcomeStatus} />}
+              {mock && (
+                <span className="tag warn" data-testid="mock-tag">
+                  Mock AI — test output
+                </span>
+              )}
             </div>
           </div>
           <div className="cs-actions">
@@ -258,7 +283,13 @@ function ObjectiveConsole() {
             )}
           </div>
         </div>
-        {config.mockAI && <p className="cs-mock">Mock AI: this server uses the mock AI provider, so plans and outputs are placeholders for development and testing, not real analysis.</p>}
+        {mock && (
+          <p className="cs-mock">
+            {ex?.usedMockAI || ex?.steps.some((s) => s.provider === "mock")
+              ? "Mock AI: this execution ran on the mock AI provider, so its plan and outputs are placeholders for development and testing, not real analysis."
+              : "Mock AI: this server uses the mock AI provider, so plans and outputs are placeholders for development and testing, not real analysis."}
+          </p>
+        )}
         <dl className="cs-facts">
           <div>
             <dt>Budget</dt>
@@ -337,6 +368,20 @@ function ObjectiveConsole() {
           <Stage id="cs-objective" n={1} state={st.objective.state} title="Objective" meta={o.createdBy ? `Defined by ${o.createdBy.name}` : undefined}>
             <div className="cs-card cs-obj">
               <p className="cs-stmt">{o.statement}</p>
+              {(o.kind === "research_brief" || o.constraints) && (
+                <dl className="cs-obj-kind">
+                  <div>
+                    <dt>Deliverable</dt>
+                    <dd>{o.kind === "research_brief" ? "Research brief (evidence-backed)" : "Decision memo"}</dd>
+                  </div>
+                  {o.constraints && (
+                    <div>
+                      <dt>Constraints</dt>
+                      <dd>{o.constraints}</dd>
+                    </div>
+                  )}
+                </dl>
+              )}
               {o.contextNotes && (
                 <details className="cs-disc">
                   <summary>Context for this objective</summary>
@@ -372,7 +417,7 @@ function ObjectiveConsole() {
 
           {ex && (
             <Stage id="verification" n={5} state={st.verification.state} title="Verification" meta={st.verification.note || undefined}>
-              <VerificationPanel execution={ex} />
+              <VerificationPanel execution={ex} objective={o} />
             </Stage>
           )}
 
@@ -381,7 +426,7 @@ function ObjectiveConsole() {
               id="result"
               icon="report"
               title="Report"
-              meta={ex.status === "COMPLETED" ? (verified ? "Verified deliverable" : "Deliverable") : "Draft"}
+              meta={reportMeta}
               right={
                 <ExportMenu
                   title={o.title}
@@ -389,7 +434,9 @@ function ObjectiveConsole() {
                   sources={sources}
                   meta={{
                     date: ex.completedAt,
-                    label: ex.status === "COMPLETED" ? "Ensemblis report" : "Draft — not yet verified",
+                    // The verification signal and the mock label travel with the file.
+                    label: completed ? resultReportLabel(result) : "Draft — not yet verified",
+                    ...(mock ? { note: MOCK_EXPORT_NOTE } : {}),
                   }}
                 />
               }
@@ -433,6 +480,13 @@ function ObjectiveConsole() {
                   </p>
                 </div>
               )}
+              {openIssuesShown && <OpenIssuesCard objective={o} execution={ex} />}
+            </Stage>
+          )}
+
+          {ex?.usage && (ex.usage.calls > 0 || ex.usage.searches.length > 0) && (
+            <Stage id="cs-usage" icon="chart" title="Usage" meta="Model calls and web searches for this attempt">
+              <UsagePanel execution={ex} />
             </Stage>
           )}
 

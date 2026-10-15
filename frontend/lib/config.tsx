@@ -23,10 +23,17 @@ export const FALLBACK_CONFIG: PublicConfig = {
   maxTasksPerUserPerDay: 0, // 0 = unknown / not shown
   maxDescriptionLength: 4000,
   aiProviderLabel: "a third-party AI model provider",
+  // Unknown until the server answers: nothing is blocked on a guess (the server refuses to plan
+  // without a working provider anyway). Pages that gate on these wait for `loaded`.
+  aiConfigured: true,
+  aiProblem: null,
+  // Not known to be mock. The console also labels an execution from what it actually ran on
+  // (execution.usedMockAI), so a failed /api/config never hides the mock label there.
   mockAI: false,
   verificationCostCents: 150,
   // Optional features stay hidden until the server says they're on.
   searchEnabled: false,
+  searchProvider: "off",
   searchProviderLabel: "Off",
   emailEnabled: false,
   paymentsEnabled: false,
