@@ -1,4 +1,4 @@
-import { expect, type APIRequestContext, type BrowserContext, type Page } from "@playwright/test";
+import { expect, type APIRequestContext, type BrowserContext, type Locator, type Page } from "@playwright/test";
 
 export const API = "http://localhost:4100";
 
@@ -34,6 +34,40 @@ export async function signUpViaAPI(request: APIRequestContext, context: BrowserC
 /** The console exposes the current execution status as data-status. */
 export async function expectStatus(page: Page, status: string | RegExp, timeout = 60_000) {
   await expect(page.getByTestId("execution-status")).toHaveAttribute("data-status", status, { timeout });
+}
+
+/** The stack is production-like (npm run e2e:prod-like): the OpenAI-compatible provider code against a local stub — still not a real model. */
+export const PROD_LIKE = process.env.PROD_LIKE === "1";
+
+/**
+ * Keyboard navigation: presses Tab (or Shift+Tab) until `target` has focus — as a keyboard user would.
+ * Fails when it isn't reachable within `max` presses (i.e. it isn't in the tab order).
+ */
+export async function tabTo(page: Page, target: Locator, opts: { max?: number; back?: boolean } = {}) {
+  const max = opts.max ?? 120;
+  await expect(target).toBeVisible();
+  for (let i = 0; i < max; i++) {
+    if (await target.evaluate((el) => el === document.activeElement).catch(() => false)) return;
+    await page.keyboard.press(opts.back ? "Shift+Tab" : "Tab");
+  }
+  await expect(target, `not reachable with ${opts.back ? "Shift+" : ""}Tab within ${max} presses`).toBeFocused();
+}
+
+/** Fills the Company Context form with a short, realistic profile and saves it. */
+export async function fillCompanyContext(page: Page) {
+  await page.getByLabel("What the company does").fill(
+    "Northwind Cooling builds liquid cooling systems for high-density data centers. Our systems cut cooling energy use by 30% compared with air cooling."
+  );
+  await page.getByLabel("Customers / ICP").fill("Colocation operators and hyperscale data center builders in Europe. Heads of facilities decide.");
+  await page.getByLabel("Markets & geographies").fill("We sell in Germany today. We want to expand to two more European markets in 2027.");
+  await page.getByLabel("Business goals").fill("Reach 40 enterprise customers in Europe by the end of 2027.");
+  await page.getByTestId("save-context").click();
+  await expect(page.getByText(/saved/i).first()).toBeVisible();
+}
+
+/** Horizontal overflow of the current page in px (0 = none). */
+export async function horizontalOverflow(page: Page): Promise<number> {
+  return page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
 }
 
 export async function defineObjective(page: Page, statement: string, opts: { suggest?: boolean } = {}) {

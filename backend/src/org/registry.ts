@@ -1,7 +1,7 @@
 // The AI Team: executives, the capabilities (playbooks) they own, and the
 // specialist agent that implements each capability.
 //
-//   Chief of Staff
+//   Chief of Staff         → Objective Planning, Business Research, Cross-functional Synthesis
 //   ├── Head of Marketing  → Market Research, Competitor Analysis, Customer/ICP, Positioning
 //   ├── Head of Sales      → Account Research, Lead Research, Sales Opportunity Analysis
 //   ├── Head of Finance    → Financial Analysis, Scenario Analysis, Unit Economics
@@ -136,6 +136,29 @@ export const CAPABILITIES: Capability[] = [
     verificationFocus: ["Answers the objective", "Covers every success criterion", "Claims carry citations"],
     costCents: 300,
     keywords: [],
+  },
+  {
+    // Open-topic business research (regulation, trends, adoption, an industry overview): the
+    // research step of an evidence-backed research brief, and the default when no specialist fits.
+    key: "business_research",
+    name: "Business Research",
+    executive: "chief_of_staff",
+    version: V1,
+    kind: "research",
+    specialist: "Research Analyst",
+    description: "Researches an open business question from external sources: regulation, trends, adoption, policy or an industry overview.",
+    methodology: [
+      "Break the objective into the 3–5 concrete questions the research must answer.",
+      "Answer each question with findings from the external sources, each citing the source that states it [n].",
+      "Keep sourced findings apart from your own inference; label inference and how you reached it.",
+      "List the evidence gaps: questions the sources don't answer, sources that are thin, old or contradict each other.",
+      "End with the open questions a person should resolve before relying on the findings.",
+    ],
+    deliverable: ["Research questions", "Cited findings", "Evidence gaps", "Open questions"],
+    tools: ["web_research", "documents", "company_context"],
+    verificationFocus: ["Every finding cites an external source [n]", "Inference is labelled", "Evidence gaps and open questions are stated"],
+    costCents: 300,
+    keywords: ["research", "brief", "regulation", "regulatory", "trend", "landscape", "adoption", "policy", "industry", "overview"],
   },
   // ------------------------------------------------------------ Marketing
   {
@@ -412,6 +435,13 @@ export function capabilitiesOf(executive: ExecutiveKey): Capability[] {
 
 export const FRAMING_CAPABILITY = "objective_framing";
 export const SYNTHESIS_CAPABILITY = "cross_functional_synthesis";
+/** The web-research capability a research brief always has (and the fallback planner's default). */
+export const BUSINESS_RESEARCH_CAPABILITY = "business_research";
+
+/** True when the capability is bound to the web_research tool (its steps search the web). */
+export function searchesWeb(cap: Pick<Capability, "tools"> | undefined | null): boolean {
+  return !!cap && cap.tools.includes("web_research");
+}
 
 export function isExecutiveKey(key: string): key is ExecutiveKey {
   return EXEC_BY_KEY.has(key as ExecutiveKey);

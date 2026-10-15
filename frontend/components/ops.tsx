@@ -12,7 +12,7 @@ import { eur, relativeTime } from "@/lib/format";
 import { ROUTES } from "@/lib/routes";
 import { EVIDENCE_KIND_LABEL, type LabelledSource } from "./report/shared";
 import { Icon, type IconName } from "./Icon";
-import { RiskTag, Tag } from "./Tags";
+import { RiskTag, Tag, exceptionKindLabel } from "./Tags";
 import { useToast } from "./Toast";
 import { refreshAttention } from "./Header";
 
@@ -253,16 +253,15 @@ const ACTION_LABEL: Record<ExceptionAction, string> = {
   provide_info: "Send answer",
   proceed: "Proceed with assumptions",
   retry: "Retry",
+  skip: "Continue without this step",
   accept: "Accept with warnings",
   cancel: "Cancel execution",
 };
 
-const EXC_KIND: Record<ExceptionItem["kind"], string> = {
-  MISSING_INFORMATION: "Missing information",
-  STEP_FAILED: "Step failed",
-  VERIFICATION_FAILED: "Verification failed",
-  INSUFFICIENT_FUNDS: "Insufficient balance",
-  POLICY_BLOCKED: "Blocked by policy",
+const ACTION_DONE: Partial<Record<ExceptionAction, string>> = {
+  cancel: "Execution cancelled",
+  provide_info: "Thanks — the Chief of Staff is re-planning",
+  skip: "Continuing without this step — the result will be marked partial",
 };
 
 /** An exception: what happened, why it matters, the recommendation, what is needed — and the actions that resolve it. */
@@ -284,7 +283,9 @@ export function ExceptionCard({ exception, onDone, focusAfter, showObjective = f
     setBusy(a);
     try {
       await api.resolveException(exception.id, a, response.trim() || undefined);
-      toast(a === "cancel" ? "Execution cancelled" : a === "provide_info" ? "Thanks — the Chief of Staff is re-planning" : "Resumed");
+      toast(
+        a === "retry" && exception.kind === "PROVIDER_UNAVAILABLE" ? "Retrying — the Chief of Staff is planning again" : ACTION_DONE[a] ?? "Resumed"
+      );
       refreshAttention();
       refresh().catch(() => undefined);
       const restore = planFocus(ref.current, focusAfter);
@@ -303,7 +304,7 @@ export function ExceptionCard({ exception, onDone, focusAfter, showObjective = f
           <Icon name="alert" size={16} />
         </span>
         <span className="cs-dc-kind">
-          Exception · {EXC_KIND[exception.kind]}
+          Exception · {exceptionKindLabel(exception.kind)}
         </span>
         {high && <Tag variant="bad">High severity</Tag>}
         <span className="cs-dc-time">{relativeTime(exception.createdAt)}</span>
@@ -373,6 +374,11 @@ export function ExceptionCard({ exception, onDone, focusAfter, showObjective = f
               )}
             </>
           )}
+          {exception.actions.includes("skip") && (
+            <p className="cs-dc-note" id={`${uid}-skip`}>
+              Continuing without this step finishes the work without it: the result is marked partial and this step&apos;s cost is refunded.
+            </p>
+          )}
           <div className="cs-dc-btns">
             {exception.actions.map((a, i) => (
               <button
@@ -382,9 +388,9 @@ export function ExceptionCard({ exception, onDone, focusAfter, showObjective = f
                 onClick={() => act(a)}
                 aria-busy={busy === a}
                 disabled={!!busy || (a === "provide_info" && tooShort)}
-                aria-describedby={a === "provide_info" && tooShort ? `${uid}-why` : undefined}
+                aria-describedby={a === "provide_info" && tooShort ? `${uid}-why` : a === "skip" ? `${uid}-skip` : undefined}
               >
-                {ACTION_LABEL[a]}
+                {ACTION_LABEL[a] ?? a.replace(/_/g, " ")}
               </button>
             ))}
           </div>
@@ -393,7 +399,7 @@ export function ExceptionCard({ exception, onDone, focusAfter, showObjective = f
         <p className="cs-dc-done s-RESOLVED">
           <Icon name="check" size={14} />
           <span>
-            Resolved ({(exception.resolvedAction ?? "").replace("_", " ")}) {relativeTime(exception.resolvedAt)}
+            Resolved ({exception.resolvedAction === "skip" ? "continued without the step" : (exception.resolvedAction ?? "").replace("_", " ")}) {relativeTime(exception.resolvedAt)}
             {exception.resolution ? ` — “${exception.resolution.slice(0, 160)}”` : ""}
           </span>
         </p>

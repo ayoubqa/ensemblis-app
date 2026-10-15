@@ -417,6 +417,11 @@ model UsageEvent {
   executionId String? // v4
   latencyMs   Int? // v4
   createdAt   DateTime   @default(now())
+  /// plan | step | verify | verify_claims | queries | memory | suggest
+  purpose     String?
+  /// True when token counts are estimated (no provider usage)
+  estimated   Boolean?
+  error       String?
 
   @@index([kind, createdAt])
   @@index([executionId])
@@ -500,6 +505,7 @@ enum VerificationStatus {
   PASS
   PASS_WITH_WARNINGS
   FAIL
+  UNVERIFIED // the AI verifier could not run (credentials, quota, timeout, invalid output): not verified
 }
 
 enum ClaimStatus {
@@ -535,6 +541,7 @@ enum ExceptionKind {
   VERIFICATION_FAILED
   INSUFFICIENT_FUNDS
   POLICY_BLOCKED
+  PROVIDER_UNAVAILABLE // the model or research provider is missing, rejected or out of quota
 }
 
 enum ExceptionStatus {
@@ -661,10 +668,14 @@ model Objective {
   updatedAt     DateTime        @updatedAt
   completedAt   DateTime?
 
-  criteria   SuccessCriterion[]
-  executions Execution[]
-  approvals  Approval[]
-  exceptions Exception[]
+  criteria    SuccessCriterion[]
+  executions  Execution[]
+  approvals   Approval[]
+  exceptions  Exception[]
+  /// Deliverable kind: null = default decision memo, "research_brief" = evidence-backed research brief
+  kind        String?
+  /// Constraints the plan and deliverable must respect (scope, exclusions, sources, format)
+  constraints String?            @db.Text
 
   @@index([orgId, createdAt])
   @@index([orgId, status])
@@ -724,17 +735,19 @@ model Execution {
   createdAt            DateTime            @default(now())
   updatedAt            DateTime            @updatedAt
 
-  steps         ExecutionStep[]
-  events        ExecutionEvent[]
-  evidence      Evidence[]
-  verifications Verification[]
-  measurements  OutcomeMeasurement[]
-  approvals     Approval[]
-  exceptions    Exception[]
-  memories      MemoryItem[]
-  transactions  Transaction[]
-  usageEvents   UsageEvent[]
-  values        ValueRecord[]
+  steps                  ExecutionStep[]
+  events                 ExecutionEvent[]
+  evidence               Evidence[]
+  verifications          Verification[]
+  measurements           OutcomeMeasurement[]
+  approvals              Approval[]
+  exceptions             Exception[]
+  memories               MemoryItem[]
+  transactions           Transaction[]
+  usageEvents            UsageEvent[]
+  values                 ValueRecord[]
+  /// The outcome a person confirmed (outcomeStatus keeps the AI-measured value)
+  confirmedOutcomeStatus OutcomeStatus?
 
   @@index([orgId, createdAt])
   @@index([objectiveId, attempt])
@@ -776,6 +789,12 @@ model ExecutionStep {
   completedAt       DateTime?
   evidence          Evidence[]
   events            ExecutionEvent[]
+  /// Research steps: ok | degraded | no_results | failed | off
+  researchStatus    String?
+  /// Research steps: { status, providersUsed, queries, attempts[] } (no secrets)
+  research          Json?
+  /// True when token counts are estimates (the provider reported no usage)
+  tokensEstimated   Boolean?
 
   @@unique([executionId, key])
   @@index([executionId, order])
@@ -897,6 +916,14 @@ model Evidence {
   content      String         @db.Text // what agents read and the verifier checks claims against (bounded)
   publishedAt  String?
   createdAt    DateTime       @default(now())
+  /// Search provider that returned this source (tavily | wikipedia), when any
+  provider     String?
+  /// The query that found it
+  query        String?
+  /// When it was retrieved during the execution
+  retrievedAt  DateTime?
+  /// search_snippet | website | upload | provided | page_fetch
+  retrieval    String?
 
   @@unique([executionId, n])
 }
@@ -918,6 +945,10 @@ model Verification {
   version       String
   createdAt     DateTime           @default(now())
   claims        ClaimCheck[]
+  /// Model that ran the AI assessment, and why it could not run when it did not
+  modelProvider String?
+  modelName     String?
+  assessorError String?            @db.Text
 
   @@index([executionId, round])
 }
@@ -932,6 +963,10 @@ model ClaimCheck {
   evidenceNs     Int[]        @default([])
   supportScore   Float        @default(0)
   note           String       @default("")
+  /// source | inference | uncertainty | recommendation
+  claimType      String?
+  /// Best-matching sentence of the cited evidence
+  quote          String?      @db.Text
 
   @@index([verificationId, order])
 }
@@ -950,6 +985,8 @@ model OutcomeMeasurement {
   method        String // model-assessed | deterministic | user-confirmed
   createdAt     DateTime         @default(now())
   updatedAt     DateTime         @updatedAt
+  /// Evidence numbers ([n]) the measurement relies on
+  evidenceNs    Int[]            @default([])
 
   @@unique([executionId, criterionId])
 }

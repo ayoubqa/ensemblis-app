@@ -3,7 +3,8 @@
 // "event key=value" lines in development, silent in tests unless LOG_LEVEL is set.
 //
 // Callers log identifiers, sizes, timings and error messages — never prompts,
-// reports or document text. As a safety net, string fields are truncated.
+// reports or document text. As a safety net, string fields are truncated and
+// anything that looks like an API key or bearer token is redacted.
 
 type Level = "debug" | "info" | "warn" | "error";
 const ORDER: Record<Level, number> = { debug: 10, info: 20, warn: 30, error: 40 };
@@ -16,12 +17,30 @@ function threshold(): number {
   return ORDER.info;
 }
 
+// Provider keys: Anthropic (sk-ant-…), OpenAI (sk-…, sk-proj-…), Groq (gsk_…), Tavily (tvly-…).
+const KEY_RE = /\b(sk-ant-|sk-|gsk_|tvly-)[A-Za-z0-9_-]{8,}/g;
+const BEARER_RE = /\b(Bearer\s+)[A-Za-z0-9._~+/=-]{8,}/gi;
+// Keys passed as query parameters (…?api_key=…&key=…).
+const QUERY_KEY_RE = /([?&](?:api[_-]?key|key|token|access_token)=)[^&\s"'<>]+/gi;
+
+/**
+ * Masks anything that looks like a provider API key or a bearer token. Used on
+ * every log field and on error text before it is stored or shown to users
+ * (step errors, exceptions, usage events). Idempotent.
+ */
+export function redact(s: string): string {
+  if (!s) return s;
+  return s.replace(KEY_RE, "$1[redacted]").replace(BEARER_RE, "$1[redacted]").replace(QUERY_KEY_RE, "$1[redacted]");
+}
+
 function clean(fields: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(fields)) {
     if (v === undefined) continue;
-    if (typeof v === "string") out[k] = v.length > MAX_FIELD_CHARS ? `${v.slice(0, MAX_FIELD_CHARS)}…` : v;
-    else if (v instanceof Error) out[k] = v.message.slice(0, MAX_FIELD_CHARS);
+    if (typeof v === "string") {
+      const r = redact(v);
+      out[k] = r.length > MAX_FIELD_CHARS ? `${r.slice(0, MAX_FIELD_CHARS)}…` : r;
+    } else if (v instanceof Error) out[k] = redact(v.message).slice(0, MAX_FIELD_CHARS);
     else out[k] = v;
   }
   return out;

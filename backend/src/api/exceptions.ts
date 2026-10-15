@@ -30,7 +30,7 @@ router.get(
 );
 
 const resolveSchema = z.object({
-  action: z.enum(["provide_info", "proceed", "retry", "accept", "cancel"]),
+  action: z.enum(["provide_info", "proceed", "retry", "skip", "accept", "cancel"]),
   response: z
     .string()
     .max(4000)

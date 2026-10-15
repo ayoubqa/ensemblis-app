@@ -19,11 +19,17 @@ export const EVENT_TYPES = [
   "STEP_STARTED",
   "CONTEXT_RETRIEVED",
   "RESEARCH_STARTED",
+  /** Web research ran and something answered (data.status ok | degraded | no_results). */
+  "RESEARCH_COMPLETED",
+  /** Web research failed or could not run (data.status failed | off). */
+  "RESEARCH_FAILED",
   "SOURCE_FOUND",
   "ANALYSIS_COMPLETED",
   "STEP_COMPLETED",
   "STEP_RETRY_SCHEDULED",
   "STEP_FAILED",
+  /** A person chose to continue without a failed step. */
+  "STEP_SKIPPED",
   "EXCEPTION_CREATED",
   "EXCEPTION_RESOLVED",
   "VERIFICATION_STARTED",

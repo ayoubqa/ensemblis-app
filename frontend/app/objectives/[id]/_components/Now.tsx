@@ -2,13 +2,24 @@
 
 // "What is happening now": the console's live summary card.
 
-import type { ExceptionItem, Execution, Objective } from "@/lib/api";
-import { Icon, outcomeLabel, statusLabel } from "@/components";
+import type { ExceptionItem, Execution, Objective, ResultState } from "@/lib/api";
+import { Icon, statusLabel } from "@/components";
+import { outcomeTagLabel } from "@/components/Tags";
 import { ExecBadge } from "@/components/ops";
+import { resultStateOf } from "@/lib/openIssues";
 import { eur, relativeTime } from "@/lib/format";
 import type { StreamState } from "./useObjectiveLive";
 
 type Tone = "live" | "wait" | "ok" | "bad" | "idle";
+
+/** How a completed execution reads: only a verified, complete result is plainly good. */
+const COMPLETED: Partial<Record<ResultState, { tone: Tone; title: string }>> = {
+  verified: { tone: "ok", title: "Completed and verified" },
+  verified_with_warnings: { tone: "wait", title: "Completed — verified with warnings" },
+  partial: { tone: "wait", title: "Completed — partial result" },
+  unverified: { tone: "wait", title: "Completed — not verified" },
+  accepted_failed_verification: { tone: "wait", title: "Completed — accepted without passing verification" },
+};
 
 function StreamBadge({ stream }: { stream: StreamState }) {
   if (stream === "live")
@@ -44,6 +55,8 @@ export function NowCard({
   let title = "";
   let sub: string | null = null;
   let cta: { href: string; label: string } | null = null;
+  let cta2: { href: string; label: string } | null = null;
+  const result = ex ? resultStateOf(ex) : null;
 
   if (!ex) {
     title = objective.status === "DRAFT" ? "Draft — not planned yet" : statusLabel(objective.status);
@@ -82,12 +95,24 @@ export function NowCard({
         title = "Verifying the result";
         sub = "Checking it against the evidence and your success criteria.";
         break;
-      case "COMPLETED":
-        tone = "ok";
-        title = `Completed ${relativeTime(ex.completedAt)}`;
-        sub = ex.outcomeSummary ?? (ex.outcomeStatus ? `Outcome: ${outcomeLabel(ex.outcomeStatus)}` : null);
+      case "COMPLETED": {
+        const m = (result && COMPLETED[result]) || { tone: "ok" as Tone, title: "Completed" };
+        tone = m.tone;
+        title = m.title;
+        const outcome = ex.confirmedOutcomeStatus ?? ex.outcomeStatus;
+        // The first reason that explains the result (not the verdict itself).
+        const why = result !== "verified" ? (ex.resultReasons ?? []).find((r) => !/^Verification passed/i.test(r)) : null;
+        sub = [
+          `${relativeTime(ex.completedAt)}.`,
+          why ?? null,
+          ex.outcomeSummary ?? (outcome ? `Outcome: ${outcomeTagLabel(outcome, !!ex.confirmedOutcomeStatus)}.` : null),
+        ]
+          .filter(Boolean)
+          .join(" ");
         cta = ex.result ? { href: "#result", label: "Read the report" } : null;
+        cta2 = result !== "verified" ? { href: "#open-issues", label: "See what is open" } : null;
         break;
+      }
       case "FAILED":
         tone = "bad";
         title = "Execution failed";
@@ -102,10 +127,10 @@ export function NowCard({
 
   const showProgress = !!ex && total > 0 && ex.status !== "PLANNING";
   const pct = total ? Math.round((done / total) * 100) : 0;
-  const announce = ex ? statusLabel(ex.status) : statusLabel(objective.status);
+  const announce = ex ? (ex.status === "COMPLETED" ? title : statusLabel(ex.status)) : statusLabel(objective.status);
 
   return (
-    <section className={`cs-now tone-${tone}`} aria-labelledby="cs-now-h" data-testid="live-card">
+    <section className={`cs-now tone-${tone}`} aria-labelledby="cs-now-h" data-testid="live-card" data-result-state={result ?? undefined}>
       <div className="cs-now-top">
         <h2 id="cs-now-h" className="cs-now-k" tabIndex={-1}>
           Now
@@ -126,7 +151,15 @@ export function NowCard({
             <span>
               {done} of {total} steps done
             </span>
-            {ex && ex.verification && <span>Verified {ex.verification.score}/100</span>}
+            {ex && ex.verification && (
+              <span>
+                {ex.verification.status === "UNVERIFIED"
+                  ? "Not verified"
+                  : ex.verification.status === "FAIL"
+                    ? `Failed verification ${ex.verification.score}/100`
+                    : `Verification ${ex.verification.score}/100`}
+              </span>
+            )}
           </div>
         </div>
       )}
@@ -158,11 +191,15 @@ export function NowCard({
         </ul>
       )}
 
-      {cta && (
-        <a href={cta.href} className="cs-now-cta">
-          {cta.label}
-          <Icon name="arrow" size={14} />
-        </a>
+      {(cta || cta2) && (
+        <div className="cs-now-ctas">
+          {[cta, cta2].filter((c): c is { href: string; label: string } => !!c).map((c) => (
+            <a key={c.href} href={c.href} className="cs-now-cta">
+              {c.label}
+              <Icon name="arrow" size={14} />
+            </a>
+          ))}
+        </div>
       )}
       <p className="sr-only" aria-live="polite">
         Status: {announce}

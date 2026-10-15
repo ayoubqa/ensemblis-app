@@ -90,6 +90,7 @@ describe("exceptions", () => {
     ex = await getExecution(auth, executionId);
     expect(ex.status).toBe("COMPLETED");
     expect(ex.verificationStatus).toBe("FAIL"); // never relabelled as passed
+    expect(ex.resultState).toBe("accepted_failed_verification");
     expect(ex.outcomeStatus).toBe("NOT_ACHIEVED");
     expect(ex.measurements[0]).toMatchObject({ result: "NOT_MET", method: "deterministic" });
   });

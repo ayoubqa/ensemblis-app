@@ -24,6 +24,7 @@ const KIND_GROUPS: { kind: ExceptionItem["kind"]; title: string; sub: string }[]
   { kind: "POLICY_BLOCKED", title: "Blocked by policy", sub: "The action isn't allowed without a person." },
   { kind: "STEP_FAILED", title: "Failed steps", sub: "A step couldn't be completed." },
   { kind: "VERIFICATION_FAILED", title: "Verification failed", sub: "The result didn't pass its checks." },
+  { kind: "PROVIDER_UNAVAILABLE", title: "Provider unavailable", sub: "The AI or search provider isn't configured, rejected the request or is out of quota. Nothing was charged." },
 ];
 const STATUS_GROUPS: { status: ExceptionItem["status"]; title: string }[] = [
   { status: "OPEN", title: "Open" },
@@ -37,6 +38,7 @@ const KIND_SHORT: Record<ExceptionItem["kind"], string> = {
   POLICY_BLOCKED: "blocked by policy",
   STEP_FAILED: "failed step",
   VERIFICATION_FAILED: "verification failed",
+  PROVIDER_UNAVAILABLE: "provider unavailable",
 };
 
 function ExceptionCenter() {

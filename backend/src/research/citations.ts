@@ -3,11 +3,15 @@
 // Agents may cite the numbered task sources inline as [n]. After every model
 // call we:
 //   - drop citation markers that point outside 1..N (and reference lines for
-//     sources that don't exist);
+//     sources that don't exist). Lists may use "," or ";" ([2, 3], [2; 3]); a
+//     range that reaches outside 1..N is dropped whole, never clamped, so the
+//     attribution is never quietly changed;
 //   - turn markdown links to domains that aren't among the sources / the
-//     client's brief into plain text, so a hallucinated URL is never
-//     presented as a clickable reference.
-// Code blocks and inline code are left untouched.
+//     client's brief into plain text, and wrap bare http(s):// and www. URLs
+//     on such domains in backticks (the report renderer autolinks bare URLs),
+//     so a hallucinated URL is never presented as a clickable reference.
+// Code blocks and inline code are left untouched. cleanOutputWithStats also
+// counts what was removed, so the run can say so.
 
 import { clip, domainOf, fairSplit } from "./text";
 
@@ -32,86 +36,135 @@ function mapProse(md: string, fn: (prose: string) => string): string {
     .join("");
 }
 
-/** Rewrites the inside of one [..] marker keeping only numbers in 1..max; "" when none survive. */
-function keepValid(inner: string, max: number): string {
-  const parts = inner.split(/\s*,\s*/);
+/**
+ * Rewrites the inside of one [..] marker keeping only citations in 1..max
+ * ("" when none survive) and counts what was dropped. A range is kept only
+ * when both ends are valid sources.
+ */
+function keepValid(inner: string, max: number): { text: string; removed: number } {
+  const parts = inner.split(/\s*[,;]\s*/);
   const kept: string[] = [];
-  let changed = false;
+  let removed = 0;
+  let normalised = false;
   for (const part of parts) {
     const range = /^(\d{1,3})\s*[-–]\s*(\d{1,3})$/.exec(part);
     if (range) {
       let a = Number(range[1]);
       let b = Number(range[2]);
-      if (a > b) [a, b] = [b, a];
-      const lo = Math.max(1, a);
-      const hi = Math.min(max, b);
-      if (lo > hi) {
-        changed = true;
+      if (a > b) {
+        [a, b] = [b, a];
+        normalised = true;
+      }
+      if (a < 1 || b > max) {
+        removed++;
         continue;
       }
-      if (lo !== a || hi !== b) changed = true;
-      kept.push(lo === hi ? String(lo) : `${lo}–${hi}`);
+      kept.push(a === b ? String(a) : `${a}–${b}`);
       continue;
     }
     const n = Number(part);
     if (Number.isInteger(n) && n >= 1 && n <= max) kept.push(String(n));
-    else changed = true;
+    else removed++;
   }
-  if (!changed) return inner;
-  return kept.join(", ");
+  if (!removed && !normalised) return { text: inner, removed: 0 };
+  return { text: kept.join(", "), removed };
 }
 
-const MARKER = /([ \t]*)\[(\d{1,3}(?:\s*[-–,]\s*\d{1,3})*)\](?![(:])/g;
+const MARKER = /([ \t]*)\[(\d{1,3}(?:\s*[-–,;]\s*\d{1,3})*)\](?![(:])/g;
 const REF_LINE = /^[ \t]*(?:[-*+][ \t]+|\d+\.[ \t]+)?\[(\d{1,3})\](?!\()/;
 
-/**
- * Removes citation markers that don't match a source (n < 1 or n > count).
- * `[2, 9]` with 5 sources becomes `[2]`; a reference line such as
- * "- [9] Some report" for a non-existent source is removed entirely.
- */
-export function stripInvalidCitations(md: string, count: number): string {
-  if (!md) return md;
+function stripInvalidCitationsWithStats(md: string, count: number): { text: string; removed: number } {
+  if (!md) return { text: md, removed: 0 };
   const max = Math.max(0, Math.floor(count));
+  let removed = 0;
   const fixed = mapProse(md, (prose) => {
     const lines = prose.split("\n").filter((line) => {
       const m = REF_LINE.exec(line);
       if (!m) return true;
       const n = Number(m[1]);
-      return n >= 1 && n <= max;
+      const keep = n >= 1 && n <= max;
+      if (!keep) removed++;
+      return keep;
     });
     return lines
       .join("\n")
       .replace(MARKER, (_all, space: string, inner: string) => {
         const kept = keepValid(inner, max);
-        return kept ? `${space}[${kept}]` : "";
+        removed += kept.removed;
+        return kept.text ? `${space}[${kept.text}]` : "";
       });
   });
-  return fixed.replace(/\n{3,}/g, "\n\n");
+  return { text: fixed.replace(/\n{3,}/g, "\n\n"), removed };
 }
 
 /**
- * Turns markdown links whose domain isn't allowed into plain text (keeps the
- * link text). Allowed domains = the task's sources + any URL in the brief.
+ * Removes citation markers that don't match a source (n < 1 or n > count).
+ * `[2, 9]` and `[2; 9]` with 5 sources become `[2]`; `[2-8]` with 3 sources is
+ * dropped (not clamped to 2–3); a reference line such as "- [9] Some report"
+ * for a non-existent source is removed entirely.
  */
-export function unlinkUnknownUrls(md: string, allowedDomains: Iterable<string>): string {
-  if (!md) return md;
+export function stripInvalidCitations(md: string, count: number): string {
+  return stripInvalidCitationsWithStats(md, count).text;
+}
+
+// One pass over prose, left to right, so a URL inside a markdown link is never
+// also treated as a bare URL:
+//   1 = image bang, 2 = link text, 3 = link URL   ([text](https://url "title"))
+//   4 = autolink URL                              (<https://url>)
+//   5 = bare http(s) URL, 6 = bare www. domain    (GFM autolinks both)
+const LINKISH =
+  /(!?)\[([^\]\n]{0,400})\]\(\s*<?(https?:\/\/[^\s)>]+)>?(?:\s+"[^"\n]*")?\s*\)|<(https?:\/\/[^\s>]+)>|\b(https?:\/\/[^\s<>()[\]`"']+)|(?<![\w.@/-])(www\.[a-z0-9-]+(?:\.[a-z0-9-]+)+[^\s<>()[\]`"']*)/gi;
+// Trailing punctuation is sentence text, not part of a bare URL (as GFM treats it).
+const TRAILING_PUNCT = /[.,;:!?*_~'"]+$/;
+
+function unlinkUnknownUrlsWithStats(md: string, allowedDomains: Iterable<string>): { text: string; unlinked: number } {
+  if (!md) return { text: md, unlinked: 0 };
   const allowed = new Set([...allowedDomains].map((d) => d.toLowerCase().replace(/^www\./, "")).filter(Boolean));
   const isAllowed = (url: string) => {
-    const d = domainOf(url);
+    const d = domainOf(/^www\./i.test(url) ? `https://${url}` : url);
     if (!d) return false;
     for (const a of allowed) if (d === a || d.endsWith(`.${a}`)) return true;
     return false;
   };
-  return mapProse(md, (prose) =>
-    prose
-      // [text](https://url "title")
-      .replace(/(!?)\[([^\]\n]{0,400})\]\(\s*<?(https?:\/\/[^\s)>]+)>?(?:\s+"[^"\n]*")?\s*\)/gi, (all, bang: string, text: string, url: string) => {
-        if (bang) return isAllowed(url) ? all : text; // never render remote images from unknown hosts
-        return isAllowed(url) ? all : text;
-      })
-      // <https://url> autolinks
-      .replace(/<(https?:\/\/[^\s>]+)>/gi, (all, url: string) => (isAllowed(url) ? all : url))
+  let unlinked = 0;
+  // Bare URLs inside replacement text (e.g. a link whose text is itself a URL) are wrapped too.
+  const wrapBare = (text: string) =>
+    text.replace(/\b(https?:\/\/[^\s<>()[\]`"']+)|(?<![\w.@/-])(www\.[a-z0-9-]+(?:\.[a-z0-9-]+)+[^\s<>()[\]`"']*)/gi, (all: string) => {
+      const tail = TRAILING_PUNCT.exec(all)?.[0] ?? "";
+      const url = tail ? all.slice(0, -tail.length) : all;
+      return isAllowed(url) ? all : `\`${url}\`${tail}`;
+    });
+  const text = mapProse(md, (prose) =>
+    prose.replace(LINKISH, (all: string, bang: string | undefined, linkText: string | undefined, linkUrl: string | undefined, autoUrl: string | undefined) => {
+      if (linkUrl !== undefined) {
+        if (isAllowed(linkUrl)) return all;
+        unlinked++;
+        // Never render remote images from unknown hosts; keep only the (alt) text.
+        return wrapBare(linkText ?? "");
+      }
+      if (autoUrl !== undefined) {
+        if (isAllowed(autoUrl)) return all;
+        unlinked++;
+        return `\`${autoUrl}\``;
+      }
+      const tail = TRAILING_PUNCT.exec(all)?.[0] ?? "";
+      const url = tail ? all.slice(0, -tail.length) : all;
+      if (!url || isAllowed(url)) return all;
+      unlinked++;
+      return `\`${url}\`${tail}`;
+    })
   );
+  return { text, unlinked };
+}
+
+/**
+ * Turns markdown links whose domain isn't allowed into plain text (keeps the
+ * link text) and wraps bare http(s):// and www. URLs on such domains in
+ * backticks, so the report renderer can't autolink them. Allowed domains =
+ * the task's sources + any URL in the brief.
+ */
+export function unlinkUnknownUrls(md: string, allowedDomains: Iterable<string>): string {
+  return unlinkUnknownUrlsWithStats(md, allowedDomains).text;
 }
 
 /** Drops a short chatty preamble ("Sure! Here is the revised report:") before the first top-level heading. */
@@ -208,7 +261,22 @@ export function allowedLinkDomains(userText: string, sources: { domain: string |
   return [...out];
 }
 
+/**
+ * Citation hygiene for one model output, with counts: invalid [n] citations
+ * removed (each dropped number, range or reference line counts once) and
+ * links/URLs to unknown domains unlinked.
+ */
+export function cleanOutputWithStats(
+  text: string,
+  sourceCount: number,
+  allowedDomains: string[]
+): { text: string; removedCitations: number; unlinkedUrls: number } {
+  const cites = stripInvalidCitationsWithStats(text.trim(), sourceCount);
+  const links = unlinkUnknownUrlsWithStats(cites.text, allowedDomains);
+  return { text: links.text.trim(), removedCitations: cites.removed, unlinkedUrls: links.unlinked };
+}
+
 /** Citation hygiene for one model output: invalid [n] removed, links to unknown domains unlinked. */
 export function cleanOutput(text: string, sourceCount: number, allowedDomains: string[]): string {
-  return unlinkUnknownUrls(stripInvalidCitations(text.trim(), sourceCount), allowedDomains).trim();
+  return cleanOutputWithStats(text, sourceCount, allowedDomains).text;
 }

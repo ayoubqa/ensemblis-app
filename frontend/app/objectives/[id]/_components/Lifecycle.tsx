@@ -3,11 +3,16 @@
 // The objective's lifecycle — Objective → Plan → Approval → Execution →
 // Verification → Evidence → Outcome — derived from the real execution state.
 // Drives the stepper under the console header and the stage markers of each section.
+// A finished execution follows its result state: a verification that failed or never ran,
+// skipped work and research that didn't deliver are never marked plainly done.
 
 import type { ExceptionItem, Execution, Objective } from "@/lib/api";
-import { Icon, outcomeLabel } from "@/components";
+import { Icon } from "@/components";
+import { outcomeTagLabel, verificationLabel } from "@/components/Tags";
+import { resultStateOf } from "@/lib/openIssues";
 
-export type StageState = "done" | "current" | "attention" | "failed" | "stopped" | "todo" | "skipped";
+/** warn: the stage finished, with issues (a skipped step, research that failed, a verifier that could not run). */
+export type StageState = "done" | "warn" | "current" | "attention" | "failed" | "stopped" | "todo" | "skipped";
 export type StageKey = "objective" | "plan" | "approval" | "execution" | "verification" | "evidence" | "outcome";
 export type Tone = "ok" | "warn" | "bad" | null;
 
@@ -48,6 +53,8 @@ const KEYS: StageKey[] = ["objective", "plan", "approval", "execution", "verific
 function blockedAt(ex: Execution, x: ExceptionItem | null): number {
   if (x?.kind === "VERIFICATION_FAILED") return 4;
   if (ex.costCents > 0) return 3;
+  // The model or search provider was unavailable while planning: nothing was charged.
+  if (x?.kind === "PROVIDER_UNAVAILABLE") return 1;
   if (x?.kind === "INSUFFICIENT_FUNDS") return 2;
   return ex.plan && ex.steps.length ? 2 : 1;
 }
@@ -114,12 +121,34 @@ export function lifecycle(o: Objective, ex: Execution | null, openException: Exc
   const decided = [...approvals].reverse().find((a) => a.status !== "PENDING");
   const v = ex?.verification ?? null;
   const evidence = ex?.evidence.length ?? 0;
+  const result = ex ? resultStateOf(ex) : null;
+  const workSteps = ex?.steps.filter((s) => s.kind === "work") ?? [];
+  const skipped = workSteps.filter((s) => s.status === "SKIPPED").length;
+  const failedSteps = workSteps.filter((s) => s.status === "FAILED").length;
+  // Research that left a step without usable web evidence (a skipped step's research no longer matters).
+  const researchGap = (ex?.steps ?? []).some((s) => s.status !== "SKIPPED" && (s.researchStatus === "failed" || s.researchStatus === "no_results" || s.researchStatus === "off"));
+  const outcome = ex?.confirmedOutcomeStatus ?? ex?.outcomeStatus ?? null;
+  const blocked = ex?.plan?.blocked ?? null;
 
   const notes: Record<StageKey, { note: string; tone: Tone }> = {
     objective: { note: o.criteria.length ? `${o.criteria.length} success ${o.criteria.length === 1 ? "criterion" : "criteria"}` : "Defined", tone: null },
     plan: {
-      note: !ex ? "Not planned yet" : ex.status === "PLANNING" ? "Planning…" : work ? `${work} ${work === 1 ? "step" : "steps"}` : at === 1 && mode === "wait" ? "Needs information" : "",
-      tone: null,
+      note: !ex
+        ? "Not planned yet"
+        : ex.status === "PLANNING"
+          ? "Planning…"
+          : blocked && ex.status === "BLOCKED"
+            ? blocked.kind === "search_unavailable"
+              ? "Web search unavailable"
+              : blocked.kind === "quota"
+                ? "AI provider out of quota"
+                : "AI provider not configured"
+            : work
+              ? `${work} ${work === 1 ? "step" : "steps"}`
+              : at === 1 && mode === "wait"
+                ? "Needs information"
+                : "",
+      tone: blocked && ex?.status === "BLOCKED" ? "warn" : null,
     },
     approval: {
       note: pending
@@ -135,22 +164,50 @@ export function lifecycle(o: Objective, ex: Execution | null, openException: Exc
             : "",
       tone: decided?.status === "REJECTED" ? "bad" : null,
     },
-    execution: { note: ex && ex.progress.total ? `${ex.progress.done} of ${ex.progress.total} steps` : "", tone: null },
+    execution: {
+      note:
+        ex && ex.progress.total
+          ? `${ex.progress.done} of ${ex.progress.total} steps${skipped ? ` · ${skipped} skipped` : ""}${failedSteps && ex.status === "COMPLETED" ? ` · ${failedSteps} failed` : ""}`
+          : "",
+      tone: skipped || (failedSteps && ex?.status === "COMPLETED") ? "warn" : null,
+    },
     verification: {
-      note: v ? `${v.score}/100` : ex?.status === "VERIFYING" ? "Checking…" : "",
-      tone: v ? (v.status === "PASS" ? "ok" : v.status === "PASS_WITH_WARNINGS" ? "warn" : "bad") : null,
+      note: v
+        ? v.status === "UNVERIFIED"
+          ? verificationLabel("UNVERIFIED")
+          : `${v.score}/100${result === "accepted_failed_verification" ? " · accepted" : ""}`
+        : ex?.status === "VERIFYING"
+          ? "Checking…"
+          : ex?.status === "COMPLETED"
+            ? "Not verified"
+            : "",
+      tone: v ? (v.status === "PASS" ? "ok" : v.status === "PASS_WITH_WARNINGS" || v.status === "UNVERIFIED" ? "warn" : "bad") : ex?.status === "COMPLETED" ? "warn" : null,
     },
-    evidence: { note: evidence ? `${evidence} ${evidence === 1 ? "source" : "sources"}` : "", tone: null },
+    evidence: {
+      note: researchGap ? `${evidence ? `${evidence} ${evidence === 1 ? "source" : "sources"} · ` : ""}research incomplete` : evidence ? `${evidence} ${evidence === 1 ? "source" : "sources"}` : "",
+      tone: researchGap ? "warn" : null,
+    },
     outcome: {
-      note: ex?.status === "COMPLETED" ? outcomeLabel(ex.outcomeStatus ?? "UNKNOWN") : "",
-      tone: ex?.outcomeStatus === "ACHIEVED" ? "ok" : ex?.outcomeStatus === "PARTIALLY_ACHIEVED" ? "warn" : ex?.outcomeStatus === "NOT_ACHIEVED" ? "bad" : null,
+      note: ex?.status === "COMPLETED" ? outcomeTagLabel(outcome ?? "UNKNOWN", !!ex.confirmedOutcomeStatus) : "",
+      tone: outcome === "ACHIEVED" ? "ok" : outcome === "PARTIALLY_ACHIEVED" ? "warn" : outcome === "NOT_ACHIEVED" ? "bad" : null,
     },
+  };
+
+  /** A finished execution: each stage reads as its result did, not plainly "done". */
+  const completeState = (key: StageKey): StageState => {
+    if (key === "verification") {
+      if (result === "accepted_failed_verification") return "failed";
+      if (result === "unverified") return "warn";
+    }
+    if (key === "execution" && (skipped || failedSteps)) return "warn";
+    if (key === "evidence" && researchGap) return "warn";
+    return "done";
   };
 
   return KEYS.map((key, i) => {
     let state: StageState;
     if (i === 0) state = "done";
-    else if (mode === "complete") state = "done";
+    else if (mode === "complete") state = completeState(key);
     else if (!ex) state = "todo";
     else if (key === "evidence") {
       // Evidence accrues while the AI Team executes.
@@ -169,6 +226,7 @@ export function lifecycle(o: Objective, ex: Execution | null, openException: Exc
 
 const STATE_TEXT: Record<StageState, string> = {
   done: "done",
+  warn: "done, with issues",
   current: "in progress",
   attention: "needs your attention",
   failed: "failed",
@@ -185,7 +243,7 @@ export function StageMark({ state, n, size = "md" }: { state: StageState; n: num
         <Icon name="check" size={size === "sm" ? 12 : 14} />
       ) : state === "failed" || state === "stopped" ? (
         <Icon name="x" size={size === "sm" ? 12 : 14} />
-      ) : state === "attention" ? (
+      ) : state === "attention" || state === "warn" ? (
         "!"
       ) : n === null ? null : (
         n
@@ -197,6 +255,8 @@ export function StageMark({ state, n, size = "md" }: { state: StageState; n: num
 /** The lifecycle stepper. Each stage links to its section when it is on the page. */
 export function LifecycleStepper({ stages, present }: { stages: StageInfo[]; present: Set<StageKey> }) {
   const now = stages.find((s) => s.state === "current" || s.state === "attention" || s.state === "failed" || s.state === "stopped") ?? null;
+  // A finished execution with issues: the narrow-screen line names the first stage that has them.
+  const shown = now ?? stages.find((s) => s.state === "warn") ?? null;
   return (
     <nav className="cs-life" aria-label="Lifecycle">
       <ol>
@@ -228,10 +288,10 @@ export function LifecycleStepper({ stages, present }: { stages: StageInfo[]; pre
           );
         })}
       </ol>
-      {now && (
-        <p className={`cs-life-now is-${now.state}`} aria-hidden="true">
-          <span className="cs-life-now-k">Stage {now.n} of 7</span> {now.label}
-          {now.note ? ` — ${now.note}` : ""}
+      {shown && (
+        <p className={`cs-life-now is-${shown.state}`} aria-hidden="true">
+          <span className="cs-life-now-k">Stage {shown.n} of 7</span> {shown.label}
+          {shown.note ? ` — ${shown.note}` : ""}
         </p>
       )}
     </nav>

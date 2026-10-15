@@ -290,7 +290,7 @@ function ObjectiveRow({ o }: { o: Objective }) {
         <span className="ws-or-result">
           {hasResult ? (
             <>
-              <OutcomeTag outcome={o.outcomeStatus} />
+              <OutcomeTag outcome={o.outcomeStatus} confirmed={!!ex?.confirmedOutcomeStatus} />
               <VerificationTag status={ex?.verificationStatus} score={ex?.verificationScore} />
             </>
           ) : (
