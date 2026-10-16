@@ -33,7 +33,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { recordUsage } from "../lib/usage";
 import { log, redact } from "../lib/log";
-import { mockAIForbidden } from "../config";
+import { DEFAULT_OLLAMA_BASE_URL, DEFAULT_OPENAI_BASE_URL, mockAIForbidden, modelEndpoint, type ModelEndpoint } from "../config";
 import { mockLLM } from "./mockProvider";
 
 export type Provider = "ollama" | "openai" | "anthropic" | "mock";
@@ -309,7 +309,7 @@ function ollamaModel(tier: ModelTier): string {
 }
 
 async function runWithOllama(systemPrompt: string, userContent: string, opts: LLMOptions, sink: TextSink): Promise<LLMResult> {
-  const baseUrl = (process.env.OLLAMA_BASE_URL || "http://localhost:11434").replace(/\/+$/, "");
+  const baseUrl = (process.env.OLLAMA_BASE_URL || DEFAULT_OLLAMA_BASE_URL).replace(/\/+$/, "");
   const model = ollamaModel(opts.model ?? "main");
   const ms = timeoutMs("ollama", opts.timeoutMs);
 
@@ -398,7 +398,6 @@ async function runWithOllama(systemPrompt: string, userContent: string, opts: LL
 // OpenAI-compatible (Groq by default)
 // ---------------------------------------------------------------------------
 
-const DEFAULT_OPENAI_BASE_URL = "https://api.groq.com/openai/v1";
 // Groq retired llama-3.3-70b-versatile on 2026-08-16; gpt-oss-120b is its recommended replacement.
 const DEFAULT_OPENAI_MODEL = "openai/gpt-oss-120b";
 const DEFAULT_GROQ_FAST_MODEL = "openai/gpt-oss-20b";
@@ -969,23 +968,42 @@ const MODEL_LABELS: Record<string, string> = {
   "openai/gpt-oss-20b": "GPT-OSS 20B",
 };
 
-/** Human-readable provider name for GET /api/config, e.g. "Groq (Llama 3.3 70B)". */
-export function aiProviderLabel(): string {
+function modelLabel(provider: Provider): string {
   if (process.env.AI_PROVIDER_LABEL?.trim()) return process.env.AI_PROVIDER_LABEL.trim();
+  if (provider === "anthropic") return "Claude";
+  if (provider === "ollama") return "Ollama";
+  if (provider === "mock") return "Mock AI (development/testing only)";
+  const model = process.env.OPENAI_MODEL || DEFAULT_OPENAI_MODEL;
+  const label = MODEL_LABELS[model] ?? model;
+  const base = (process.env.OPENAI_BASE_URL || DEFAULT_OPENAI_BASE_URL).toLowerCase();
+  if (base.includes("groq.com")) return `Groq (${label})`;
+  if (base.includes("api.openai.com")) return `OpenAI (${label})`;
+  if (base.includes("openrouter.ai")) return `OpenRouter (${label})`;
+  return label;
+}
+
+/**
+ * Human-readable provider name for GET /api/config, e.g. "Groq (GPT-OSS 120B)". A test stub or a
+ * local endpoint says so (config.ts modelEndpoint), even with AI_PROVIDER_LABEL set.
+ */
+export function aiProviderLabel(): string {
   let provider: Provider;
   try {
     provider = currentProvider();
   } catch {
     return "Unconfigured";
   }
-  if (provider === "anthropic") return "Claude";
-  if (provider === "ollama") return "Local model (Ollama)";
-  if (provider === "mock") return "Mock AI (development/testing only)";
-  const model = process.env.OPENAI_MODEL || DEFAULT_OPENAI_MODEL;
-  const modelLabel = MODEL_LABELS[model] ?? model;
-  const base = (process.env.OPENAI_BASE_URL || DEFAULT_OPENAI_BASE_URL).toLowerCase();
-  if (base.includes("groq.com")) return `Groq (${modelLabel})`;
-  if (base.includes("api.openai.com")) return `OpenAI (${modelLabel})`;
-  if (base.includes("openrouter.ai")) return `OpenRouter (${modelLabel})`;
-  return modelLabel;
+  const label = modelLabel(provider);
+  const endpoint = provider === "mock" ? null : modelEndpoint();
+  if (endpoint?.kind === "stub") return `Test stub endpoint (E2E_STUB=1) — ${label}, not a real model`;
+  if (endpoint?.kind === "local") return `Local model endpoint (${endpoint.host}) — ${label}`;
+  return label;
+}
+
+/**
+ * Where this server's model calls go right now (config.ts modelEndpoint), or null when they are
+ * the mock's (AI_PROVIDER=mock or a test handler). Stamped on each plan (Plan.runtime).
+ */
+export function currentModelEndpoint(): ModelEndpoint | null {
+  return describeModel("main").provider === "mock" ? null : modelEndpoint()?.kind ?? null;
 }

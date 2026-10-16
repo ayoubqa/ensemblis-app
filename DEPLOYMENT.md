@@ -205,6 +205,10 @@ done before it has run. It spends real tokens and searches (≈ two objectives).
    `E,A,D` (the default `E,A,B,C,D` adds the missing-information and
    cross-functional checks), e_expect `run`, full off. Download the
    `real-model-smoke-report` artifact.
+   GitHub offers *Run workflow* only once `.github/workflows/real-model-smoke.yml`
+   is on the default branch (`main`), i.e. after #1 is merged; until then use
+   step 3. Scenario E and the `e_expect` input live in this branch's version of
+   the file, so before this branch is merged pick it under *Use workflow from*.
 3. Or locally (needs Postgres with a database named `ensemblis_smoke`):
 
    ```bash

@@ -16,6 +16,7 @@ import {
   verificationLabel,
 } from "@/components/Tags";
 import { RESULT_STATES, type ClaimType, type ExceptionKind, type ExecutionStatus, type OutcomeStatus, type ResearchStatus, type VerificationStatus } from "./api";
+import { CUSTOM_SEARCH_NOTE, MOCK_EXPORT_NOTE, MOCK_TAG_LABEL, MODEL_ENDPOINT_TAG, UNFINISHED_STEP } from "./openIssues";
 
 const ALL: ExecutionStatus[] = ["PLANNING", "PLANNED", "WAITING_FOR_APPROVAL", "RUNNING", "BLOCKED", "VERIFYING", "COMPLETED", "FAILED", "CANCELLED"];
 
@@ -79,6 +80,25 @@ describe("honest result vocabulary", () => {
     expect(exceptionKindLabel("PROVIDER_UNAVAILABLE")).toBe("Provider unavailable");
     // A kind this build doesn't know yet still reads as words.
     expect(exceptionKindLabel("SOMETHING_NEW")).toBe("Something new");
+  });
+
+  it("labels mock output the same way everywhere", () => {
+    expect(MOCK_TAG_LABEL).toBe("Mock AI — test output");
+    expect(MOCK_EXPORT_NOTE.startsWith(`${MOCK_TAG_LABEL}.`)).toBe(true);
+  });
+
+  it("labels a stub or local model endpoint and a custom search endpoint, never as a real or mock model", () => {
+    expect(MODEL_ENDPOINT_TAG).toEqual({ stub: "Test stub endpoint — not a real model", local: "Local model endpoint" });
+    expect(CUSTOM_SEARCH_NOTE).toBe("Custom search endpoint — sources come from TAVILY_BASE_URL, not the public Tavily API.");
+    // A local endpoint may be a real self-hosted model: it is never called a mock or a stub.
+    expect(MODEL_ENDPOINT_TAG.local).not.toMatch(/mock|stub/i);
+  });
+
+  it("names steps an ended run didn't finish apart from a person's skip", () => {
+    expect(UNFINISHED_STEP.not_run.label).toBe("Not run");
+    expect(UNFINISHED_STEP.stopped.label).toBe("Stopped");
+    // "Skipped" (StepStatusTag) stays a person's decision.
+    expect(Object.values(UNFINISHED_STEP).map((u) => u.label)).not.toContain("Skipped");
   });
 
   it("labels research outcomes and claim types", () => {

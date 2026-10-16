@@ -4,9 +4,11 @@ import Link from "next/link";
 import { useCallback, useState } from "react";
 import { api, type Briefing } from "@/lib/api";
 import { EmptyState, Icon, Meter, OutcomeTag, RequireAuth, Skeleton, Tag, VerificationTag, useShell } from "@/components";
+import { ResultStateTag } from "@/components/Tags";
 import { ApprovalCard, ExceptionCard, ExecBadge } from "@/components/ops";
 import { eur, greeting, plural, relativeTime } from "@/lib/format";
 import { usePolling } from "@/lib/hooks";
+import { MOCK_TAG_LABEL, listedResultState, resultScore } from "@/lib/openIssues";
 import { LOOP } from "@/lib/data";
 import { ROUTES } from "@/lib/routes";
 
@@ -19,6 +21,22 @@ export default function DashboardPage() {
 }
 
 type Activity = Briefing["team"]["activity"][number];
+
+/**
+ * A recent outcome (always a completed execution): its outcome, its result state when it isn't
+ * plainly verified (a partial one keeps its verification verdict too), and the mock label.
+ */
+function OutcomeTags({ r }: { r: Briefing["recentOutcomes"][number] }) {
+  const result = listedResultState({ ...r, status: "COMPLETED" });
+  return (
+    <span className="ws-tags">
+      <OutcomeTag outcome={r.outcomeStatus} confirmed={!!r.outcomeConfirmed} />
+      {result && <ResultStateTag state={result} suffix={result === "partial" ? null : resultScore(r)} />}
+      {(!result || result === "partial") && <VerificationTag status={r.verificationStatus} score={r.verificationScore} />}
+      {r.usedMockAI && <Tag variant="warn">{MOCK_TAG_LABEL}</Tag>}
+    </span>
+  );
+}
 
 /** Event types that deserve a coloured marker in the activity feed (the text always says what happened). */
 const TONE: Record<string, "ok" | "warn" | "bad"> = {
@@ -260,10 +278,7 @@ function ChiefOfStaff() {
                               {eur(r.costCents, { decimals: true })} · {relativeTime(r.completedAt)}
                             </span>
                           </span>
-                          <span className="ws-tags">
-                            <OutcomeTag outcome={r.outcomeStatus} confirmed={!!r.outcomeConfirmed} />
-                            <VerificationTag status={r.verificationStatus} score={r.verificationScore} />
-                          </span>
+                          <OutcomeTags r={r} />
                         </Link>
                       </li>
                     ))}

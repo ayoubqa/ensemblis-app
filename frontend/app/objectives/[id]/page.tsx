@@ -8,8 +8,8 @@ import { useAuth } from "@/lib/auth-context";
 import { useConfig } from "@/lib/config";
 import { EmptyState, Icon, OutcomeTag, PageSkeleton, RequireAuth, StatusTag, Tag, VerificationTag, statusLabel, useToast } from "@/components";
 import { ResultStateTag, resultReportLabel, resultStateLabel } from "@/components/Tags";
-import { MOCK_EXPORT_NOTE, resultStateOf, usedMockAI } from "@/lib/openIssues";
-import { ExportMenu, ReportView, copyText } from "@/components/report";
+import { MOCK_EXPORT_NOTE, MODEL_ENDPOINT_DETAIL, endpointNote, modelEndpointOf, modelEndpointTag, resultStateOf, usedMockAI } from "@/lib/openIssues";
+import { AI_NOTE, ExportMenu, ReportView, copyText } from "@/components/report";
 import { ApprovalCard, EventFeed, ExceptionCard, evidenceToSources } from "@/components/ops";
 import { eur, longDate, relativeTime } from "@/lib/format";
 import { ROUTES } from "@/lib/routes";
@@ -181,6 +181,9 @@ function ObjectiveConsole() {
   const completed = ex?.status === "COMPLETED";
   // Labelled from what this execution actually ran on, and from the server's current setting.
   const mock = usedMockAI(ex, config.mockAI);
+  // A test stub or local model endpoint, and a custom search endpoint, as recorded with this execution.
+  const modelEndpoint = modelEndpointOf(ex);
+  const endpointExportNote = endpointNote(ex);
   const outcome = ex ? (ex.confirmedOutcomeStatus ?? ex.outcomeStatus) : null;
   // A completed result carries its result state; its verification verdict shows separately
   // only when the state doesn't already say it (a partial result).
@@ -259,6 +262,11 @@ function ObjectiveConsole() {
                   Mock AI — test output
                 </span>
               )}
+              {modelEndpoint && (
+                <span className={`tag ${modelEndpoint === "stub" ? "warn" : "gray"}`} data-testid="endpoint-tag" title={MODEL_ENDPOINT_DETAIL[modelEndpoint]}>
+                  {modelEndpointTag(ex)}
+                </span>
+              )}
             </div>
           </div>
           <div className="cs-actions">
@@ -290,6 +298,7 @@ function ObjectiveConsole() {
               : "Mock AI: this server uses the mock AI provider, so plans and outputs are placeholders for development and testing, not real analysis."}
           </p>
         )}
+        {modelEndpoint === "stub" && <p className="cs-mock">{MODEL_ENDPOINT_DETAIL.stub}</p>}
         <dl className="cs-facts">
           <div>
             <dt>Budget</dt>
@@ -434,9 +443,9 @@ function ObjectiveConsole() {
                   sources={sources}
                   meta={{
                     date: ex.completedAt,
-                    // The verification signal and the mock label travel with the file.
+                    // The verification signal, the mock label and a stub, local or custom endpoint travel with the file.
                     label: completed ? resultReportLabel(result) : "Draft — not yet verified",
-                    ...(mock ? { note: MOCK_EXPORT_NOTE } : {}),
+                    ...(mock || endpointExportNote ? { note: [mock ? MOCK_EXPORT_NOTE : AI_NOTE, endpointExportNote].filter(Boolean).join(" ") } : {}),
                   }}
                 />
               }

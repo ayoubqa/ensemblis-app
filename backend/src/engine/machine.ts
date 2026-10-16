@@ -31,6 +31,7 @@ import { readRevisionInputs, runStep, StepError } from "./executor";
 import { learnFromExecution } from "./learning";
 import { addRevisionStep, failExecution, notifyAttention, openException, requestApproval, startInTx } from "./lifecycle";
 import { recordOutcome } from "./outcome";
+import { incompleteWork } from "./resultState";
 import { DEFAULT_CRITERIA, planObjective, type Plan, type PlanBlockedKind } from "./planner";
 import { titleFor } from "./objectives";
 import { eur, refundExecution } from "./billing";
@@ -717,6 +718,9 @@ async function finalize(ex: Execution, model: ModelAssessment | null, accepted: 
   const latest = await prisma.verification.findFirst({ where: { executionId: ex.id }, orderBy: { round: "desc" }, select: { id: true, status: true } });
   const verificationStatus = latest?.status ?? null;
   const hasUnsupported = latest ? (await prisma.claimCheck.count({ where: { verificationId: latest.id, status: { in: ["UNSUPPORTED", "UNCITED"] } } })) > 0 : false;
+  // A skipped or failed work step, or research that didn't deliver, makes the result partial for any objective kind.
+  const steps = await prisma.executionStep.findMany({ where: { executionId: ex.id }, select: { kind: true, status: true, researchStatus: true, title: true } });
+  const partial = incompleteWork(steps, objective.kind).length > 0;
   const unverified = verificationStatus === "UNVERIFIED";
   const outcome = await prisma.$transaction((tx) =>
     recordOutcome(tx, {
@@ -727,6 +731,7 @@ async function finalize(ex: Execution, model: ModelAssessment | null, accepted: 
       objectiveKind: objective.kind,
       verificationStatus,
       hasUnsupported,
+      partial,
     })
   );
   await emit(prisma, {

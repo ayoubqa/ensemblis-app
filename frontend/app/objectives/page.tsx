@@ -4,9 +4,11 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Fragment, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { api, type LegacyTask, type Objective, type ObjectiveCounts, type ObjectiveGroup, type ObjectiveStatus } from "@/lib/api";
-import { EmptyState, Icon, OutcomeTag, PageHead, ProgressBar, RequireAuth, Skeleton, StatusTag, Tabs, VerificationTag, useToast, type IconName } from "@/components";
+import { EmptyState, Icon, OutcomeTag, PageHead, ProgressBar, RequireAuth, Skeleton, StatusTag, Tabs, Tag, VerificationTag, useToast, type IconName } from "@/components";
+import { ResultStateTag } from "@/components/Tags";
 import { eur, plural, relativeTime, shortDate } from "@/lib/format";
 import { useDebounced } from "@/lib/hooks";
+import { MOCK_TAG_LABEL, listedResultState, resultScore } from "@/lib/openIssues";
 import { ROUTES } from "@/lib/routes";
 
 export default function ObjectivesPage() {
@@ -275,7 +277,10 @@ function ObjectiveRow({ o }: { o: Objective }) {
   const sub = ex?.currentStep
     ? `${ex.currentStep.agent} (${ex.currentStep.executiveTitle}): ${ex.currentStep.title}`
     : ex?.outcomeSummary ?? `${o.criteria.length} success criteri${o.criteria.length === 1 ? "on" : "a"} · budget ${eur(o.budgetCents)}`;
-  const hasResult = !!o.outcomeStatus || !!ex?.verificationStatus;
+  // A completed result that isn't plainly verified says so; a partial one also keeps its verification verdict.
+  const result = listedResultState(ex);
+  const hasResult = !!o.outcomeStatus || !!ex?.verificationStatus || !!result;
+  const mock = !!ex?.usedMockAI;
   return (
     <li>
       <Link href={ROUTES.objective(o.id)} className="ws-or">
@@ -291,14 +296,18 @@ function ObjectiveRow({ o }: { o: Objective }) {
           {hasResult ? (
             <>
               <OutcomeTag outcome={o.outcomeStatus} confirmed={!!ex?.confirmedOutcomeStatus} />
-              <VerificationTag status={ex?.verificationStatus} score={ex?.verificationScore} />
+              {result && <ResultStateTag state={result} suffix={result === "partial" ? null : resultScore(ex)} />}
+              {(!result || result === "partial") && <VerificationTag status={ex?.verificationStatus} score={ex?.verificationScore} />}
             </>
           ) : (
-            <span className="ws-dash">
-              <span aria-hidden="true">—</span>
-              <span className="sr-only">No result yet</span>
-            </span>
+            !mock && (
+              <span className="ws-dash">
+                <span aria-hidden="true">—</span>
+                <span className="sr-only">No result yet</span>
+              </span>
+            )
           )}
+          {mock && <Tag variant="warn">{MOCK_TAG_LABEL}</Tag>}
         </span>
         <span className="ws-or-time">{relativeTime(o.updatedAt)}</span>
       </Link>

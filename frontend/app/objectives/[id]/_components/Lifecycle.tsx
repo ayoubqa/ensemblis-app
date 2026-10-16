@@ -9,7 +9,7 @@
 import type { ExceptionItem, Execution, Objective } from "@/lib/api";
 import { Icon } from "@/components";
 import { outcomeTagLabel, verificationLabel } from "@/components/Tags";
-import { resultStateOf } from "@/lib/openIssues";
+import { resultStateOf, unfinishedStep, verificationStopped } from "@/lib/openIssues";
 
 /** warn: the stage finished, with issues (a skipped step, research that failed, a verifier that could not run). */
 export type StageState = "done" | "warn" | "current" | "attention" | "failed" | "stopped" | "todo" | "skipped";
@@ -63,10 +63,11 @@ function blockedAt(ex: Execution, x: ExceptionItem | null): number {
  * Furthest stage a failed or cancelled execution reached. Rejecting or cancelling a
  * plan marks its untouched steps SKIPPED: only an execution that started (`startedAt`,
  * set when it is charged) or a step that actually ran counts as execution, so a rejected
- * plan stops at Approval instead of reading as approved.
+ * plan stops at Approval instead of reading as approved. A run that ended with every work
+ * step finished stopped during verification.
  */
 function reachedAt(ex: Execution): number {
-  if (ex.verification) return 4;
+  if (ex.verification || verificationStopped(ex)) return 4;
   if (ex.startedAt || ex.costCents > 0 || ex.steps.some((s) => s.status !== "PENDING" && s.status !== "SKIPPED")) return 3;
   return ex.plan ? 2 : 1;
 }
@@ -123,7 +124,12 @@ export function lifecycle(o: Objective, ex: Execution | null, openException: Exc
   const evidence = ex?.evidence.length ?? 0;
   const result = ex ? resultStateOf(ex) : null;
   const workSteps = ex?.steps.filter((s) => s.kind === "work") ?? [];
-  const skipped = workSteps.filter((s) => s.status === "SKIPPED").length;
+  // Steps a cancelled or failed run ended without finishing read "not run" (never started) or
+  // "stopped" (started); "skipped" is a person's skip (as in the Plan's step tags).
+  const unfinished = ex ? workSteps.map((s) => unfinishedStep(s, ex.status)) : [];
+  const notRun = unfinished.filter((u) => u === "not_run").length;
+  const stopped = unfinished.filter((u) => u === "stopped").length;
+  const skipped = workSteps.filter((s) => s.status === "SKIPPED").length - notRun - stopped;
   const failedSteps = workSteps.filter((s) => s.status === "FAILED").length;
   // Research that left a step without usable web evidence (a skipped step's research no longer matters).
   const researchGap = (ex?.steps ?? []).some((s) => s.status !== "SKIPPED" && (s.researchStatus === "failed" || s.researchStatus === "no_results" || s.researchStatus === "off"));
@@ -167,7 +173,7 @@ export function lifecycle(o: Objective, ex: Execution | null, openException: Exc
     execution: {
       note:
         ex && ex.progress.total
-          ? `${ex.progress.done} of ${ex.progress.total} steps${skipped ? ` · ${skipped} skipped` : ""}${failedSteps && ex.status === "COMPLETED" ? ` · ${failedSteps} failed` : ""}`
+          ? `${ex.progress.done} of ${ex.progress.total} steps${skipped ? ` · ${skipped} skipped` : ""}${stopped ? ` · ${stopped} stopped` : ""}${notRun ? ` · ${notRun} not run` : ""}${failedSteps && ex.status === "COMPLETED" ? ` · ${failedSteps} failed` : ""}`
           : "",
       tone: skipped || (failedSteps && ex?.status === "COMPLETED") ? "warn" : null,
     },

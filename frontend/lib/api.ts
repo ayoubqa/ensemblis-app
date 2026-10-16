@@ -131,12 +131,25 @@ export interface ExecutionSummary {
   resultReasons?: string[];
   /** True when any part of this execution actually ran on the mock AI provider. */
   usedMockAI?: boolean;
+  /** Where its model and web search calls went, as recorded with it at run time. Absent from an older API. */
+  endpoints?: ExecutionEndpoints;
   planSource: "planner" | "fallback" | null;
   startedAt: string | null;
   completedAt: string | null;
   createdAt: string;
   progress: { done: number; total: number };
   currentStep: { title: string; agent: string; executive: string; executiveTitle: string } | null;
+}
+
+/**
+ * Where an execution's calls went, recorded with it (never the server's current setting).
+ * model: stub = a test stub endpoint (not a real model); local = a model on this machine or a private
+ * network (self-hosted or a test endpoint); hosted = a model API. search: custom = TAVILY_BASE_URL, not
+ * the public Tavily API. null: not used (the mock model, no web search) or not known (an older execution).
+ */
+export interface ExecutionEndpoints {
+  model: "hosted" | "local" | "stub" | null;
+  search: "public" | "custom" | null;
 }
 
 export interface Objective {
@@ -187,6 +200,8 @@ export interface SearchAttempt {
   error: string | null;
   resultCount: number;
   ms: number | null;
+  /** custom: the request went to TAVILY_BASE_URL, not the public Tavily API. Absent when no request was made, and on older attempts. */
+  endpoint?: "public" | "custom";
 }
 
 /** What a research step did: the providers that answered, the queries sent and every attempt. */
@@ -597,6 +612,10 @@ export interface Briefing {
     outcomeSummary: string | null;
     verificationStatus: VerificationStatus | null;
     verificationScore: number | null;
+    /** Optional: read when the API sends them (otherwise the result state is read from the verification alone). */
+    resultState?: ResultState;
+    usedMockAI?: boolean;
+    endpoints?: ExecutionEndpoints;
   }[];
   context: { filled: number; total: number; missing: string[] };
   value30d: { criteriaMet: number; estimatedHoursReturned: number; executionCostCents: number };
@@ -716,6 +735,7 @@ export interface PublicReport {
   team: { agentName: string; role: string; title: string }[];
   /** Execution reports: taken from what the execution actually ran on. */
   usedMockAI?: boolean;
+  endpoints?: ExecutionEndpoints;
   resultState?: ResultState;
   resultReasons?: string[];
   objective?: {
@@ -795,11 +815,15 @@ export interface PublicConfig {
   /** Why model calls can't work, naming environment variables only (never a key); null when configured. */
   aiProblem: string | null;
   mockAI: boolean;
+  /** Where this server's model calls go now: stub also for the mock AI (neither is a real model). Absent from an older API. */
+  aiEndpoint?: "hosted" | "local" | "stub";
   verificationCostCents: number;
   searchEnabled: boolean;
   /** The search provider actually used: tavily, wikipedia (no Tavily key) or off. */
   searchProvider: "tavily" | "wikipedia" | "off";
   searchProviderLabel: string;
+  /** True when TAVILY_BASE_URL sends web search to an endpoint other than the public Tavily API (a stub or a proxy). Absent from an older API. */
+  searchCustomEndpoint?: boolean;
   emailEnabled: boolean;
   paymentsEnabled: boolean;
   creditPacks: CreditPack[];

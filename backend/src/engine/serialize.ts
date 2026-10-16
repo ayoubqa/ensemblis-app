@@ -21,10 +21,48 @@ import { getCapability, getExecutive } from "../org/registry";
 import { redact } from "../lib/log";
 import { toPublicMemory } from "../memory/service";
 import { toPublicEvidence } from "./evidence";
-import type { Plan } from "./planner";
+import type { Plan, PlanRuntime } from "./planner";
+import type { ModelEndpoint } from "../config";
+import type { SearchEndpoint } from "../research/search";
 import { deriveResultState } from "./resultState";
+import { SKIPPED_STEP_ISSUE } from "./verification/checks";
+import { TEXT_MATCH_ONLY } from "./verification/claimCheck";
 
 const iso = (d: Date | null | undefined) => (d ? d.toISOString() : null);
+
+/**
+ * The outcome a person confirmed, or null. Before confirmedOutcomeStatus existed a confirmation
+ * overwrote outcomeStatus and set outcomeConfirmedAt: such a row counts as confirmed with that value.
+ */
+export function confirmedOutcomeOf(e: Pick<Execution, "outcomeStatus" | "confirmedOutcomeStatus" | "outcomeConfirmedAt">) {
+  return e.confirmedOutcomeStatus ?? (e.outcomeConfirmedAt ? e.outcomeStatus : null);
+}
+
+const PUBLIC_RESEARCH_WARNING = "Web research was incomplete for part of this result.";
+const PUBLIC_VERIFIER_WARNING = "The AI verifier was unavailable for this result.";
+const PUBLIC_TEXT_MATCH_WARNING = "Claims were checked by text match only.";
+
+/**
+ * Verification warnings for the public shared report. Lines that carry provider or operator
+ * detail — a search failure and its reason (budget, key, HTTP status), the AI verifier's or the
+ * claim check's error — become generic wording; the owner's console keeps the full text.
+ */
+export function toPublicWarnings(warnings: readonly string[]): string[] {
+  const out: string[] = [];
+  for (const w of warnings) {
+    const research = w.startsWith("Research: ") ? w.slice("Research: ".length) : null;
+    const safe =
+      research !== null && !SKIPPED_STEP_ISSUE.test(research)
+        ? PUBLIC_RESEARCH_WARNING
+        : w.startsWith("The AI verifier could not run")
+          ? PUBLIC_VERIFIER_WARNING
+          : w.startsWith(`${TEXT_MATCH_ONLY}:`)
+            ? PUBLIC_TEXT_MATCH_WARNING
+            : w;
+    if (!out.includes(safe)) out.push(safe);
+  }
+  return out;
+}
 
 /** Provider/search error text shown to people: key-shaped tokens masked (lib/log redact), then clipped. */
 export function scrubError(s: string | null | undefined, max = 300): string | null {
@@ -37,9 +75,9 @@ export function toPublicCriterion(c: SuccessCriterion) {
   return { id: c.id, order: c.order, description: c.description, kind: c.kind as "qualitative" | "quantitative", targetValue: c.targetValue, unit: c.unit, source: c.source as "user" | "proposed" };
 }
 
-/** The step fields a summary needs. provider / researchStatus / capability are optional so narrow selects still type-check. */
+/** The step fields a summary needs. provider / researchStatus / capability / research are optional so narrow selects still type-check. */
 export type StepLite = Pick<ExecutionStep, "status" | "title" | "agent" | "executive" | "order" | "kind"> &
-  Partial<Pick<ExecutionStep, "provider" | "researchStatus" | "capability">>;
+  Partial<Pick<ExecutionStep, "provider" | "researchStatus" | "capability" | "research">>;
 
 /** Select for StepLite (list and detail summaries). */
 export const STEP_LITE_SELECT = {
@@ -52,6 +90,7 @@ export const STEP_LITE_SELECT = {
   provider: true,
   researchStatus: true,
   capability: true,
+  research: true, // the search attempts' endpoints (endpointsOf)
 } as const;
 
 export function progressOf(steps: StepLite[]) {
@@ -87,6 +126,42 @@ export function usedMockAIOf(e: {
   );
 }
 
+export interface ExecutionEndpoints {
+  model: ModelEndpoint | null;
+  search: SearchEndpoint | null;
+}
+
+/**
+ * Where an execution's model and web search calls went, from what is stored with it — never the
+ * server's current configuration. model: Plan.runtime, stamped at planning (null for the mock).
+ * search: the endpoints its search attempts record ("custom" when any went to TAVILY_BASE_URL);
+ * research reused from an interrupted attempt has no attempts, so the plan's stamp stands in.
+ * null: not used, or not known (an execution from before this was recorded).
+ */
+export function endpointsOf(e: { plan?: unknown; steps?: { researchStatus?: string | null; research?: unknown }[] }): ExecutionEndpoints {
+  const runtime = planRuntime(e.plan);
+  const marked = new Set<unknown>();
+  for (const s of e.steps ?? []) {
+    const attempts = s.research && typeof s.research === "object" ? (s.research as { attempts?: unknown }).attempts : null;
+    if (Array.isArray(attempts)) for (const a of attempts) marked.add(a && typeof a === "object" ? (a as { endpoint?: unknown }).endpoint : undefined);
+  }
+  const searched = (e.steps ?? []).some((s) => s.researchStatus === "ok" || s.researchStatus === "degraded" || s.researchStatus === "no_results");
+  return {
+    model: runtime?.modelEndpoint ?? null,
+    search: marked.has("custom") ? "custom" : marked.has("public") ? "public" : searched ? runtime?.searchEndpoint ?? null : null,
+  };
+}
+
+function planRuntime(plan: unknown): PlanRuntime | null {
+  const r = plan && typeof plan === "object" ? (plan as { runtime?: unknown }).runtime : null;
+  if (!r || typeof r !== "object") return null;
+  const { modelEndpoint: m, searchEndpoint: s } = r as Record<string, unknown>;
+  return {
+    modelEndpoint: m === "hosted" || m === "local" || m === "stub" ? m : null,
+    searchEndpoint: s === "public" || s === "custom" ? s : null,
+  };
+}
+
 export function toExecutionSummary(e: SummaryInput, opts: { objectiveKind?: string | null } = {}) {
   const result = deriveResultState({
     status: e.status,
@@ -105,11 +180,12 @@ export function toExecutionSummary(e: SummaryInput, opts: { objectiveKind?: stri
     verificationScore: e.verificationScore,
     /** The AI-measured outcome. A person's confirmation is confirmedOutcomeStatus and never overwrites it. */
     outcomeStatus: e.outcomeStatus,
-    confirmedOutcomeStatus: e.confirmedOutcomeStatus ?? null,
+    confirmedOutcomeStatus: confirmedOutcomeOf(e),
     outcomeSummary: e.outcomeSummary,
     resultState: result.state,
     resultReasons: result.reasons,
     usedMockAI: usedMockAIOf(e),
+    endpoints: endpointsOf(e),
     planSource: e.planSource,
     startedAt: iso(e.startedAt),
     completedAt: iso(e.completedAt),

@@ -44,15 +44,23 @@ export interface ResultStateOutput {
 
 const named = (s: ResultStateStep) => (s.title?.trim() ? `"${s.title.trim()}"` : "a step");
 
-/** Step-level facts that make a finished result incomplete (partial) or worth noting. */
-function stepFindings(steps: ResultStateStep[], terminal: boolean, objectiveKind: string | null | undefined) {
+/**
+ * Step-level facts that make a finished result incomplete (partial) or worth noting.
+ * A cancelled or failed execution delivered no result, and ending it marks every step that never ran
+ * SKIPPED: those steps are not listed (the state's own reason says the execution ended).
+ */
+function stepFindings(steps: ResultStateStep[], status: string, objectiveKind: string | null | undefined) {
+  const completed = status === "COMPLETED";
+  const ended = status === "CANCELLED" || status === "FAILED";
   const incomplete: string[] = [];
   const notes: string[] = [];
   for (const s of steps) {
     const work = s.kind !== "revision";
-    if (work && s.status === "SKIPPED") incomplete.push(`Step ${named(s)} was skipped, so the result was produced without it.`);
-    else if (work && s.status === "FAILED") incomplete.push(`Step ${named(s)} failed.`);
-    else if (work && terminal && (s.status === "PENDING" || s.status === "RUNNING")) incomplete.push(`Step ${named(s)} did not finish.`);
+    if (work && s.status === "SKIPPED") {
+      if (completed) incomplete.push(`Step ${named(s)} was skipped, so the result was produced without it.`);
+      else if (!ended) incomplete.push(`Step ${named(s)} was skipped.`);
+    } else if (work && s.status === "FAILED") incomplete.push(`Step ${named(s)} failed.`);
+    else if (work && completed && (s.status === "PENDING" || s.status === "RUNNING")) incomplete.push(`Step ${named(s)} did not finish.`);
     if (s.status === "SKIPPED") continue; // a skipped step's research no longer matters
     switch (s.researchStatus) {
       case "failed":
@@ -72,16 +80,24 @@ function stepFindings(steps: ResultStateStep[], terminal: boolean, objectiveKind
     }
   }
   // An evidence-backed brief whose plan never searched the web is not the deliverable that was asked for.
-  if (objectiveKind === "research_brief" && terminal && steps.length && !steps.some((s) => s.researchStatus)) {
+  if (objectiveKind === "research_brief" && completed && steps.length && !steps.some((s) => s.researchStatus)) {
     incomplete.push("No web research ran for this research brief.");
   }
   return { incomplete, notes };
 }
 
+/**
+ * Why a COMPLETED execution with these steps would be partial (empty when its work is complete).
+ * The outcome uses it: incomplete work can't count as fully achieved.
+ */
+export function incompleteWork(steps: ResultStateStep[], objectiveKind?: string | null): string[] {
+  return stepFindings(steps, "COMPLETED", objectiveKind).incomplete;
+}
+
 export function deriveResultState(input: ResultStateInput): ResultStateOutput {
   const steps = input.steps ?? [];
   const completed = input.status === "COMPLETED";
-  const { incomplete, notes } = input.steps ? stepFindings(steps, completed, input.objectiveKind) : { incomplete: [], notes: [] };
+  const { incomplete, notes } = input.steps ? stepFindings(steps, input.status, input.objectiveKind) : { incomplete: [], notes: [] };
   const stepReasons = [...incomplete, ...notes];
 
   if (input.status === "BLOCKED") return { state: "blocked", reasons: ["Paused until a person resolves an open issue.", ...stepReasons] };

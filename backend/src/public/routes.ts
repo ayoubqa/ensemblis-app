@@ -12,7 +12,7 @@ import { prisma } from "../db";
 import { ah, HttpError } from "../lib/http";
 import { asDepth, toPublicAgent, toSharedSource } from "../lib/serializers";
 import { toPublicEvidence } from "../engine/evidence";
-import { criteriaFromAssessment, toPublicCriterion, toPublicMeasurement, usedMockAIOf } from "../engine/serialize";
+import { confirmedOutcomeOf, criteriaFromAssessment, endpointsOf, toPublicCriterion, toPublicMeasurement, toPublicWarnings, usedMockAIOf } from "../engine/serialize";
 import { deriveResultState } from "../engine/resultState";
 
 const router = Router();
@@ -54,7 +54,7 @@ async function loadExecutionReport(token: string) {
       evidence: { orderBy: { n: "asc" } },
       verifications: { orderBy: { round: "desc" }, take: 1 },
       measurements: true,
-      steps: { orderBy: { order: "asc" }, select: { title: true, agent: true, executive: true, status: true, kind: true, provider: true, researchStatus: true } },
+      steps: { orderBy: { order: "asc" }, select: { title: true, agent: true, executive: true, status: true, kind: true, provider: true, researchStatus: true, research: true } },
     },
   });
   if (!ex) return null;
@@ -67,6 +67,8 @@ async function loadExecutionReport(token: string) {
     title: ex.objective.title,
     /** Taken from what this execution actually ran on (any step or the verifier on the mock provider). */
     usedMockAI: usedMockAIOf({ steps: ex.steps, verifications: ex.verifications }),
+    /** Where its model and search calls went (a test stub, a local model, a custom search endpoint), as stored with it. Never a host. */
+    endpoints: endpointsOf(ex),
     resultState: result.state,
     resultReasons: result.reasons,
     category: null,
@@ -84,7 +86,7 @@ async function loadExecutionReport(token: string) {
       measurements: ex.measurements.map(toPublicMeasurement),
       /** The AI-measured outcome; confirmedOutcomeStatus is set once a person confirmed it. */
       outcomeStatus: ex.outcomeStatus,
-      confirmedOutcomeStatus: ex.confirmedOutcomeStatus ?? null,
+      confirmedOutcomeStatus: confirmedOutcomeOf(ex),
       outcomeConfirmedAt: ex.outcomeConfirmedAt?.toISOString() ?? null,
       outcomeSummary: ex.outcomeSummary,
     },
@@ -93,7 +95,8 @@ async function loadExecutionReport(token: string) {
           status: v.status,
           score: v.score,
           summary: v.summary,
-          warnings: v.warnings,
+          // Provider and operator detail (search failures, verifier errors) stays in the owner's console.
+          warnings: toPublicWarnings(v.warnings),
           checks: v.checks,
           method: v.method,
           criteria: criteriaFromAssessment(v.assessment, new Set(ex.evidence.map((e) => e.n))),

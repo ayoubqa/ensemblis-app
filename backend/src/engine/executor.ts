@@ -198,7 +198,8 @@ export function stepSystemPrompt(cap: Capability, opts: { revision: boolean; bri
       "Produce the final result the client will read — it must stand on its own.",
       "Start with a `#` title, then these sections in order: `## Executive summary` (4–6 bullets that answer the objective), `## Findings`, `## Recommendation`, " +
         "`## Success criteria` (one numbered line per criterion: how the result meets it), `## Limitations & uncertainty`, `## Next steps`.",
-      "Integrate every earlier step; apply corrections; keep [n] citations next to the claims they support. Under ~1,400 words."
+      "Integrate every earlier step; apply corrections; keep [n] citations next to the claims they support. Under ~1,400 words.",
+      "Under `## Limitations & uncertainty`, name every step the assignment reports as skipped or with incomplete research: never present that work as done."
     );
     if (opts.revision) {
       out.push("This is a REVISION: the verifier rejected parts of the previous result. Fix every issue in <revision_feedback>; remove or qualify any claim the evidence does not support. Return the FULL revised result.");
@@ -246,6 +247,8 @@ export function stepUserPrompt(args: {
   evidence: Evidence[];
   /** Set for a research brief. */
   brief?: BriefContext | null;
+  /** Any other objective's synthesis: steps that were skipped or whose research wasn't ok (a brief's are in `brief`). */
+  incomplete?: string[] | null;
 }): string {
   const { input, cap, companyProfile, memories, evidence, brief } = args;
   const { objective, criteria, step, totalSteps } = input;
@@ -271,9 +274,9 @@ export function stepUserPrompt(args: {
   if (evidence.length) parts.push(evidenceBlock(evidence, brief && isSynthesis ? BRIEF_EVIDENCE_PROMPT_CHARS : EVIDENCE_PROMPT_CHARS));
   if (input.revisionFeedback) parts.push(block("revision_feedback", input.revisionFeedback, "internal"));
 
-  // The assignment mixes planner-written text (title, purpose, outputs) and stored step titles and
-  // search errors — neutralised one by one — with Ensemblis' own instructions, which must keep the
-  // tag names and source markers they refer to.
+  // The assignment mixes planner-written text (title, purpose, outputs) and stored step titles —
+  // neutralised one by one — with Ensemblis' own instructions, which must keep the tag names and
+  // source markers they refer to.
   const n = neutralize;
   const briefLines: string[] = [];
   if (brief && isSynthesis) {
@@ -291,6 +294,8 @@ export function stepUserPrompt(args: {
     if (brief.newSources) {
       briefLines.push(brief.newSources.length ? `New sources gathered for this revision: ${refs(brief.newSources)}.` : "The extra research for this revision found no new sources.");
     }
+  } else if (isSynthesis && args.incomplete?.length) {
+    briefLines.push("Work that is missing or incomplete (name each under Limitations & uncertainty):", ...args.incomplete.map((l) => `- ${n(l)}`));
   }
   const outputs = (step.outputs as string[]) ?? [];
   const checks = (step.verification as string[]) ?? [];
@@ -583,28 +588,29 @@ async function gatherEvidence(
   return { created, research: summary };
 }
 
+// Provider-free on purpose: the model may copy these lines into the result, which can be shared
+// publicly. The reason (provider, HTTP status, budget, env var) stays in the step's research record.
 const RESEARCH_STATUS_TEXT: Record<string, string> = {
-  degraded: "research was degraded — some searches failed or fell back",
-  no_results: "the searches found nothing",
+  degraded: "web research was incomplete (some searches failed)",
+  no_results: "web research found no usable sources",
   failed: "web research failed",
-  off: "web research did not run (web search is off on this server)",
+  off: "web research did not run",
 };
 
-/** One line per step that was skipped or whose research wasn't ok (for a brief's Evidence gaps). */
-export async function incompleteResearchNotes(executionId: string, exceptStepId?: string): Promise<string[]> {
+/** One line per step that was skipped or whose research wasn't ok (a brief's Evidence gaps, a memo's Limitations). Never the stored reason. */
+export async function incompleteResearchNotes(executionId: string, exceptStepId?: string, deliverable: "brief" | "result" = "brief"): Promise<string[]> {
   const steps = await prisma.executionStep.findMany({
     where: { executionId },
     orderBy: { order: "asc" },
-    select: { id: true, title: true, status: true, researchStatus: true, research: true },
+    select: { id: true, title: true, status: true, researchStatus: true },
   });
   const out: string[] = [];
   for (const s of steps) {
     if (s.id === exceptStepId) continue;
     if (s.status === "SKIPPED") {
-      out.push(`“${s.title}” was skipped: its work is missing from this brief.`);
+      out.push(`“${s.title}” was skipped: its work is missing from this ${deliverable}.`);
     } else if (s.researchStatus && s.researchStatus !== "ok") {
-      const reason = readStoredResearch(s.research).reason;
-      out.push(`“${s.title}”: ${RESEARCH_STATUS_TEXT[s.researchStatus] ?? s.researchStatus}${reason ? ` (${clip(reason, 200)})` : ""}.`);
+      out.push(`“${s.title}”: ${RESEARCH_STATUS_TEXT[s.researchStatus] ?? "web research was incomplete"}.`);
     }
   }
   return out;
@@ -654,15 +660,18 @@ export async function runStep(input: StepRunInput): Promise<StepRunOutput> {
 
   const gathered = await gatherEvidence(runInput, cap, companyProfile, ctx);
   const evidence = await loadEvidence(input.execution.id);
+  // Every synthesis hears which steps were skipped or researched incompletely, whatever the objective kind.
+  const incomplete = isSynthesis ? await incompleteResearchNotes(input.execution.id, input.step.id, brief ? "brief" : "result") : [];
   const briefContext: BriefContext | null = brief
     ? {
-        incomplete: isSynthesis ? await incompleteResearchNotes(input.execution.id, input.step.id) : [],
-        newSources: isRevision && gathered.research ? gathered.created.filter((e) => isExternalEvidence(e.kind)).map((e) => e.n) : null,
+        incomplete,
+        // The external sources this step stored: a retry that reuses the earlier attempt's research creates none, but found them.
+        newSources: isRevision && gathered.research ? evidence.filter((e) => e.stepId === input.step.id && isExternalEvidence(e.kind)).map((e) => e.n) : null,
       }
     : null;
 
   const system = stepSystemPrompt(cap, { revision: isRevision, brief });
-  const user = stepUserPrompt({ input: runInput, cap, companyProfile, memories, evidence, brief: briefContext });
+  const user = stepUserPrompt({ input: runInput, cap, companyProfile, memories, evidence, brief: briefContext, incomplete: brief ? null : incomplete });
   const partial = partialWriter(input.step.id, input.step.attempts);
 
   let result;
