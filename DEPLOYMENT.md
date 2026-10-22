@@ -90,13 +90,17 @@ defaults shown — none needs setting for a normal deploy):
 | `SEARCH_PROVIDER` | `tavily` when `TAVILY_API_KEY` is set, else `wikipedia` | `tavily` \| `wikipedia` \| `off`. Tavily without a key quietly becomes Wikipedia (the define page then labels a brief "limited evidence"); `off` blocks research briefs at planning (`PROVIDER_UNAVAILABLE`, nothing charged). |
 | `SEARCH_DAILY_BUDGET` | `30` | Successful Tavily calls per UTC day, server-wide (failed calls no longer count). A research step makes 3 searches and other web steps 2 each (plus 2 when a brief's one automatic revision researches again), so a brief typically uses 3–9 and 30 allows only a few briefs a day: raise it (e.g. `200`) for demos and the live smoke. When it is spent, searches fall back to Wikipedia and the research is recorded as `degraded`. |
 | `VERIFY_RETRY_DELAY_MS` | `60000` | When the AI verifier can't run (key, quota, timeout, unusable reply) the result is **not verified** (`UNVERIFIED`): it is checked again once after this pause, then handed to a person as "The result could not be verified" (accept / retry / cancel). Accepting keeps it `UNVERIFIED`, the outcome `UNKNOWN`, and refunds the verification fee. |
-| `TAVILY_BASE_URL` | `https://api.tavily.com` | **Tests only** (points search at a local stub). Never set it in production. |
+| `TAVILY_BASE_URL` | `https://api.tavily.com` | **Tests only** (points search at a local stub). Never set it in production: results that used it carry a "Custom search endpoint" notice and the API logs a production warning at boot. |
 
 Model-layer behaviour to know: HTTP 500 and connection errors from the AI
 provider are now retried like 502/503/504; an exhausted quota (OpenAI
 `insufficient_quota`, a long `Retry-After`, Anthropic credit errors) is *not*
 retried and says "The AI provider's quota is exhausted for now — retry after
 ~N min"; a missing or rejected key blocks planning before anything is charged.
+
+An `OPENAI_BASE_URL` on a loopback, private or `.local`/`.internal` host is
+labelled "Local model endpoint" on every result it produced (with `E2E_STUB=1`:
+"Test stub endpoint — not a real model") and logs a production warning.
 
 `AI_PROVIDER=mock` cannot run in production: the API and worker refuse to
 start with it when `NODE_ENV=production` **or** on Render (`RENDER` is set) —
@@ -205,6 +209,10 @@ done before it has run. It spends real tokens and searches (≈ two objectives).
    `E,A,D` (the default `E,A,B,C,D` adds the missing-information and
    cross-functional checks), e_expect `run`, full off. Download the
    `real-model-smoke-report` artifact.
+   GitHub offers *Run workflow* only once `.github/workflows/real-model-smoke.yml`
+   is on the default branch (`main`), i.e. after #1 is merged; until then use
+   step 3. Scenario E and the `e_expect` input live in this branch's version of
+   the file, so before this branch is merged pick it under *Use workflow from*.
 3. Or locally (needs Postgres with a database named `ensemblis_smoke`):
 
    ```bash
@@ -361,7 +369,9 @@ DROP TABLE "_rollback_v1_unverified", "_rollback_v1_unverified_exec", "_rollback
 While rolled back, the old build shows those results as "verified with
 warnings" although they were never verified — tell affected users, or roll
 forward promptly. The other v1 columns are nullable additions the old build
-ignores.
+ignores. The follow-up migration `20261015120000_backfill_confirmed_outcome` is
+data only (it copies earlier human confirmations into `confirmedOutcomeStatus`,
+idempotently) and needs nothing on rollback.
 
 ## 8. If the migration step fails at boot
 

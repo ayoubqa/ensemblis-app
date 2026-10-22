@@ -404,4 +404,80 @@ describe("research brief failure modes (mock AI, stub search)", () => {
     const resolved = (await api().get("/api/exceptions?status=ALL").set(auth).expect(200)).body.exceptions.find((x: { id: string }) => x.id === exc.id);
     expect(resolved.resolvedAction).toBe("skip");
   });
+
+  it("(11) a decision memo that continues without a failed step: never a plain PASS, never ACHIEVED, 'partial', and the memo is told what is missing", async () => {
+    stub = await startStubSearch();
+    const { auth } = await createUser({ credits: 5000 });
+    await fillContext(auth);
+    const synthesisPrompts: string[] = [];
+    scriptLLM((system, user, opts) => {
+      if (opts.purpose === "step" && isStep(system, "Competitive Intelligence Analyst")) return Promise.reject(new Error("socket hang up"));
+      if (opts.purpose === "step" && isStep(system, "Synthesis Lead")) synthesisPrompts.push(user);
+      return undefined;
+    });
+    const res = await api()
+      .post("/api/objectives")
+      .set(auth)
+      .send({
+        statement: "Analyze the European market for our liquid-cooling product and recommend the three highest-potential markets for expansion.",
+        successCriteria: [{ description: "Recommend 3 markets, ranked" }, { description: "Each recommendation cites evidence" }],
+        budgetCents: 3000,
+        autonomy: "AUTO_WITHIN_BUDGET",
+      })
+      .expect(201);
+    const executionId = res.body.executionId as string;
+    await runWorker();
+    const exc = await openException(auth, executionId);
+    expect(exc).toMatchObject({ kind: "STEP_FAILED", actions: ["retry", "skip", "cancel"] });
+    const failed = await prisma.executionStep.findFirstOrThrow({ where: { executionId, status: "FAILED" } });
+    await resolve(auth, exc.id, "skip");
+    await runWorker();
+
+    const ex = await getExecution(auth, executionId);
+    expect(ex.status).toBe("COMPLETED");
+    expect(ex.steps.find((s: { id: string }) => s.id === failed.id).status).toBe("SKIPPED");
+    // Execution success, verification and outcome stay apart: the work finished, but without one step.
+    expect(ex.verificationStatus).not.toBe("PASS");
+    expect(ex.verificationStatus).toBe("PASS_WITH_WARNINGS");
+    expect(ex.verification.warnings.join(" ")).toContain(`“${failed.title}” was skipped`);
+    expect(ex.outcomeStatus).not.toBe("ACHIEVED");
+    expect(ex.outcomeStatus).toBe("PARTIALLY_ACHIEVED");
+    expect(ex.resultState).toBe("partial");
+    expect(ex.resultReasons).toContain(`Step "${failed.title}" was skipped, so the result was produced without it.`);
+    // The synthesis prompt named the missing step for the memo's limitations.
+    expect(synthesisPrompts.length).toBeGreaterThan(0);
+    for (const p of synthesisPrompts) expect(p).toContain(`- “${failed.title}” was skipped: its work is missing from this result.`);
+  });
+
+  it("(12) a revision retried after a model failure still lists the sources its research found", async () => {
+    // Round 1 fails for lack of evidence (every search fails); the revision's research then finds sources.
+    stub = await startStubSearch({ status: 500, wikipedia: 500, retryAfter: "0" });
+    const { auth } = await createUser({ credits: 5000 });
+    await fillContext(auth);
+    let revisionCalls = 0;
+    const revisionPrompts: string[] = [];
+    scriptLLM((system, user, opts) => {
+      if (opts.purpose === "verify") stub!.set({ status: 200, results: STUB_RESULTS, wikipedia: [] });
+      if (opts.purpose === "step" && /This is a REVISION/.test(system)) {
+        revisionPrompts.push(user);
+        if (++revisionCalls === 1) return Promise.reject(new Error("socket hang up"));
+      }
+      return undefined;
+    });
+    const executionId = await launchBrief(auth);
+    await runWorker();
+    const revision = await prisma.executionStep.findFirstOrThrow({ where: { executionId, kind: "revision" } });
+    expect(revision.attempts).toBe(2);
+    expect(revision.researchStatus).toBe("ok");
+    const own = (await prisma.evidence.findMany({ where: { executionId, stepId: revision.id, kind: { in: ["WEB", "WIKIPEDIA"] } }, orderBy: { n: "asc" } })).map((e) => e.n);
+    expect(own.length).toBeGreaterThan(0);
+    expect(revisionPrompts).toHaveLength(2);
+    const listed = `New sources gathered for this revision: ${own.map((n) => `[${n}]`).join(", ")}.`;
+    // The retry reused the research (no new searches) and is told the same sources as the first attempt.
+    for (const p of revisionPrompts) {
+      expect(p).toContain(listed);
+      expect(p).not.toContain("The extra research for this revision found no new sources.");
+    }
+    expect((await events(executionId)).filter((e) => e.stepId === revision.id && e.type === "RESEARCH_STARTED")).toHaveLength(1);
+  });
 });

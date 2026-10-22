@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { deriveResultState, RESULT_STATES, type ResultState, type ResultStateStep } from "../../src/engine/resultState";
+import { deriveResultState, incompleteWork, RESULT_STATES, type ResultState, type ResultStateStep } from "../../src/engine/resultState";
 
 const work = (title: string, status = "COMPLETED", researchStatus: string | null = null): ResultStateStep => ({ kind: "work", status, title, researchStatus });
 const revision = (status: string): ResultStateStep => ({ kind: "revision", status, title: "Revision", researchStatus: null });
@@ -29,6 +29,7 @@ const cases: Case[] = [
   { name: "blocked", status: "BLOCKED", verificationStatus: null, steps: [framing, work("Research the market", "FAILED")], state: "blocked", reasons: [/Paused until a person/, /"Research the market" failed/] },
   { name: "failed", status: "FAILED", verificationStatus: null, steps: clean, state: "failed", reasons: [/failed before a result/] },
   { name: "cancelled", status: "CANCELLED", verificationStatus: "FAIL", steps: clean, state: "cancelled", reasons: [/cancelled/] },
+  { name: "blocked after a person skipped a step", status: "BLOCKED", verificationStatus: null, steps: [work("Competitor scan", "SKIPPED"), work("Pricing", "FAILED")], state: "blocked", reasons: [/Paused/, /^Step "Competitor scan" was skipped\.$/, /"Pricing" failed/] },
 
   // COMPLETED × verification status
   { name: "completed + PASS", status: "COMPLETED", verificationStatus: "PASS", steps: clean, state: "verified", reasons: [] },
@@ -64,6 +65,9 @@ const cases: Case[] = [
   { name: "summary without steps", status: "COMPLETED", verificationStatus: "PASS", steps: undefined, objectiveKind: "research_brief", state: "verified", reasons: [] },
 ];
 
+// Cancelling, rejecting a plan or failing an execution marks every step that never ran SKIPPED.
+const unrun = [work("Frame the objective", "SKIPPED"), work("Research the market", "SKIPPED", null), work("Synthesis", "SKIPPED")];
+
 describe("deriveResultState", () => {
   it.each(cases)("$name → $state", (c) => {
     const out = deriveResultState({ status: c.status, verificationStatus: c.verificationStatus, steps: c.steps, objectiveKind: c.objectiveKind ?? null });
@@ -83,6 +87,30 @@ describe("deriveResultState", () => {
         expect(RESULT_STATES).toContain(state);
       }
     }
+  });
+
+  it("a cancelled or failed execution never claims a result was produced without its unrun steps", () => {
+    expect(deriveResultState({ status: "CANCELLED", verificationStatus: null, steps: unrun }).reasons).toEqual(["The execution was cancelled."]);
+    expect(deriveResultState({ status: "CANCELLED", verificationStatus: null, steps: unrun, objectiveKind: "research_brief" }).reasons).toEqual(["The execution was cancelled."]);
+    // A failed run names the step that failed, never the ones it never reached.
+    const failed = deriveResultState({ status: "FAILED", verificationStatus: null, steps: [framing, work("Research the market", "FAILED", "failed"), work("Synthesis", "SKIPPED")] });
+    expect(failed).toEqual({
+      state: "failed",
+      reasons: ["The execution failed before a result was delivered.", 'Step "Research the market" failed.', 'Web research failed in "Research the market": no external sources were retrieved.'],
+    });
+    for (const status of ["PLANNING", "PLANNED", "WAITING_FOR_APPROVAL", "RUNNING", "VERIFYING", "BLOCKED", "FAILED", "CANCELLED"]) {
+      const { reasons } = deriveResultState({ status, verificationStatus: null, steps: [framing, work("Competitor scan", "SKIPPED"), ...unrun] });
+      expect(reasons.some((r) => /produced without it/.test(r)), `${status}: ${JSON.stringify(reasons)}`).toBe(false);
+    }
+  });
+
+  it("incompleteWork lists what makes a finished result partial", () => {
+    expect(incompleteWork(clean)).toEqual([]);
+    expect(incompleteWork([framing, research("degraded"), synthesis])).toEqual([]);
+    expect(incompleteWork([framing, work("Competitor scan", "SKIPPED"), synthesis])).toEqual(['Step "Competitor scan" was skipped, so the result was produced without it.']);
+    expect(incompleteWork([framing, research("off"), synthesis], null)).toHaveLength(1);
+    expect(incompleteWork([framing, synthesis], "research_brief")).toEqual(["No web research ran for this research brief."]);
+    expect(incompleteWork([...clean, revision("SKIPPED")])).toEqual([]);
   });
 
   it("is pure and deterministic", () => {

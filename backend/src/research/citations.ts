@@ -9,9 +9,16 @@
 //   - turn markdown links to domains that aren't among the sources / the
 //     client's brief into plain text, and wrap bare http(s):// and www. URLs
 //     on such domains in backticks (the report renderer autolinks bare URLs),
-//     so a hallucinated URL is never presented as a clickable reference.
+//     so a hallucinated URL is never presented as a clickable reference. A
+//     link, image, autolink or reference definition whose destination is
+//     protocol-relative ("//host") or has a scheme other than http(s) is
+//     treated the same way, whatever its host.
 // Code blocks and inline code are left untouched. cleanOutputWithStats also
 // counts what was removed, so the run can say so.
+//
+// This is defence in depth for the stored text, not the guarantee: every
+// channel that shows a result (screen, PDF, Word, .md download, e-mail)
+// applies its own allowlist with a real markdown parser, or strips links.
 
 import { clip, domainOf, fairSplit } from "./text";
 
@@ -30,9 +37,15 @@ function splitCode(md: string): { text: string; code: boolean }[] {
   return out;
 }
 
-function mapProse(md: string, fn: (prose: string) => string): string {
+/** Applies `fn` to each prose segment; `at` is where the segment starts in `md`. */
+function mapProse(md: string, fn: (prose: string, at: number) => string): string {
+  let at = 0;
   return splitCode(md)
-    .map((s) => (s.code ? s.text : fn(s.text)))
+    .map((s) => {
+      const out = s.code ? s.text : fn(s.text, at);
+      at += s.text.length;
+      return out;
+    })
     .join("");
 }
 
@@ -110,17 +123,49 @@ export function stripInvalidCitations(md: string, count: number): string {
 // One pass over prose, left to right, so a URL inside a markdown link is never
 // also treated as a bare URL:
 //   1 = image bang, 2 = link text, 3 = link URL   ([text](https://url "title"))
-//   4 = autolink URL                              (<https://url>)
+//   4 = autolink URL, any scheme                  (<https://url>, <mailto:…>)
 //   5 = bare http(s) URL, 6 = bare www. domain    (GFM autolinks both)
 const LINKISH =
-  /(!?)\[([^\]\n]{0,400})\]\(\s*<?(https?:\/\/[^\s)>]+)>?(?:\s+"[^"\n]*")?\s*\)|<(https?:\/\/[^\s>]+)>|\b(https?:\/\/[^\s<>()[\]`"']+)|(?<![\w.@/-])(www\.[a-z0-9-]+(?:\.[a-z0-9-]+)+[^\s<>()[\]`"']*)/gi;
+  /(!?)\[([^\]\n]{0,400})\]\(\s*<?(https?:\/\/[^\s)>]+)>?(?:\s+"[^"\n]*")?\s*\)|<([a-z][a-z0-9+.-]{1,31}:[^\s>]*)>|\b(https?:\/\/[^\s<>()[\]`"']+)|(?<![\w.@/-])(www\.[a-z0-9-]+(?:\.[a-z0-9-]+)+[^\s<>()[\]`"']*)/gi;
 // Trailing punctuation is sentence text, not part of a bare URL (as GFM treats it).
 const TRAILING_PUNCT = /[.,;:!?*_~'"]+$/;
+
+// A link or image with any destination (1 = text, 2 = destination), and a reference definition
+// ("[label]: destination", also in a list or quote, not a "[^1]:" footnote; 1 = up to the
+// destination, 2 = destination, 3 = the rest of its line: nothing or a title, else it is prose).
+// Only the spaces before each container marker are optional, so a prefix has one reading (linear time).
+const ANY_LINK = /!?\[([^\]\n]{0,400})\]\(\s*(<[^<>\n]*>|(?:[^\s()<>]|\([^\s()]*\))+)(?:\s+(?:"[^"\n]*"|'[^'\n]*'|\([^()\n]*\)))?\s*\)/g;
+const REF_DEF =
+  /^((?:[ \t]*(?:>|[-*+](?=[ \t])|\d{1,9}[.)](?=[ \t])))*[ \t]*\[(?!\^[^\]\s]*\])[^\]\n]+\]:[ \t]*(?:\n[ \t]*)?)(<[^<>\n]*>|\S+)(?=((?:[ \t]+(?:"(?:[^"\\]|\\[\s\S])*"|'(?:[^'\\]|\\[\s\S])*'|\((?:[^()\\]|\\[\s\S])*\)))?[ \t]*)$)/gm;
+
+/**
+ * A destination the domain check can't vouch for: protocol-relative ("//host", also written
+ * "\/\/host", "/\host" or with character references) or with a scheme other than a plain
+ * http(s):// (javascript:, data:, mailto:, "https:/host", …). A plain http(s):// one is
+ * judged by its domain.
+ */
+function unsafeDestination(raw: string): boolean {
+  const dest = raw.replace(/^<|>$/g, "");
+  if (/^https?:\/\//i.test(dest)) return false;
+  // As the renderer reads it: backslash escapes and numeric / ":", "/", "\" references decoded.
+  const named: Record<string, string> = { colon: ":", sol: "/", bsol: "\\" };
+  const href = dest.replace(
+    /\\([!-/:-@[-`{-~])|&(?:#(\d{1,7})|#x([0-9a-f]{1,6})|(colon|sol|bsol));/gi,
+    (all: string, esc: string | undefined, dec: string | undefined, hex: string | undefined, name: string | undefined) => {
+      if (esc) return esc;
+      if (name) return named[name.toLowerCase()];
+      const code = dec ? Number(dec) : parseInt(hex ?? "", 16);
+      return code <= 0x10ffff ? String.fromCodePoint(code) : all;
+    }
+  );
+  return /^[\\/]{2}|^[a-z][a-z0-9+.-]*:/i.test(href);
+}
 
 function unlinkUnknownUrlsWithStats(md: string, allowedDomains: Iterable<string>): { text: string; unlinked: number } {
   if (!md) return { text: md, unlinked: 0 };
   const allowed = new Set([...allowedDomains].map((d) => d.toLowerCase().replace(/^www\./, "")).filter(Boolean));
   const isAllowed = (url: string) => {
+    if (!/^(?:https?:|www\.)/i.test(url)) return false; // an autolink may carry any scheme
     const d = domainOf(/^www\./i.test(url) ? `https://${url}` : url);
     if (!d) return false;
     for (const a of allowed) if (d === a || d.endsWith(`.${a}`)) return true;
@@ -134,7 +179,28 @@ function unlinkUnknownUrlsWithStats(md: string, allowedDomains: Iterable<string>
       const url = tail ? all.slice(0, -tail.length) : all;
       return isAllowed(url) ? all : `\`${url}\`${tail}`;
     });
-  const text = mapProse(md, (prose) =>
+  // First the destinations no domain makes safe: a link keeps its text, a definition gets its
+  // destination in backticks (as a bare URL would). Their own pass, so the backticks count as code below.
+  const safe = mapProse(md, (prose, at) =>
+    prose
+      .replace(REF_DEF, (all: string, lead: string, dest: string, rest: string, offset: number) => {
+        // A definition is a whole line of the text, not a segment that starts or ends at inline code
+        // (a destination glued to the code runs on into it, so that one still counts).
+        const start = at + offset;
+        const end = start + all.length + rest.length;
+        if (start > 0 && !/[\n\r]/.test(md[start - 1])) return all;
+        if (rest && end < md.length && !/[\n\r]/.test(md[end])) return all;
+        if (!unsafeDestination(dest)) return all;
+        unlinked++;
+        return `${lead}\`${dest}\``;
+      })
+      .replace(ANY_LINK, (all: string, linkText: string, dest: string) => {
+        if (!unsafeDestination(dest)) return all;
+        unlinked++;
+        return wrapBare(linkText);
+      })
+  );
+  const text = mapProse(safe, (prose) =>
     prose.replace(LINKISH, (all: string, bang: string | undefined, linkText: string | undefined, linkUrl: string | undefined, autoUrl: string | undefined) => {
       if (linkUrl !== undefined) {
         if (isAllowed(linkUrl)) return all;
@@ -161,7 +227,8 @@ function unlinkUnknownUrlsWithStats(md: string, allowedDomains: Iterable<string>
  * Turns markdown links whose domain isn't allowed into plain text (keeps the
  * link text) and wraps bare http(s):// and www. URLs on such domains in
  * backticks, so the report renderer can't autolink them. Allowed domains =
- * the task's sources + any URL in the brief.
+ * the task's sources + any URL in the brief. A protocol-relative or non-http(s)
+ * destination is never allowed.
  */
 export function unlinkUnknownUrls(md: string, allowedDomains: Iterable<string>): string {
   return unlinkUnknownUrlsWithStats(md, allowedDomains).text;

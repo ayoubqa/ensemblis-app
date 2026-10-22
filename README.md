@@ -112,8 +112,12 @@ an objective you define.
 | Token counts | measured when the provider reports usage (Groq, OpenAI, Anthropic), otherwise estimated and labelled "est." | estimated (mock) / measured from the stub's usage (prod-like) |
 
 Anything produced by the mock model is labelled **"Mock AI — test output"** in
-the console, exports and shared reports, and the mock refuses to run in
-production. Charges shown are Ensemblis prices, not what the AI provider
+the console, lists, exports, shared reports and e-mails, and the mock refuses to
+run in production. Each execution also records which endpoints it ran on: a
+model behind `E2E_STUB=1` is tagged **"Test stub endpoint — not a real model"**,
+a model on a loopback/private `OPENAI_BASE_URL` **"Local model endpoint"**, and
+search through a custom `TAVILY_BASE_URL` gets a **"Custom search endpoint"**
+notice — from what that execution stored, not the server's current settings. Charges shown are Ensemblis prices, not what the AI provider
 billed. The only check of real model output with real search is the live
 smoke (`npm run smoke:real`, scenario E), which needs real keys and network
 access — see [DEPLOYMENT.md §5a](DEPLOYMENT.md). Known limit: sources are
@@ -121,6 +125,21 @@ search excerpts returned by the provider (no page fetch). Result URLs on
 non-public hosts (loopback, private ranges, the cloud metadata address,
 `.internal`/`.local` names) or with embedded credentials are dropped, and
 evidence URLs are never fetched by the server.
+
+Links in model output are treated as untrusted (a source page can carry a
+prompt-injected link). A link stays clickable only when it points at an
+evidence domain or a domain named in the objective or the company website.
+This is enforced with the real Markdown parser wherever a report leaves the
+server: on screen (console and shared page), in the PDF and Word exports, and
+in the Markdown download and Copy (re-written through the same parser, raw
+HTML turned into text). Images in model output are never loaded. Public
+suffixes (`co.uk`) and shared-hosting domains (`s3.amazonaws.com`, `github.io`,
+…) allow their exact host only, never subdomains. E-mail summaries contain no
+URLs or addresses at all. The stored result text keeps a light first-pass
+cleaner (invalid `[n]` removed, links to unknown domains unlinked,
+protocol-relative and non-http(s) destinations removed) — treat the raw text
+from the API as untrusted. E-mails and the public shared page never contain
+provider error text.
 
 ### Run a brief yourself
 

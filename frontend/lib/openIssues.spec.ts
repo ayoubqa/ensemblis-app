@@ -1,8 +1,25 @@
 // collectOpenIssues(): one list of everything unresolved — and "nothing open" only when
 // every source is empty. resultStateOf() / usedMockAI(): honest fallbacks for an older API.
 import { describe, expect, it } from "vitest";
+import type { Briefing, Objective } from "./api";
 import type { OpenIssuesInput } from "./openIssues";
-import { collectOpenIssues, failedSearchSummary, groupOpenIssues, researchNotice, resultStateOf, usedMockAI } from "./openIssues";
+import {
+  MODEL_ENDPOINT_DETAIL,
+  collectOpenIssues,
+  endpointNote,
+  failedSearchSummary,
+  groupOpenIssues,
+  listedEndpointTag,
+  listedResultState,
+  modelEndpointTag,
+  researchNotice,
+  resultScore,
+  resultStateOf,
+  unfinishedStep,
+  usedCustomSearch,
+  usedMockAI,
+  verificationStopped,
+} from "./openIssues";
 
 const check = (status: "pass" | "warn" | "fail" | "not_assessed", key: string = status) => ({ key, label: `Check ${key}`, status, score: 50, detail: `detail ${key}` });
 const claim = (status: "SUPPORTED" | "PARTIALLY_SUPPORTED" | "UNSUPPORTED" | "UNCITED" | "ESTIMATE", text = `claim ${status}`) => ({
@@ -174,6 +191,28 @@ describe("collectOpenIssues", () => {
     ]);
   });
 
+  it("never says a cancelled or failed run produced a result without the steps it never ran", () => {
+    for (const state of ["cancelled", "failed"] as const) {
+      const x = clean();
+      x.resultState = state;
+      // What an API from before this fix sends for the steps ending the run marked SKIPPED.
+      x.resultReasons = [
+        state === "cancelled" ? "The execution was cancelled." : "The execution failed before a result was delivered.",
+        'Step "Pricing" was skipped, so the result was produced without it.',
+        'Step "Market scan" failed.',
+      ];
+      const items = collectOpenIssues(x).filter((i) => i.kind === "result");
+      expect(items.map((i) => i.title)).toEqual([x.resultReasons[0], 'Step "Market scan" failed.']);
+      expect(groupOpenIssues(items, state)[0].title).toBe("Why there is no result");
+    }
+    // A completed result still lists the step it was produced without.
+    const done = clean();
+    done.resultState = "partial";
+    done.resultReasons = ['Step "Pricing" was skipped, so the result was produced without it.'];
+    expect(collectOpenIssues(done).map((i) => i.title)).toEqual(done.resultReasons);
+    expect(groupOpenIssues(collectOpenIssues(done), "partial")[0].title).toBe("Why the result is not plainly verified");
+  });
+
   it("lists an open exception first and drops the matching 'Paused' reason", () => {
     const x = clean();
     x.resultState = "blocked";
@@ -233,6 +272,107 @@ describe("resultStateOf", () => {
     expect(resultStateOf({ status: "FAILED", verificationStatus: null })).toBe("failed");
     expect(resultStateOf({ status: "CANCELLED", verificationStatus: null })).toBe("cancelled");
     expect(resultStateOf({ status: "VERIFYING", verificationStatus: null })).toBe("in_progress");
+  });
+});
+
+describe("listedResultState", () => {
+  it("names a completed result only when it is not plainly verified", () => {
+    expect(listedResultState({ status: "COMPLETED", verificationStatus: "PASS", resultState: "verified" })).toBeNull();
+    expect(listedResultState({ status: "COMPLETED", verificationStatus: "PASS", resultState: "partial" })).toBe("partial");
+    expect(listedResultState({ status: "COMPLETED", verificationStatus: "PASS", resultState: "verified_with_warnings" })).toBe("verified_with_warnings");
+    // Without the API's result state, from the verification alone.
+    expect(listedResultState({ status: "COMPLETED", verificationStatus: "UNVERIFIED" })).toBe("unverified");
+    expect(listedResultState({ status: "COMPLETED", verificationStatus: "FAIL" })).toBe("accepted_failed_verification");
+    expect(listedResultState({ status: "COMPLETED", verificationStatus: "PASS" })).toBeNull();
+  });
+  it("leaves unfinished and ended executions to their status", () => {
+    expect(listedResultState({ status: "CANCELLED", verificationStatus: null, resultState: "cancelled" })).toBeNull();
+    expect(listedResultState({ status: "RUNNING", verificationStatus: null })).toBeNull();
+    expect(listedResultState(null)).toBeNull();
+  });
+  it("carries a score only for a verification that ran", () => {
+    expect(resultScore({ verificationStatus: "FAIL", verificationScore: 42 })).toBe("42");
+    expect(resultScore({ verificationStatus: "UNVERIFIED", verificationScore: 0 })).toBeNull();
+    expect(resultScore({ verificationStatus: "PASS", verificationScore: null })).toBeNull();
+  });
+});
+
+describe("unfinishedStep", () => {
+  const T0 = "2026-10-01T10:00:00.000Z";
+  const T1 = "2026-10-01T10:01:00.000Z";
+  const step = (status: "SKIPPED" | "COMPLETED" | "FAILED" | "PENDING", startedAt: string | null, completedAt: string | null, attempts = startedAt ? 1 : 0) => ({
+    status,
+    startedAt,
+    completedAt,
+    attempts,
+  });
+  it("tells the steps an ended run didn't finish from a person's skip", () => {
+    for (const status of ["CANCELLED", "FAILED"] as const) {
+      // Ending the run marked it SKIPPED before it started: Not run.
+      expect(unfinishedStep(step("SKIPPED", null, null), status)).toBe("not_run");
+      // The run ended while it was working (or waiting to retry): Stopped.
+      expect(unfinishedStep(step("SKIPPED", T0, null), status)).toBe("stopped");
+      // A person skipped it after it failed (failing set completedAt): still Skipped.
+      expect(unfinishedStep(step("SKIPPED", T0, T1), status)).toBeNull();
+      // Retried after it failed, then the run ended: the completedAt is the earlier failure's.
+      expect(unfinishedStep(step("SKIPPED", T1, T0, 1), status)).toBe("stopped");
+      expect(unfinishedStep(step("SKIPPED", T0, T1, 0), status)).toBe("stopped");
+      expect(unfinishedStep(step("COMPLETED", T0, T1), status)).toBeNull();
+      expect(unfinishedStep(step("FAILED", T0, null), status)).toBeNull();
+    }
+    // Only an ended run leaves steps unfinished.
+    expect(unfinishedStep(step("SKIPPED", null, null), "COMPLETED")).toBeNull();
+    expect(unfinishedStep(step("SKIPPED", T0, T1), "COMPLETED")).toBeNull();
+    expect(unfinishedStep(step("SKIPPED", T0, null), "RUNNING")).toBeNull();
+  });
+
+  it("says the verification gate stopped only when the run ended after every work step finished", () => {
+    const work = (s: ReturnType<typeof step>) => ({ ...s, kind: "work" as const });
+    const done = [work(step("COMPLETED", T0, T1)), work(step("COMPLETED", T0, T1))];
+    expect(verificationStopped({ status: "CANCELLED", verification: null, steps: done })).toBe(true);
+    expect(verificationStopped({ status: "FAILED", verification: null, steps: done })).toBe(true);
+    // A step a person skipped counts as finished; one the run never reached does not.
+    expect(verificationStopped({ status: "CANCELLED", verification: null, steps: [done[0], work(step("SKIPPED", T0, T1))] })).toBe(true);
+    expect(verificationStopped({ status: "CANCELLED", verification: null, steps: [done[0], work(step("SKIPPED", null, null))] })).toBe(false);
+    expect(verificationStopped({ status: "CANCELLED", verification: null, steps: [done[0], work(step("SKIPPED", T0, null))] })).toBe(false);
+    // A recorded verification, a run still going, or no steps at all.
+    expect(verificationStopped({ status: "CANCELLED", verification: { status: "PASS" }, steps: done })).toBe(false);
+    expect(verificationStopped({ status: "VERIFYING", verification: null, steps: done })).toBe(false);
+    expect(verificationStopped({ status: "CANCELLED", verification: null, steps: [] })).toBe(false);
+  });
+});
+
+describe("endpoints", () => {
+  it("labels a stub or local model and a custom search endpoint from what the execution recorded", () => {
+    expect(modelEndpointTag({ endpoints: { model: "stub", search: "custom" } })).toBe("Test stub endpoint — not a real model");
+    expect(modelEndpointTag({ endpoints: { model: "local", search: null } })).toBe("Local model endpoint");
+    expect(modelEndpointTag({ endpoints: { model: "hosted", search: "public" } })).toBeNull();
+    // The mock model records no endpoint (its own label says it); an older API sends none.
+    expect(modelEndpointTag({ endpoints: { model: null, search: "custom" } })).toBeNull();
+    expect(modelEndpointTag({})).toBeNull();
+    expect(usedCustomSearch({ endpoints: { model: null, search: "custom" } })).toBe(true);
+    expect(usedCustomSearch({ endpoints: { model: "hosted", search: "public" } })).toBe(false);
+    expect(usedCustomSearch(null)).toBe(false);
+  });
+
+  it("builds the export note from the model and search parts that apply", () => {
+    expect(endpointNote({ endpoints: { model: "stub", search: "custom" } })).toBe(
+      "Test stub endpoint — not a real model. Custom search endpoint — sources come from TAVILY_BASE_URL, not the public Tavily API."
+    );
+    expect(endpointNote({ endpoints: { model: "local", search: "public" } })).toBe("Local model endpoint.");
+    expect(endpointNote({ endpoints: { model: null, search: "custom" } })).toBe("Custom search endpoint — sources come from TAVILY_BASE_URL, not the public Tavily API.");
+    expect(endpointNote({ endpoints: { model: "hosted", search: "public" } })).toBeNull();
+    expect(endpointNote(undefined)).toBeNull();
+  });
+
+  it("gives a list row (Objectives, Reports, Home) the stub tag as a warning, a local model's in gray", () => {
+    const row: Pick<NonNullable<Objective["latestExecution"]>, "usedMockAI" | "endpoints"> = { usedMockAI: false, endpoints: { model: "stub", search: "custom" } };
+    const outcome: Pick<Briefing["recentOutcomes"][number], "usedMockAI" | "endpoints"> = { usedMockAI: false, endpoints: { model: "stub", search: null } };
+    for (const r of [row, outcome]) expect(listedEndpointTag(r)).toEqual({ label: "Test stub endpoint — not a real model", variant: "warn", detail: MODEL_ENDPOINT_DETAIL.stub });
+    expect(listedEndpointTag({ endpoints: { model: "local", search: null } })).toEqual({ label: "Local model endpoint", variant: "gray", detail: MODEL_ENDPOINT_DETAIL.local });
+    // A hosted model, the mock (its own tag says it), an older API or no execution yet: no endpoint tag.
+    const none: Parameters<typeof listedEndpointTag>[0][] = [{ endpoints: { model: "hosted", search: "public" } }, { endpoints: { model: null, search: "custom" } }, {}, null, undefined];
+    for (const r of none) expect(listedEndpointTag(r)).toBeNull();
   });
 });
 

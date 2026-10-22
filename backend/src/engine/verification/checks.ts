@@ -399,7 +399,10 @@ export interface CombineInput {
   objectiveKind?: string | null;
   /** External evidence (web, Wikipedia) retrieved in this execution. Defaults to evidenceCount. */
   externalEvidenceCount?: number;
-  /** Research briefs: research that failed, returned nothing or did not run, and skipped steps (warnings). */
+  /**
+   * Research that failed, returned nothing or did not run, and skipped work steps (service.ts researchIssuesFor).
+   * A brief warns on each; any other objective warns on the skipped steps (SKIPPED_STEP_ISSUE).
+   */
   researchIssues?: string[];
   /** Research briefs: invented [n] citations removed from the result before it was saved (a warning). */
   citationsRemoved?: number;
@@ -509,6 +512,9 @@ function briefCitationCheck(claims: ClaimResult[], externalEvidenceCount: number
   return { key: "citation_support", label, status, score, detail };
 }
 
+/** A researchIssues line for a skipped work step: `“<title>” was skipped, …` (research lines start "web research in"). */
+export const SKIPPED_STEP_ISSUE = /^“[\s\S]+” was skipped\b/;
+
 export function combineVerification(input: CombineInput): CombinedVerification {
   const brief = isResearchBrief(input.objectiveKind);
   const checks: CheckResult[] = [];
@@ -605,14 +611,17 @@ export function combineVerification(input: CombineInput): CombinedVerification {
       briefWarnings.push(`${removed} invented citation${removed === 1 ? " was" : "s were"} removed from the brief because ${removed === 1 ? "it" : "they"} pointed at no collected source.`);
     }
   }
+  // A skipped work step leaves its work out of the result, whatever the objective: never a plain PASS (a brief warns above).
+  const skippedWarnings = brief ? [] : (input.researchIssues ?? []).filter((i) => SKIPPED_STEP_ISSUE.test(i)).slice(0, 8);
   const notes = (input.notes ?? []).filter((n) => n.trim());
-  warnings.push(...briefWarnings, ...notes);
+  warnings.push(...briefWarnings, ...skippedWarnings, ...notes);
 
   const assessed = checks.filter((c) => c.score !== null);
   const totalW = assessed.reduce((n, c) => n + WEIGHTS[c.key], 0);
   const score = totalW ? Math.round(assessed.reduce((n, c) => n + (c.score ?? 0) * WEIGHTS[c.key], 0) / totalW) : 0;
   const anyFail = checks.some((c) => c.status === "fail") || (brief && unsupportedClaims.length > 0);
-  const anySoft = checks.some((c) => c.status === "warn" || c.status === "not_assessed") || (brief && (briefWarnings.length > 0 || notes.length > 0));
+  const anySoft =
+    checks.some((c) => c.status === "warn" || c.status === "not_assessed") || skippedWarnings.length > 0 || (brief && (briefWarnings.length > 0 || notes.length > 0));
   // Without the AI verifier the result is not verified, unless a deterministic check already failed it.
   const status: VerificationStatus = anyFail ? "FAIL" : !input.model ? "UNVERIFIED" : anySoft ? "PASS_WITH_WARNINGS" : "PASS";
   const humanJudgment = [...(input.model?.humanJudgment ?? [])];

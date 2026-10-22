@@ -3,14 +3,16 @@
 // Runs against the local Tavily + Wikipedia stub (tests/stubSearch.ts).
 import { afterEach, describe, expect, it } from "vitest";
 import { prisma } from "../../src/db";
-import { config } from "../../src/config";
+import { config, customTavilyBaseUrl } from "../../src/config";
 import { publicConfig } from "../../src/public/config";
 import {
   activeSearchBackend,
+  currentSearchEndpoint,
   effectiveSearchProvider,
   parseTavilyResponse,
   parseWikipediaPages,
   parseWikipediaSearch,
+  searchCustomEndpoint,
   searchEnabled,
   searchProviderLabel,
   webSearchDetailed,
@@ -119,7 +121,53 @@ describe("configuration", () => {
   it("with a key, Tavily is used", () => {
     config.search.provider = "tavily";
     config.search.tavilyApiKey = "tvly-something";
-    expect(publicConfig()).toMatchObject({ searchEnabled: true, searchProvider: "tavily", searchProviderLabel: "Tavily web search" });
+    expect(publicConfig()).toMatchObject({ searchEnabled: true, searchProvider: "tavily", searchProviderLabel: "Tavily web search", searchCustomEndpoint: false });
+  });
+
+  it("Tavily at another endpoint (TAVILY_BASE_URL: a stub or proxy) is never presented as the public Tavily API", async () => {
+    stub = await startStubSearch();
+    expect(searchCustomEndpoint()).toBe(true);
+    expect(searchProviderLabel()).toBe("Custom search endpoint (TAVILY_BASE_URL) — not the public Tavily API");
+    expect(publicConfig()).toMatchObject({ searchProvider: "tavily", searchCustomEndpoint: true, searchProviderLabel: expect.stringMatching(/not the public Tavily API/) });
+    // Without a Tavily key the endpoint is never called: Wikipedia, no custom-endpoint flag.
+    config.search.tavilyApiKey = "";
+    expect(publicConfig()).toMatchObject({ searchProvider: "wikipedia", searchProviderLabel: "Wikipedia", searchCustomEndpoint: false });
+  });
+
+  it("every search request records where it went (the stub is custom, Wikipedia public); a skipped provider records nothing", async () => {
+    config.search.provider = "tavily";
+    config.search.tavilyApiKey = "tvly-something";
+    expect(currentSearchEndpoint()).toBe("public");
+    stub = await startStubSearch({ status: 401, wikipedia: STUB_RESULTS.slice(0, 1) });
+    expect(currentSearchEndpoint()).toBe("custom");
+    const first = await webSearchDetailed("european data centers");
+    expect(first.attempts.map((a) => [a.provider, a.ok, a.endpoint])).toEqual([
+      ["tavily", false, "custom"],
+      ["wikipedia", true, "public"],
+    ]);
+    // The 401 tripped the circuit breaker: Tavily is skipped without a request.
+    const second = await webSearchDetailed("nordic data centers");
+    expect(second.attempts.map((a) => [a.provider, a.endpoint])).toEqual([
+      ["tavily", undefined],
+      ["wikipedia", "public"],
+    ]);
+    config.search.provider = "off";
+    expect(currentSearchEndpoint()).toBeNull();
+  });
+
+  it("TAVILY_BASE_URL counts as custom unless it is the public API", () => {
+    const prev = process.env.TAVILY_BASE_URL;
+    try {
+      delete process.env.TAVILY_BASE_URL;
+      expect(customTavilyBaseUrl()).toBeNull();
+      process.env.TAVILY_BASE_URL = "https://api.tavily.com/";
+      expect(customTavilyBaseUrl()).toBeNull();
+      process.env.TAVILY_BASE_URL = " http://127.0.0.1:4198/ ";
+      expect(customTavilyBaseUrl()).toBe("http://127.0.0.1:4198");
+    } finally {
+      if (prev === undefined) delete process.env.TAVILY_BASE_URL;
+      else process.env.TAVILY_BASE_URL = prev;
+    }
   });
 });
 
@@ -265,6 +313,14 @@ describe("safeHttpUrl (search result URLs)", () => {
     const { safeHttpUrl } = await import("../../src/research/search");
     expect(safeHttpUrl("https://www.example.com/report?id=1")).toBe("https://www.example.com/report?id=1");
     expect(safeHttpUrl("http://93.184.216.34/page")).toBe("http://93.184.216.34/page");
+    expect(safeHttpUrl("https://example.com./a")).toBe("https://example.com./a");
+    expect(safeHttpUrl("http://[2606:4700:4700::1111]/")).toBe("http://[2606:4700:4700::1111]/");
+  });
+  it("drops non-public names written with a trailing dot, and single-label names", async () => {
+    const { safeHttpUrl } = await import("../../src/research/search");
+    for (const bad of ["http://localhost./x", "http://localhost../x", "http://foo.internal./", "http://printer.local./", "http://intranet/", "http://intranet./", "https://./"]) {
+      expect(safeHttpUrl(bad), bad).toBeNull();
+    }
   });
   it("drops non-http schemes, embedded credentials and non-public hosts", async () => {
     const { safeHttpUrl } = await import("../../src/research/search");

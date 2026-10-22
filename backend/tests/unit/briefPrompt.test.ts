@@ -59,7 +59,7 @@ const runInput = (extra: Partial<StepRunInput["objective"]> = {}): StepRunInput 
   priorSteps: [],
 });
 
-const INCOMPLETE = ["“Research the market”: web research failed (Tavily: HTTP 401)."];
+const INCOMPLETE = ["“Research the market”: web research failed."];
 const briefUser = (evidence = EVIDENCE) =>
   stepUserPrompt({ input: runInput(), cap: synthesis, companyProfile: "What the company does: drone delivery software.", memories: [], evidence, brief: { incomplete: INCOMPLETE, newSources: null } });
 
@@ -123,7 +123,7 @@ describe("the brief synthesis prompt", () => {
     const user = briefUser();
     expect(user).toMatch(/External sources you may cite as findings \(web and Wikipedia\): \[2\], \[3\]\./);
     expect(user).toMatch(/Company-provided material \(company context, documents, website\) — not external evidence: \[1\], \[4\]\./);
-    expect(user).toMatch(/Research that is incomplete \(list each under Evidence gaps\):\n- “Research the market”: web research failed \(Tavily: HTTP 401\)\./);
+    expect(user).toMatch(/Research that is incomplete \(list each under Evidence gaps\):\n- “Research the market”: web research failed\./);
     expect(user).toMatch(/<constraints trust="user-instruction">\nOnly EU rules; ignore the UK\.\n<\/constraints>/);
     expect(user).toMatch(/Respect every item in <constraints>\./);
     expect(user).toMatch(/Deliverable: research brief \(evidence-backed\)/);

@@ -5,11 +5,16 @@
 //   result is not plainly verified. Empty only when every one of those sources is empty.
 // - resultStateOf() / usedMockAI(): the result state and the mock flag, with a fallback for
 //   an API that predates them (the frontend and the API deploy separately).
+// - listedResultState() / unfinishedStep() / verificationStopped(): what a list row says about a
+//   result, and how a step or the verification gate reads once a run ended without finishing it.
+// - modelEndpointTag() / endpointNote() / listedEndpointTag(): a test stub or local model endpoint,
+//   or a custom search endpoint, as recorded with the execution.
 // - researchNotice(): whether web research ran and how it went, for the Evidence panel.
 
 import type {
   Evidence,
   ExceptionItem,
+  ExecutionEndpoints,
   ExecutionStatus,
   ExecutionStep,
   OutcomeMeasurement,
@@ -127,6 +132,9 @@ export function collectOpenIssues(input: OpenIssuesInput): OpenIssue[] {
   for (const r of input.resultReasons ?? []) {
     if (/^Verification passed/i.test(r)) continue;
     if (hasOpenException && /^Paused until/i.test(r)) continue;
+    // A cancelled or failed run delivered no result: an older API still said each step it never
+    // ran "was skipped, so the result was produced without it", which isn't true.
+    if (deliveredNothing(state) && /so the result was produced without it\.?$/i.test(r)) continue;
     if (/research|web search/i.test(r) && [...researchSteps].some((t) => r.includes(t))) continue;
     push("result", resultSeverity, r);
   }
@@ -188,9 +196,18 @@ export interface OpenIssueGroup {
   items: OpenIssue[];
 }
 
-/** Issues grouped by kind, in display order (empty groups left out). */
-export function groupOpenIssues(issues: OpenIssue[]): OpenIssueGroup[] {
-  return ORDER.map((kind) => ({ kind, title: ISSUE_GROUP_TITLE[kind], items: issues.filter((i) => i.kind === kind) })).filter((g) => g.items.length);
+/** A cancelled or failed execution: it ended without delivering a result (there is no report). */
+export function deliveredNothing(state: ResultState | null | undefined): boolean {
+  return state === "cancelled" || state === "failed";
+}
+
+/**
+ * Issues grouped by kind, in display order (empty groups left out). For an execution that
+ * delivered nothing (`state` cancelled or failed), the result reasons say why there is no result.
+ */
+export function groupOpenIssues(issues: OpenIssue[], state?: ResultState | null): OpenIssueGroup[] {
+  const title = (kind: OpenIssueKind) => (kind === "result" && deliveredNothing(state) ? "Why there is no result" : ISSUE_GROUP_TITLE[kind]);
+  return ORDER.map((kind) => ({ kind, title: title(kind), items: issues.filter((i) => i.kind === kind) })).filter((g) => g.items.length);
 }
 
 // ---------------------------------------------------------------- result state + mock flag
@@ -228,6 +245,61 @@ export function resultStateOf(ex: {
 export const NOT_PLAINLY_VERIFIED: readonly ResultState[] = ["partial", "unverified", "accepted_failed_verification"];
 
 /**
+ * The result state a list row shows next to its outcome: that of a completed execution whose
+ * result is not plainly verified (partial, not verified, accepted after failing verification,
+ * verified with warnings). Null otherwise: the row's verification tag says the rest.
+ */
+export function listedResultState(ex: Parameters<typeof resultStateOf>[0] | null | undefined): ResultState | null {
+  if (!ex || ex.status !== "COMPLETED") return null;
+  const state = resultStateOf(ex);
+  return state === "verified" ? null : state;
+}
+
+/** The score a result-state tag carries ("97"): none for a verification that could not run. */
+export function resultScore(ex: { verificationStatus: VerificationStatus | null; verificationScore: number | null } | null | undefined): string | null {
+  return ex?.verificationScore != null && ex.verificationStatus !== "UNVERIFIED" ? `${ex.verificationScore}` : null;
+}
+
+/** How a step reads when a cancelled or failed run ended without finishing it. */
+export type UnfinishedStep = "not_run" | "stopped";
+
+export const UNFINISHED_STEP: Record<UnfinishedStep, { label: string; title: string }> = {
+  not_run: { label: "Not run", title: "The execution ended before this step ran." },
+  stopped: { label: "Stopped", title: "The execution ended before this step finished." },
+};
+
+/**
+ * A step a cancelled or failed run ended without finishing (null otherwise). Ending a run marks
+ * every unfinished step SKIPPED and leaves completedAt unset: "not_run" when it never started,
+ * "stopped" when it was working or waiting to retry. A person can only skip a step that failed,
+ * and failing set its completedAt, so that step stays "Skipped". A completedAt older than the step's
+ * latest start (or a step reset by "Retry", attempts 0) is from an earlier failure, not a finish.
+ */
+export function unfinishedStep(
+  step: Pick<ExecutionStep, "status" | "startedAt" | "completedAt" | "attempts">,
+  executionStatus: ExecutionStatus
+): UnfinishedStep | null {
+  if (step.status !== "SKIPPED" || (executionStatus !== "CANCELLED" && executionStatus !== "FAILED")) return null;
+  const finished = !!step.completedAt && step.attempts > 0 && (!step.startedAt || Date.parse(step.completedAt) >= Date.parse(step.startedAt));
+  if (finished) return null;
+  return step.startedAt ? "stopped" : "not_run";
+}
+
+/**
+ * The run ended (cancelled or failed) while the verification gate was working: every work step
+ * finished (done, or skipped by a person) and no verification was recorded.
+ */
+export function verificationStopped(ex: {
+  status: ExecutionStatus;
+  verification?: unknown;
+  steps: Pick<ExecutionStep, "status" | "kind" | "startedAt" | "completedAt" | "attempts">[];
+}): boolean {
+  if (ex.verification || (ex.status !== "CANCELLED" && ex.status !== "FAILED")) return false;
+  const work = ex.steps.filter((s) => s.kind === "work");
+  return work.length > 0 && work.every((s) => s.status === "COMPLETED" || (s.status === "SKIPPED" && !unfinishedStep(s, ex.status)));
+}
+
+/**
  * Whether this execution's output must carry the mock label: it ran on the mock provider
  * (from the API, or from its steps for an older API), or the server is on mock AI now.
  */
@@ -235,8 +307,60 @@ export function usedMockAI(ex: { usedMockAI?: boolean; steps?: Pick<ExecutionSte
   return serverMock || !!ex?.usedMockAI || (ex?.steps ?? []).some((s) => s.provider === "mock");
 }
 
+/** The tag on mock output, wherever it is listed. */
+export const MOCK_TAG_LABEL = "Mock AI — test output";
+
 /** The note carried by exports of mock output (replaces the default AI note). */
 export const MOCK_EXPORT_NOTE = "Mock AI — test output. Generated by the mock AI provider for development and testing, not real analysis.";
+
+// ---------------------------------------------------------------- endpoints (recorded with the execution)
+
+/** The tag on output whose model calls went to a test stub or a local model endpoint. */
+export const MODEL_ENDPOINT_TAG: Record<"stub" | "local", string> = {
+  stub: "Test stub endpoint — not a real model",
+  local: "Local model endpoint",
+};
+
+/** What the model endpoint tag means, in a sentence. */
+export const MODEL_ENDPOINT_DETAIL: Record<"stub" | "local", string> = {
+  stub: "Model calls went to a test stub endpoint: the plan and outputs are not a real model's analysis.",
+  local: "Model calls went to a model on this machine or a private network: a self-hosted model, or a test endpoint.",
+};
+
+/** Said wherever an execution's web search went to TAVILY_BASE_URL (the Evidence panel sets `head` in bold). */
+export const CUSTOM_SEARCH = { head: "Custom search endpoint", text: "sources come from TAVILY_BASE_URL, not the public Tavily API." };
+export const CUSTOM_SEARCH_NOTE = `${CUSTOM_SEARCH.head} — ${CUSTOM_SEARCH.text}`;
+
+type WithEndpoints = { endpoints?: ExecutionEndpoints | null } | null | undefined;
+
+/** A stub or local model endpoint, from what the execution recorded (never the server's current setting); null otherwise. */
+export function modelEndpointOf(ex: WithEndpoints): "stub" | "local" | null {
+  const m = ex?.endpoints?.model;
+  return m === "stub" || m === "local" ? m : null;
+}
+
+/** The model endpoint tag's text, or null for a hosted model, the mock or an execution that didn't record it. */
+export function modelEndpointTag(ex: WithEndpoints): string | null {
+  const m = modelEndpointOf(ex);
+  return m ? MODEL_ENDPOINT_TAG[m] : null;
+}
+
+/** True when this execution's web search went to a custom TAVILY_BASE_URL (as recorded with it). */
+export function usedCustomSearch(ex: WithEndpoints): boolean {
+  return ex?.endpoints?.search === "custom";
+}
+
+/** The sentences exports and the shared page add for a stub or local model endpoint and a custom search endpoint; null when neither applies. */
+export function endpointNote(ex: WithEndpoints): string | null {
+  const tag = modelEndpointTag(ex);
+  return [tag && `${tag}.`, usedCustomSearch(ex) && CUSTOM_SEARCH_NOTE].filter(Boolean).join(" ") || null;
+}
+
+/** The model endpoint tag a list row shows beside the mock tag (a stub warns, a local model is gray); null when none applies. */
+export function listedEndpointTag(ex: WithEndpoints): { label: string; variant: "warn" | "gray"; detail: string } | null {
+  const m = modelEndpointOf(ex);
+  return m ? { label: MODEL_ENDPOINT_TAG[m], variant: m === "stub" ? "warn" : "gray", detail: MODEL_ENDPOINT_DETAIL[m] } : null;
+}
 
 // ---------------------------------------------------------------- research notice (Evidence panel)
 

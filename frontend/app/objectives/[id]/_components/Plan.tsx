@@ -1,12 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { Execution, ExecutionStep, PlanInfo, TaskSource } from "@/lib/api";
+import type { Execution, ExecutionStatus, ExecutionStep, PlanInfo, TaskSource } from "@/lib/api";
 import { Icon, StepStatusTag, Tag, VerificationTag } from "@/components";
 import { ResearchTag, providerName } from "@/components/Tags";
 import { CiteProvider, ReportMarkdown } from "@/components/report";
 import { ExecBadge, evidenceToSources } from "@/components/ops";
 import { duration, eur, relativeTime } from "@/lib/format";
+import { UNFINISHED_STEP, unfinishedStep, verificationStopped } from "@/lib/openIssues";
 import { EvidenceChips, evidenceId, focusEvidence } from "./Evidence";
 
 /** The Chief of Staff at work before a plan exists. */
@@ -192,7 +193,7 @@ function StepNode({ step }: { step: ExecutionStep }) {
   );
 }
 
-function StepItem({ step, partial, sources, charged }: { step: ExecutionStep; partial?: string; sources: TaskSource[]; charged: boolean }) {
+function StepItem({ step, partial, sources, charged, runStatus }: { step: ExecutionStep; partial?: string; sources: TaskSource[]; charged: boolean; runStatus: ExecutionStatus }) {
   const [open, setOpen] = useState(false);
   const live = step.status === "RUNNING";
   const text = live ? partial ?? step.partialOutput : null;
@@ -207,6 +208,8 @@ function StepItem({ step, partial, sources, charged }: { step: ExecutionStep; pa
     research === "ok" || research === "degraded"
       ? (step.research?.providers ?? []).map(providerName).join(" + ") || null
       : null;
+  // The run ended without finishing this step ("Not run" / "Stopped"); otherwise a skip is a person's.
+  const unfinished = unfinishedStep(step, runStatus);
   return (
     <li className={`cs-tl-i st-${step.status}`} data-testid="plan-step" data-status={step.status}>
       <StepNode step={step} />
@@ -229,7 +232,13 @@ function StepItem({ step, partial, sources, charged }: { step: ExecutionStep; pa
               <span className="cs-cap">{step.capabilityName}</span>
             </p>
           </div>
-          <StepStatusTag status={step.status} />
+          {unfinished ? (
+            <Tag variant="gray" title={UNFINISHED_STEP[unfinished].title}>
+              {UNFINISHED_STEP[unfinished].label}
+            </Tag>
+          ) : (
+            <StepStatusTag status={step.status} />
+          )}
         </div>
         <p className="cs-tl-purpose">{step.purpose}</p>
         {step.summary && step.status === "COMPLETED" && <p className="cs-tl-sum">{step.summary}</p>}
@@ -240,11 +249,23 @@ function StepItem({ step, partial, sources, charged }: { step: ExecutionStep; pa
             {step.error}
           </p>
         )}
-        {step.status === "SKIPPED" && step.kind === "work" && step.error && (
+        {unfinished === "stopped" && step.error && (
+          // An unfinished step keeps an error only while it waits to retry (starting an attempt clears it).
+          <p className="cs-tl-err is-skip">
+            <Icon name="info" size={14} />
+            <span>
+              The execution ended while this step was waiting to retry after a failed attempt. <span className="cs-tl-err-why">{step.error}</span>
+            </span>
+          </p>
+        )}
+        {step.status === "SKIPPED" && step.kind === "work" && step.error && !unfinished && (
           <p className="cs-tl-err is-skip" data-testid="step-skipped-why">
             <Icon name="info" size={14} />
             <span>
-              Skipped after it failed — the result was produced without it. <span className="cs-tl-err-why">{step.error}</span>
+              {/* A cancelled or failed run delivered no result to leave the step out of. */}
+              Skipped after it failed
+              {runStatus === "COMPLETED" ? " — the result was produced without it." : runStatus === "CANCELLED" || runStatus === "FAILED" ? "." : " — the result will be produced without it."}{" "}
+              <span className="cs-tl-err-why">{step.error}</span>
             </span>
           </p>
         )}
@@ -311,12 +332,26 @@ export function ExecutionTimeline({ execution, partials }: { execution: Executio
     );
   }
   const v = execution.verification;
-  const gate = v ? (v.status === "FAIL" ? "FAILED" : v.status === "UNVERIFIED" ? "UNVERIFIED" : "COMPLETED") : execution.status === "VERIFYING" ? "RUNNING" : "PENDING";
+  // A finished execution with no verification either ended while the gate was working (every work
+  // step finished: "Stopped") or never reached it (cancelled, rejected or failed first: "Not run").
+  const gateStopped = verificationStopped(execution);
+  const gateNotRun = !v && !gateStopped && ["COMPLETED", "FAILED", "CANCELLED"].includes(execution.status);
+  const gate = v
+    ? v.status === "FAIL"
+      ? "FAILED"
+      : v.status === "UNVERIFIED"
+        ? "UNVERIFIED"
+        : "COMPLETED"
+    : execution.status === "VERIFYING"
+      ? "RUNNING"
+      : gateStopped || gateNotRun
+        ? "SKIPPED"
+        : "PENDING";
   return (
-    <CiteProvider sources={sources} jump={jump} prefix="ev" targetId={evidenceId}>
+    <CiteProvider sources={sources} linkDomains={execution.linkDomains} jump={jump} prefix="ev" targetId={evidenceId}>
       <ol className="cs-tl" aria-label="Execution steps">
         {execution.steps.map((s) => (
-          <StepItem key={s.id} step={s} partial={partials[s.id]} sources={sources} charged={execution.costCents > 0} />
+          <StepItem key={s.id} step={s} partial={partials[s.id]} sources={sources} charged={execution.costCents > 0} runStatus={execution.status} />
         ))}
         <li className={`cs-tl-i cs-tl-gate st-${gate}`}>
           <span className="cs-tl-node" aria-hidden="true">
@@ -328,7 +363,19 @@ export function ExecutionTimeline({ execution, partials }: { execution: Executio
                 <h3 className="cs-tl-title">Verification gate</h3>
                 <p className="cs-tl-who">Evidence · success criteria · completeness · consistency</p>
               </div>
-              {v ? <VerificationTag status={v.status} /> : <StepStatusTag status={gate === "RUNNING" ? "RUNNING" : "PENDING"} />}
+              {v ? (
+                <VerificationTag status={v.status} />
+              ) : gateStopped ? (
+                <Tag variant="gray" title="The execution ended while its result was being verified.">
+                  {UNFINISHED_STEP.stopped.label}
+                </Tag>
+              ) : gateNotRun ? (
+                <Tag variant="gray" title="The execution ended before its result was verified.">
+                  {UNFINISHED_STEP.not_run.label}
+                </Tag>
+              ) : (
+                <StepStatusTag status={gate === "RUNNING" ? "RUNNING" : "PENDING"} />
+              )}
             </div>
             {v && (
               <p className="cs-tl-sum">

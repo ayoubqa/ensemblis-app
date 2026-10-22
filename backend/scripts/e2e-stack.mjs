@@ -50,9 +50,13 @@ const env = {
   MOCK_AI_DELAY_MS: process.env.MOCK_AI_DELAY_MS || "1600",
   SEARCH_PROVIDER: "tavily",
   TAVILY_API_KEY: "stub-key",
+  // Not the public Tavily API: the product labels it a custom search endpoint (/api/config searchCustomEndpoint)
+  // and, with PROD_LIKE=1, logs a boot warning — a warning only, so this stack still starts.
   TAVILY_BASE_URL: search.url,
   SEARCH_DAILY_BUDGET: "100000",
-  // Marks this as a stub stack (the search and, with PROD_LIKE, the model are local stubs).
+  // Marks this as a stub stack (the search and, with PROD_LIKE, the model are local stubs). Keep it in
+  // both modes: with PROD_LIKE the model endpoint is labelled a test stub (config.ts modelEndpoint), and
+  // every execution records it (endpoints.model "stub", endpoints.search "custom").
   E2E_STUB: "1",
   VERIFY_RETRY_DELAY_MS: process.env.VERIFY_RETRY_DELAY_MS || "1000",
   EMBEDDED_WORKER: "false",

