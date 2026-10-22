@@ -12,6 +12,8 @@ export interface ExportMenuProps {
   markdown: string;
   sources?: TaskSource[] | null;
   meta?: ExportMeta;
+  /** Domains links in every export (PDF, Word, Markdown, Copy) may point to, as on screen; default: the sources' domains. */
+  linkDomains?: readonly string[] | null;
   /** Button label (default "Export"). */
   label?: string;
   /** Use the primary button style. */
@@ -29,7 +31,7 @@ const ITEMS: { kind: Kind; title: string; sub: string; fmt: string; cls?: string
 ];
 
 /** "Export ▾" → PDF / Word / Markdown / Copy. Heavy libraries load only on click. */
-export function ExportMenu({ title, markdown, sources, meta, label = "Export", primary, className }: ExportMenuProps) {
+export function ExportMenu({ title, markdown, sources, meta, linkDomains, label = "Export", primary, className }: ExportMenuProps) {
   const toast = useToast();
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState<Kind | null>(null);
@@ -95,7 +97,7 @@ export function ExportMenu({ title, markdown, sources, meta, label = "Export", p
   const run = async (kind: Kind) => {
     if (busy) return;
     setBusy(kind);
-    const input = { title, markdown, sources: sources ?? [], meta };
+    const input = { title, markdown, sources: sources ?? [], meta, linkDomains };
     const base = `${fileSlug(title)}${meta?.version && meta.version > 1 ? `-v${meta.version}` : ""}`;
     try {
       if (kind === "pdf") {

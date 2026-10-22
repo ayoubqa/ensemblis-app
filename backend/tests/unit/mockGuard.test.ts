@@ -1,18 +1,20 @@
 // The scripted mock model must never serve production — not even when
 // NODE_ENV was forgotten on a hosting platform.
 import { afterEach, describe, expect, it } from "vitest";
-import { mockAIForbidden, productionConfigProblems } from "../../src/config";
+import { config, mockAIForbidden, productionConfigProblems, productionConfigWarnings } from "../../src/config";
 import { aiConfigProblem, currentProvider, describeModel, setLLMHandlerForTests } from "../../src/ai/llmProvider";
 import { classifyProviderError } from "../../src/ai/errors";
 import { publicConfig } from "../../src/public/config";
 
-const KEYS = ["RENDER", "AI_PROVIDER", "JWT_SECRET", "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "OPENAI_MODEL", "OPENAI_FAST_MODEL", "OPENAI_BASE_URL", "CLAUDE_MODEL"] as const;
+const KEYS = ["RENDER", "AI_PROVIDER", "JWT_SECRET", "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "OPENAI_MODEL", "OPENAI_FAST_MODEL", "OPENAI_BASE_URL", "CLAUDE_MODEL", "TAVILY_BASE_URL", "E2E_STUB"] as const;
 const saved: Record<string, string | undefined> = Object.fromEntries(KEYS.map((k) => [k, process.env[k]]));
+const savedSearch = { ...config.search };
 afterEach(() => {
   for (const k of KEYS) {
     if (saved[k] === undefined) delete process.env[k];
     else process.env[k] = saved[k];
   }
+  Object.assign(config.search, savedSearch);
   setLLMHandlerForTests(null);
 });
 
@@ -38,6 +40,26 @@ describe("mock AI guard", () => {
     delete process.env.JWT_SECRET;
     expect(productionConfigProblems("api").join(" ")).toMatch(/JWT_SECRET/);
     expect(productionConfigProblems("worker").join(" ")).not.toMatch(/JWT_SECRET/);
+  });
+
+  it("warns in production when TAVILY_BASE_URL sends web search to a stub or proxy (naming only its host)", () => {
+    process.env.RENDER = "true";
+    process.env.AI_PROVIDER = "openai";
+    config.search.provider = "tavily";
+    config.search.tavilyApiKey = "tvly-test";
+    process.env.TAVILY_BASE_URL = "http://user:pw@127.0.0.1:4198/";
+    const warning = productionConfigWarnings().find((w) => w.startsWith("TAVILY_BASE_URL"));
+    expect(warning).toMatch(/^TAVILY_BASE_URL is set \(127\.0\.0\.1:4198\): web search goes there instead of the public Tavily API/);
+    expect(warning).not.toMatch(/user|pw@/);
+    // A stub stack (scripts/e2e-stack.mjs, E2E_STUB=1) still starts: a warning, never a refusal.
+    process.env.E2E_STUB = "1";
+    expect(productionConfigWarnings().join(" ")).toMatch(/E2E_STUB=1/);
+    expect(productionConfigProblems().join(" ")).not.toMatch(/TAVILY/);
+    process.env.TAVILY_BASE_URL = "https://api.tavily.com";
+    expect(productionConfigWarnings().join(" ")).not.toMatch(/TAVILY_BASE_URL/);
+    delete process.env.RENDER;
+    process.env.TAVILY_BASE_URL = "http://127.0.0.1:4198";
+    expect(productionConfigWarnings()).toEqual([]);
   });
 });
 

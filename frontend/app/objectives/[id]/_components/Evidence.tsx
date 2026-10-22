@@ -1,7 +1,7 @@
 "use client";
 
 import type { Evidence, Execution } from "@/lib/api";
-import { researchNotice } from "@/lib/openIssues";
+import { CUSTOM_SEARCH, researchNotice, usedCustomSearch } from "@/lib/openIssues";
 import { Icon } from "@/components";
 import { providerName } from "@/components/Tags";
 import { EVIDENCE_KIND_LABEL, safeHref } from "@/components/report";
@@ -64,6 +64,9 @@ function provenance(e: Evidence): { parts: string[]; retrieved: string | null } 
 }
 
 export function EvidencePanel({ execution }: { execution: Execution }) {
+  // This execution's web search went to TAVILY_BASE_URL (a stub or a proxy), as recorded with it — never
+  // the server's current setting, so a later configuration change doesn't relabel an older execution.
+  const customSearch = usedCustomSearch(execution);
   const foundBy = new Map(execution.steps.map((s) => [s.id, s.agent]));
   // Research can still happen after a blocked execution resumes, so it isn't "finished" here.
   const finished = ["COMPLETED", "FAILED", "CANCELLED", "VERIFYING"].includes(execution.status);
@@ -71,6 +74,14 @@ export function EvidencePanel({ execution }: { execution: Execution }) {
   const failedSearches = execution.steps.flatMap((s) => (s.status === "SKIPPED" ? [] : (s.research?.attempts ?? []).filter((a) => !a.ok).map((a) => ({ ...a, step: s.title }))));
   const extras = (
     <>
+      {customSearch && (
+        <div className="cs-empty is-warn cs-ev-notice" role="note" data-testid="search-endpoint-notice">
+          <Icon name="alert" size={16} />
+          <p>
+            <b>{CUSTOM_SEARCH.head}</b> — {CUSTOM_SEARCH.text}
+          </p>
+        </div>
+      )}
       {notice && (
         <div className={`cs-empty${notice.tone === "warn" ? " is-warn" : ""} cs-ev-notice`} role="note" data-testid="research-notice">
           <Icon name={notice.tone === "warn" ? "alert" : "info"} size={16} />

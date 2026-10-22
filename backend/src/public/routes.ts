@@ -3,16 +3,17 @@
 //   - legacy task reports (v1–v3), exactly as before;
 //   - objective outcomes (v4): the final result with its objective, success
 //     criteria, outcome, verification summary and evidence.
-// Never exposed: the account, prices, the full objective statement or notes,
-// and the text of company documents (their evidence entries stay listed so
-// [n] citations still resolve).
+// Never exposed: the account, prices, the full objective statement or notes
+// (linkDomains adds to the evidence domains only hosts the result itself links
+// to), and the text of company documents (their evidence entries stay listed
+// so [n] citations still resolve).
 
 import { Router } from "express";
 import { prisma } from "../db";
 import { ah, HttpError } from "../lib/http";
 import { asDepth, toPublicAgent, toSharedSource } from "../lib/serializers";
 import { toPublicEvidence } from "../engine/evidence";
-import { criteriaFromAssessment, toPublicCriterion, toPublicMeasurement, usedMockAIOf } from "../engine/serialize";
+import { confirmedOutcomeOf, criteriaFromAssessment, endpointsOf, LINK_ORG_INCLUDE, linkDomainsOf, toPublicCriterion, toPublicMeasurement, toPublicWarnings, usedMockAIOf } from "../engine/serialize";
 import { deriveResultState } from "../engine/resultState";
 
 const router = Router();
@@ -54,7 +55,8 @@ async function loadExecutionReport(token: string) {
       evidence: { orderBy: { n: "asc" } },
       verifications: { orderBy: { round: "desc" }, take: 1 },
       measurements: true,
-      steps: { orderBy: { order: "asc" }, select: { title: true, agent: true, executive: true, status: true, kind: true, provider: true, researchStatus: true } },
+      steps: { orderBy: { order: "asc" }, select: { title: true, agent: true, executive: true, status: true, kind: true, provider: true, researchStatus: true, research: true } },
+      organization: LINK_ORG_INCLUDE,
     },
   });
   if (!ex) return null;
@@ -67,6 +69,8 @@ async function loadExecutionReport(token: string) {
     title: ex.objective.title,
     /** Taken from what this execution actually ran on (any step or the verifier on the mock provider). */
     usedMockAI: usedMockAIOf({ steps: ex.steps, verifications: ex.verifications }),
+    /** Where its model and search calls went (a test stub, a local model, a custom search endpoint), as stored with it. Never a host. */
+    endpoints: endpointsOf(ex),
     resultState: result.state,
     resultReasons: result.reasons,
     category: null,
@@ -75,6 +79,8 @@ async function loadExecutionReport(token: string) {
     version: 1,
     // TaskSource-compatible list so the shared citation components render [n].
     sources: evidence.map((e) => ({ n: e.n, kind: e.sourceKind, title: e.title, url: e.url, domain: e.domain, snippet: e.snippet, publishedAt: e.publishedAt })),
+    /** The domains the result may link to: its evidence's, and the hosts it links to that the objective or website allowed — never the notes'. */
+    linkDomains: linkDomainsOf(ex, { publicView: true }),
     completedAt: ex.completedAt?.toISOString() ?? null,
     leadAgent: null,
     team: ex.steps.filter((s) => s.status === "COMPLETED").map((s) => ({ agentName: s.agent, role: s.executive, title: s.title })),
@@ -84,7 +90,7 @@ async function loadExecutionReport(token: string) {
       measurements: ex.measurements.map(toPublicMeasurement),
       /** The AI-measured outcome; confirmedOutcomeStatus is set once a person confirmed it. */
       outcomeStatus: ex.outcomeStatus,
-      confirmedOutcomeStatus: ex.confirmedOutcomeStatus ?? null,
+      confirmedOutcomeStatus: confirmedOutcomeOf(ex),
       outcomeConfirmedAt: ex.outcomeConfirmedAt?.toISOString() ?? null,
       outcomeSummary: ex.outcomeSummary,
     },
@@ -93,7 +99,8 @@ async function loadExecutionReport(token: string) {
           status: v.status,
           score: v.score,
           summary: v.summary,
-          warnings: v.warnings,
+          // Provider and operator detail (search failures, verifier errors) stays in the owner's console.
+          warnings: toPublicWarnings(v.warnings),
           checks: v.checks,
           method: v.method,
           criteria: criteriaFromAssessment(v.assessment, new Set(ex.evidence.map((e) => e.n))),

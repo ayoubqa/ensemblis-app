@@ -24,7 +24,7 @@
 import { z } from "zod";
 import { runStructured } from "../ai/structured";
 import { classifyProviderError } from "../ai/errors";
-import { aiConfigProblem, describeModel } from "../ai/llmProvider";
+import { aiConfigProblem, currentModelEndpoint, describeModel } from "../ai/llmProvider";
 import { bool, listOf, looseEnum, num, strList, text } from "../ai/lenient";
 import {
   BUSINESS_RESEARCH_CAPABILITY,
@@ -40,7 +40,8 @@ import {
 } from "../org/registry";
 import { terms } from "../context/retrieval";
 import { redact } from "../lib/log";
-import { searchEnabled } from "../research/search";
+import { currentSearchEndpoint, searchEnabled, type SearchEndpoint } from "../research/search";
+import type { ModelEndpoint } from "../config";
 import { clip, collapse } from "../research/text";
 import { block, constraintsBlock, isResearchBrief, TRUST_RULES } from "./prompts";
 
@@ -139,6 +140,22 @@ export interface Plan {
   notes: string[];
   /** Set when the plan cannot run: see PlanBlocked. Absent on a runnable plan. */
   blocked?: PlanBlocked;
+  /** Where this execution's model and web search calls go, stamped at (re-)planning. Absent on plans from before it. */
+  runtime?: PlanRuntime;
+}
+
+/**
+ * The endpoints an execution runs against, stored with it so a later configuration change never
+ * relabels it (serialize.ts endpointsOf). null: the mock model / web search off.
+ */
+export interface PlanRuntime {
+  modelEndpoint: ModelEndpoint | null;
+  searchEndpoint: SearchEndpoint | null;
+  /**
+   * The company website ("" for none) whose domain the result may link to, so a later change in
+   * Company Context never changes its links (serialize.ts linkDomainsOf). Absent on plans from before it.
+   */
+  website?: string;
 }
 
 export interface PlannerInput {
@@ -158,6 +175,8 @@ export interface PlannerInput {
   kind?: string | null;
   /** Objective.constraints: scope, exclusions, sources or format the plan must respect. */
   constraints?: string | null;
+  /** CompanyContext.website when planning (stamped as Plan.runtime.website). */
+  website?: string;
 }
 
 type PlanShape = Pick<PlannerInput, "title" | "statement" | "criteria"> & Partial<Pick<PlannerInput, "kind">>;
@@ -520,8 +539,15 @@ const blockedMessage = (message: string) => clip(redact(collapse(message)), 400)
  * model's output is unusable or a transient error stopped it, and returns a
  * blocked plan (plan.blocked) when nothing could run anyway — the AI provider
  * isn't configured or is out of quota, or a research brief has no web search.
+ * Every plan carries the endpoints it runs against and the company website (Plan.runtime).
  */
 export async function planObjective(input: PlannerInput): Promise<Plan> {
+  const plan = await planOrBlock(input);
+  plan.runtime = { modelEndpoint: currentModelEndpoint(), searchEndpoint: currentSearchEndpoint(), website: input.website };
+  return plan;
+}
+
+async function planOrBlock(input: PlannerInput): Promise<Plan> {
   if (isResearchBrief(input.kind) && !searchEnabled()) {
     return blockedPlan(input, { kind: "search_unavailable", message: SEARCH_UNAVAILABLE_MESSAGE });
   }

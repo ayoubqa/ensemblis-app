@@ -159,15 +159,24 @@ export function outcomeSummary(ms: CriterionMeasurement[]): string {
  * The overall outcome after the caps:
  *   - an unverified result is never measured (UNKNOWN);
  *   - a result accepted despite failing verification can't count as fully achieved;
+ *   - nor can a result whose work was incomplete (a skipped or failed work step, research that
+ *     didn't deliver: the result state "partial"), whatever the objective kind;
  *   - a research brief is ACHIEVED only when verification PASSed with no unsupported or uncited claim.
  */
 export function cappedOutcome(
   status: OutcomeStatus,
-  args: { acceptedDespiteFailure: boolean; objectiveKind?: string | null; verificationStatus?: VerificationStatus | null; hasUnsupported?: boolean }
+  args: {
+    acceptedDespiteFailure: boolean;
+    objectiveKind?: string | null;
+    verificationStatus?: VerificationStatus | null;
+    hasUnsupported?: boolean;
+    /** The work was incomplete (resultState.ts incompleteWork). */
+    partial?: boolean;
+  }
 ): OutcomeStatus {
   if (args.verificationStatus === "UNVERIFIED") return "UNKNOWN";
   if (status !== "ACHIEVED") return status;
-  if (args.acceptedDespiteFailure) return "PARTIALLY_ACHIEVED";
+  if (args.acceptedDespiteFailure || args.partial) return "PARTIALLY_ACHIEVED";
   if (isResearchBrief(args.objectiveKind) && (args.verificationStatus !== "PASS" || args.hasUnsupported)) return "PARTIALLY_ACHIEVED";
   return status;
 }
@@ -185,6 +194,8 @@ export async function recordOutcome(
     verificationStatus?: VerificationStatus | null;
     /** The latest round has an UNSUPPORTED or UNCITED claim. */
     hasUnsupported?: boolean;
+    /** The work was incomplete (a skipped or failed work step, research that didn't deliver). */
+    partial?: boolean;
   }
 ): Promise<{ status: OutcomeStatus; summary: string; measurements: CriterionMeasurement[] }> {
   // The citation_support mapping is applied when the round is verified (service.ts); the evidence-link rule again here (idempotent).

@@ -16,12 +16,10 @@
 // of at most 5s; after a 401/403 (bad or revoked key) Tavily is skipped for
 // 10 minutes instead of failing — and spending budget — on every query.
 
-import { config } from "../config";
+import { config, customTavilyBaseUrl, DEFAULT_TAVILY_BASE_URL, isLocalHost } from "../config";
 import { prisma } from "../db";
 import { log, redact } from "../lib/log";
 import { recordUsage, startOfTodayUTC } from "../lib/usage";
-import { isIP } from "node:net";
-import { isPublicAddress } from "./netGuard";
 import { collapse } from "./text";
 
 export type SearchKind = "web" | "wikipedia";
@@ -51,14 +49,23 @@ export interface SearchAttempt {
   error: string | null;
   resultCount: number;
   ms: number;
+  /**
+   * Where the request went: "custom" is TAVILY_BASE_URL (a stub or a proxy), not the public Tavily
+   * API; Wikipedia is "public". Absent when no request was made (a skipped provider) and on attempts
+   * recorded before it existed.
+   */
+  endpoint?: SearchEndpoint;
 }
 
+/** Where web search goes: the public Tavily API or Wikipedia, or a custom TAVILY_BASE_URL. */
+export type SearchEndpoint = "public" | "custom";
+
 // TAVILY_BASE_URL is only for pointing tests at a local stub; production uses the real API.
-const TAVILY_BASE_URL = (process.env.TAVILY_BASE_URL?.trim() || "https://api.tavily.com").replace(/\/+$/, "");
+const TAVILY_SEARCH = `${DEFAULT_TAVILY_BASE_URL}/search`;
 
 /** Endpoints (mutable only so unit tests can point them at local stub servers). */
 export const searchEndpoints = {
-  tavily: `${TAVILY_BASE_URL}/search`,
+  tavily: `${customTavilyBaseUrl() ?? DEFAULT_TAVILY_BASE_URL}/search`,
   wikipedia: "https://en.wikipedia.org/w/api.php",
 };
 
@@ -103,24 +110,38 @@ export function searchEnabled(): boolean {
   return effectiveSearchProvider() !== "off";
 }
 
+const tavilyEndpoint = (): SearchEndpoint => (searchEndpoints.tavily === TAVILY_SEARCH ? "public" : "custom");
+
+/**
+ * True when web search goes to Tavily at an endpoint other than the public Tavily API
+ * (TAVILY_BASE_URL: a test stub or a proxy), so its results are not live Tavily results.
+ */
+export function searchCustomEndpoint(): boolean {
+  return effectiveSearchProvider() === "tavily" && tavilyEndpoint() === "custom";
+}
+
+/** Where this server's web search goes now, or null when it is off. Stamped on each plan (Plan.runtime). */
+export function currentSearchEndpoint(): SearchEndpoint | null {
+  return !searchEnabled() ? null : searchCustomEndpoint() ? "custom" : "public";
+}
+
 /** Human-readable effective provider, shown in the UI and owner dashboard. */
 export function searchProviderLabel(): string {
   const p = effectiveSearchProvider();
-  return p === "tavily" ? "Tavily web search" : p === "wikipedia" ? "Wikipedia" : "Off";
+  if (p === "tavily") return searchCustomEndpoint() ? "Custom search endpoint (TAVILY_BASE_URL) — not the public Tavily API" : "Tavily web search";
+  return p === "wikipedia" ? "Wikipedia" : "Off";
 }
 
 function userAgent(): string {
   return `Ensemblis/1.0 (+${config.appUrl})`;
 }
 
-/** Hostnames that never name a public web page (loopback, local or internal-only names). */
-const NON_PUBLIC_HOST = /^(localhost|.*\.localhost|.*\.local|.*\.internal|.*\.lan|.*\.home\.arpa)$/i;
-
 /**
  * A search result URL is kept only when it is an http(s) URL on a public host: no embedded
- * credentials, no loopback/internal names and no IP literal outside public unicast space (e.g.
- * the cloud metadata address 169.254.169.254). Evidence URLs are shown and linked, never fetched
- * by the server, so a hostname is not resolved here.
+ * credentials, no loopback/internal names (also written with a trailing dot, "localhost."), no
+ * single-label name ("intranet") and no IP literal outside public unicast space (e.g. the cloud
+ * metadata address 169.254.169.254). Evidence URLs are shown and linked, never fetched by the
+ * server, so a hostname is not resolved here.
  */
 export function safeHttpUrl(raw: unknown): string | null {
   if (typeof raw !== "string" || raw.length > 2048) return null;
@@ -128,10 +149,7 @@ export function safeHttpUrl(raw: unknown): string | null {
     const u = new URL(raw);
     if (u.protocol !== "https:" && u.protocol !== "http:") return null;
     if (u.username || u.password) return null;
-    const host = u.hostname.replace(/^\[|\]$/g, "");
-    if (!host || NON_PUBLIC_HOST.test(host)) return null;
-    if (isIP(host) && !isPublicAddress(host)) return null;
-    return u.toString();
+    return isLocalHost(u.hostname) ? null : u.toString();
   } catch {
     return null;
   }
@@ -235,6 +253,7 @@ async function tavilyCall(query: string, executionId: string | null): Promise<Ta
 /** One Tavily search with at most one retry (429/5xx with a short wait). Results are null when it failed. */
 async function tavilySearch(query: string, executionId: string | null): Promise<{ results: SearchResult[] | null; attempt: SearchAttempt }> {
   const started = Date.now();
+  const endpoint = tavilyEndpoint();
   let call = await tavilyCall(query, executionId);
   let retried = false;
   if (!call.ok && call.httpStatus !== null && (call.httpStatus === 429 || call.httpStatus >= 500)) {
@@ -248,7 +267,7 @@ async function tavilySearch(query: string, executionId: string | null): Promise<
   }
   const ms = Date.now() - started;
   if (call.ok) {
-    return { results: call.results, attempt: { query, provider: "tavily", ok: true, httpStatus: 200, error: null, resultCount: call.results.length, ms } };
+    return { results: call.results, attempt: { query, provider: "tavily", ok: true, httpStatus: 200, error: null, resultCount: call.results.length, ms, endpoint } };
   }
   if (call.httpStatus === 401 || call.httpStatus === 403) {
     // A bad or revoked key fails every query the same way: stop calling Tavily for a while.
@@ -257,7 +276,7 @@ async function tavilySearch(query: string, executionId: string | null): Promise<
   }
   const error = `${call.error}${retried ? " (after 1 retry)" : ""}`;
   log.warn("search.failed", { provider: "tavily", executionId: executionId ?? undefined, httpStatus: call.httpStatus ?? undefined, error });
-  return { results: null, attempt: { query, provider: "tavily", ok: false, httpStatus: call.httpStatus, error, resultCount: 0, ms } };
+  return { results: null, attempt: { query, provider: "tavily", ok: false, httpStatus: call.httpStatus, error, resultCount: 0, ms, endpoint } };
 }
 
 // ---------------------------------------------------------------- Wikipedia
@@ -346,8 +365,8 @@ async function wikipediaSearch(query: string, executionId: string | null): Promi
   return {
     results,
     attempt: failure
-      ? { query, provider: "wikipedia", ok: false, httpStatus: failure.httpStatus, error: failure.error, resultCount: 0, ms }
-      : { query, provider: "wikipedia", ok: true, httpStatus: 200, error: null, resultCount: results.length, ms },
+      ? { query, provider: "wikipedia", ok: false, httpStatus: failure.httpStatus, error: failure.error, resultCount: 0, ms, endpoint: "public" }
+      : { query, provider: "wikipedia", ok: true, httpStatus: 200, error: null, resultCount: results.length, ms, endpoint: "public" },
   };
 }
 

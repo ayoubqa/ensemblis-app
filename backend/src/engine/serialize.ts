@@ -21,10 +21,50 @@ import { getCapability, getExecutive } from "../org/registry";
 import { redact } from "../lib/log";
 import { toPublicMemory } from "../memory/service";
 import { toPublicEvidence } from "./evidence";
-import type { Plan } from "./planner";
+import type { Plan, PlanRuntime } from "./planner";
+import type { ModelEndpoint } from "../config";
+import type { SearchEndpoint } from "../research/search";
+import { allowedLinkDomains } from "../research/citations";
+import { domainOf } from "../research/text";
 import { deriveResultState } from "./resultState";
+import { SKIPPED_STEP_ISSUE } from "./verification/checks";
+import { TEXT_MATCH_ONLY } from "./verification/claimCheck";
 
 const iso = (d: Date | null | undefined) => (d ? d.toISOString() : null);
+
+/**
+ * The outcome a person confirmed, or null. Before confirmedOutcomeStatus existed a confirmation
+ * overwrote outcomeStatus and set outcomeConfirmedAt: such a row counts as confirmed with that value.
+ */
+export function confirmedOutcomeOf(e: Pick<Execution, "outcomeStatus" | "confirmedOutcomeStatus" | "outcomeConfirmedAt">) {
+  return e.confirmedOutcomeStatus ?? (e.outcomeConfirmedAt ? e.outcomeStatus : null);
+}
+
+const PUBLIC_RESEARCH_WARNING = "Web research was incomplete for part of this result.";
+const PUBLIC_VERIFIER_WARNING = "The AI verifier was unavailable for this result.";
+const PUBLIC_TEXT_MATCH_WARNING = "Claims were checked by text match only.";
+
+/**
+ * Verification warnings for the public shared report. Lines that carry provider or operator
+ * detail — a search failure and its reason (budget, key, HTTP status), the AI verifier's or the
+ * claim check's error — become generic wording; the owner's console keeps the full text.
+ */
+export function toPublicWarnings(warnings: readonly string[]): string[] {
+  const out: string[] = [];
+  for (const w of warnings) {
+    const research = w.startsWith("Research: ") ? w.slice("Research: ".length) : null;
+    const safe =
+      research !== null && !SKIPPED_STEP_ISSUE.test(research)
+        ? PUBLIC_RESEARCH_WARNING
+        : w.startsWith("The AI verifier could not run")
+          ? PUBLIC_VERIFIER_WARNING
+          : w.startsWith(`${TEXT_MATCH_ONLY}:`)
+            ? PUBLIC_TEXT_MATCH_WARNING
+            : w;
+    if (!out.includes(safe)) out.push(safe);
+  }
+  return out;
+}
 
 /** Provider/search error text shown to people: key-shaped tokens masked (lib/log redact), then clipped. */
 export function scrubError(s: string | null | undefined, max = 300): string | null {
@@ -37,9 +77,9 @@ export function toPublicCriterion(c: SuccessCriterion) {
   return { id: c.id, order: c.order, description: c.description, kind: c.kind as "qualitative" | "quantitative", targetValue: c.targetValue, unit: c.unit, source: c.source as "user" | "proposed" };
 }
 
-/** The step fields a summary needs. provider / researchStatus / capability are optional so narrow selects still type-check. */
+/** The step fields a summary needs. provider / researchStatus / capability / research are optional so narrow selects still type-check. */
 export type StepLite = Pick<ExecutionStep, "status" | "title" | "agent" | "executive" | "order" | "kind"> &
-  Partial<Pick<ExecutionStep, "provider" | "researchStatus" | "capability">>;
+  Partial<Pick<ExecutionStep, "provider" | "researchStatus" | "capability" | "research">>;
 
 /** Select for StepLite (list and detail summaries). */
 export const STEP_LITE_SELECT = {
@@ -52,6 +92,7 @@ export const STEP_LITE_SELECT = {
   provider: true,
   researchStatus: true,
   capability: true,
+  research: true, // the search attempts' endpoints (endpointsOf)
 } as const;
 
 export function progressOf(steps: StepLite[]) {
@@ -87,6 +128,43 @@ export function usedMockAIOf(e: {
   );
 }
 
+export interface ExecutionEndpoints {
+  model: ModelEndpoint | null;
+  search: SearchEndpoint | null;
+}
+
+/**
+ * Where an execution's model and web search calls went, from what is stored with it — never the
+ * server's current configuration. model: Plan.runtime, stamped at planning (null for the mock).
+ * search: the endpoints its search attempts record ("custom" when any went to TAVILY_BASE_URL);
+ * research reused from an interrupted attempt has no attempts, so the plan's stamp stands in.
+ * null: not used, or not known (an execution from before this was recorded).
+ */
+export function endpointsOf(e: { plan?: unknown; steps?: { researchStatus?: string | null; research?: unknown }[] }): ExecutionEndpoints {
+  const runtime = planRuntime(e.plan);
+  const marked = new Set<unknown>();
+  for (const s of e.steps ?? []) {
+    const attempts = s.research && typeof s.research === "object" ? (s.research as { attempts?: unknown }).attempts : null;
+    if (Array.isArray(attempts)) for (const a of attempts) marked.add(a && typeof a === "object" ? (a as { endpoint?: unknown }).endpoint : undefined);
+  }
+  const searched = (e.steps ?? []).some((s) => s.researchStatus === "ok" || s.researchStatus === "degraded" || s.researchStatus === "no_results");
+  return {
+    model: runtime?.modelEndpoint ?? null,
+    search: marked.has("custom") ? "custom" : marked.has("public") ? "public" : searched ? runtime?.searchEndpoint ?? null : null,
+  };
+}
+
+function planRuntime(plan: unknown): PlanRuntime | null {
+  const r = plan && typeof plan === "object" ? (plan as { runtime?: unknown }).runtime : null;
+  if (!r || typeof r !== "object") return null;
+  const { modelEndpoint: m, searchEndpoint: s, website: w } = r as Record<string, unknown>;
+  return {
+    modelEndpoint: m === "hosted" || m === "local" || m === "stub" ? m : null,
+    searchEndpoint: s === "public" || s === "custom" ? s : null,
+    website: typeof w === "string" ? w : undefined,
+  };
+}
+
 export function toExecutionSummary(e: SummaryInput, opts: { objectiveKind?: string | null } = {}) {
   const result = deriveResultState({
     status: e.status,
@@ -105,11 +183,12 @@ export function toExecutionSummary(e: SummaryInput, opts: { objectiveKind?: stri
     verificationScore: e.verificationScore,
     /** The AI-measured outcome. A person's confirmation is confirmedOutcomeStatus and never overwrites it. */
     outcomeStatus: e.outcomeStatus,
-    confirmedOutcomeStatus: e.confirmedOutcomeStatus ?? null,
+    confirmedOutcomeStatus: confirmedOutcomeOf(e),
     outcomeSummary: e.outcomeSummary,
     resultState: result.state,
     resultReasons: result.reasons,
     usedMockAI: usedMockAIOf(e),
+    endpoints: endpointsOf(e),
     planSource: e.planSource,
     startedAt: iso(e.startedAt),
     completedAt: iso(e.completedAt),
@@ -513,6 +592,45 @@ export function toPublicExecutionEvidence(x: Evidence) {
   };
 }
 
+type LinkObjective = Partial<Pick<Objective, "statement" | "contextNotes">>;
+type LinkOrg = { context: { website: string } | null };
+
+/** Loads the company website for linkDomainsOf (an execution's organization). */
+export const LINK_ORG_INCLUDE = { select: { context: { select: { website: true } } } } as const;
+
+/**
+ * Hosts (lower-case, no "www.") of the http(s) and www. URLs a text links to or shows. Punctuation
+ * after a URL ("**", "_", ".") is not part of its host.
+ */
+function urlHostsIn(text: string): string[] {
+  const out = new Set<string>();
+  for (const m of text.matchAll(/(?:https?:\/\/|www\.)[^\s<>()[\]"'`\\]+/gi)) {
+    const host = domainOf(/^www\./i.test(m[0]) ? `https://${m[0]}` : m[0])?.replace(/[^a-z0-9]+$/, "");
+    if (host) out.add(host);
+  }
+  return [...out];
+}
+
+/**
+ * The domains an execution's result may link to, as the executor's link cleaner allowed them: its
+ * evidence plus any domain named in the objective, the owner's notes or the company website — as it
+ * was when the execution was planned (Plan.runtime), the current one for plans from before that stamp.
+ * The report renderers (screen, PDF, Word) show any other link as text. publicView sends only what
+ * the shared page shows anyway: the evidence domains and the hosts the result itself links to that
+ * the objective or the website allowed — never another token of the private statement, nor the notes.
+ */
+export function linkDomainsOf(
+  e: { evidence: Pick<Evidence, "domain" | "url">[]; objective?: LinkObjective | null; organization?: LinkOrg | null; plan?: unknown; result?: string | null },
+  opts: { publicView?: boolean } = {}
+): string[] {
+  const website = planRuntime(e.plan)?.website ?? e.organization?.context?.website ?? "";
+  const statement = e.objective?.statement ?? "";
+  if (!opts.publicView) return allowedLinkDomains(`${statement} ${e.objective?.contextNotes ?? ""} ${website}`, e.evidence);
+  const named = allowedLinkDomains(`${statement} ${website}`, []);
+  const linked = urlHostsIn(e.result ?? "").filter((h) => named.some((d) => h === d || h.endsWith(`.${d}`)));
+  return [...new Set([...allowedLinkDomains("", e.evidence), ...linked])];
+}
+
 export type FullExecution = Execution & {
   steps: ExecutionStep[];
   evidence: Evidence[];
@@ -524,7 +642,8 @@ export type FullExecution = Execution & {
   memories: MemoryItem[];
   events: ExecutionEvent[];
   usageEvents?: UsageLite[];
-  objective?: { kind: string | null } | null;
+  objective?: ({ kind: string | null } & LinkObjective) | null;
+  organization?: LinkOrg | null;
 };
 
 export const FULL_EXECUTION_INCLUDE = {
@@ -537,7 +656,8 @@ export const FULL_EXECUTION_INCLUDE = {
   memories: true,
   events: { orderBy: { id: "desc" as const }, take: 400 },
   usageEvents: { select: USAGE_EVENT_SELECT },
-  objective: { select: { kind: true } },
+  objective: { select: { kind: true, statement: true, contextNotes: true } },
+  organization: LINK_ORG_INCLUDE,
 };
 
 export function toPublicExecution(e: FullExecution) {
@@ -558,6 +678,8 @@ export function toPublicExecution(e: FullExecution) {
     revisionCount: e.revisionCount,
     steps: e.steps.map((s) => toPublicStep(s, e.evidence)),
     evidence: e.evidence.map(toPublicExecutionEvidence),
+    /** The domains the result may link to (linkDomainsOf); the report renderers show any other link as text. */
+    linkDomains: linkDomainsOf(e),
     /** The latest round. */
     verification: rounds[0] ? toPublicVerification(rounds[0], { knownEvidence }) : null,
     /** Every round, oldest first (e.g. round 1 FAIL → revision → round 2). */

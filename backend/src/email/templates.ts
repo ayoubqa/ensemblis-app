@@ -27,18 +27,61 @@ export function escapeHtml(s: string): string {
 
 const eur = (cents: number) => `€${(cents / 100).toFixed(2)}`;
 
-/** Strips inline markdown (bold, links, code, citations) to plain text. */
+// What a mail client would turn into a link: URLs (scheme://…, protocol-relative //… or \\…, also to a
+// bracketed IP address, www.…; trailing punctuation is the sentence's), mailto: and e-mail addresses (on
+// a domain with a top-level domain: react@18.3.1 and deploy@10.0.0.5 have none). Each starts only where
+// its run of characters does, or at the fixed "www." (linear time); "TCP//IP" is not a URL.
+const URL_REST = String.raw`[^\s<>()[\]"'\x60]*[^\s<>()[\]"'\x60.,;:!?]`;
+const LINKABLE = new RegExp(
+  String.raw`(?:(?<![a-z0-9+.-])[a-z][a-z0-9+.-]*:|(?<![\p{L}\p{N}]))[\\/]{2}(?:\[[0-9a-f:.]+\](?:${URL_REST})?|${URL_REST})|www\.${URL_REST}|\bmailto:(?:${URL_REST})?|` +
+    String.raw`(?<![\p{L}\p{N}._%+-])[\p{L}\p{N}._%+-]+@[\p{L}\p{N}-]+(?:\.[\p{L}\p{N}-]+)*\.(?:xn--[a-z0-9-]+|\p{L}{2,24})(?![\p{L}\p{N}-])`,
+  "giu"
+);
+
+/**
+ * `s` on one line without any URL or e-mail address, so a mail client has nothing in it to link
+ * (for text an e-mail quotes: a report's summary, a model's question).
+ */
+const MAX_LINK_PASSES = 4;
+
+export function withoutLinks(s: string): string {
+  // "\0" marks where a URL or address was. A match can end where the next address's run starts
+  // ("a@one.example+b@other.example"), and dropping a mark joins the text on either side ("www" +
+  // mark + ".host/path"), so repeat until a pass changes nothing: each later pass removes one or more.
+  // Each pass can uncover only one more nesting level, so the passes are capped (keeping this linear);
+  // text still link-shaped after the cap is dropped rather than sent.
+  let text = s;
+  for (let prev = "", pass = 0; prev !== text; pass++) {
+    if (pass === MAX_LINK_PASSES) return text.search(LINKABLE) === -1 && !text.includes("\0") ? text : "";
+    prev = text;
+    text = text
+      .replace(LINKABLE, "\0")
+      .replace(/\s+/g, " ")
+      // ...which leaves no empty "()", no space before punctuation, one space between words.
+      .replace(/\( ?\0[ \0]*\)/g, "\0")
+      .replace(/ ?\0[ \0]*(?=[.,;:!?]|$)/g, "")
+      .replace(/ ?\0[ \0]*/g, " ")
+      .trim();
+  }
+  return text;
+}
+
+/**
+ * Strips inline markdown (bold, links, code, citations) to plain text, without any URL or
+ * e-mail address: the summary goes out in an e-mail, where nothing of the report is a link.
+ */
 function plainInline(s: string): string {
-  return s
-    .replace(/!\[[^\]]*\]\([^)]*\)/g, "") // images
-    .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1") // links -> text
-    .replace(/\s*\[\d+(?:\s*[,–-]\s*\d+)*\]/g, "") // citation markers [1], [2,3]
-    .replace(/(\*\*|__)(.+?)\1/g, "$2")
-    .replace(/(\*|_)(.+?)\1/g, "$2")
-    .replace(/`([^`]+)`/g, "$1")
-    .replace(/<[^>]+>/g, "")
-    .replace(/\s+/g, " ")
-    .trim();
+  return withoutLinks(
+    s
+      .replace(/!\[[^\]]*\]\([^)]*\)/g, "") // images
+      .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1") // links -> text
+      .replace(/\s*\[\d+(?:\s*[,–-]\s*\d+)*\]/g, "") // citation markers [1], [2,3]
+      .replace(/(\*\*|__)(.+?)\1/g, "$2")
+      .replace(/(\*|_)(.+?)\1/g, "$2")
+      .replace(/`([^`]+)`/g, "$1")
+      .replace(/<(?:[a-z][a-z0-9+.-]{1,31}:|[^\s<>@]+@)[^\s<>]*>/gi, "\0") // autolinks
+      .replace(/<[^>]+>/g, "")
+  );
 }
 
 function clip(s: string, max: number): string {
@@ -46,6 +89,20 @@ function clip(s: string, max: number): string {
   const cut = s.slice(0, max - 1);
   const sp = cut.lastIndexOf(" ");
   return (sp > max * 0.6 ? cut.slice(0, sp) : cut).replace(/[\s,;:.]+$/, "") + "…";
+}
+
+/** clip() can cut a word into something link-shaped ("x@host.com-2024" → "x@host.com…"), so strip after it too. */
+function clipPlain(s: string, max: number): string {
+  return withoutLinks(clip(s, max));
+}
+
+/** Each line without a URL or address, keeping the lines and the spacing of those that had none. */
+function linkFreeLines(s: string): string {
+  // A "\0" line is cleaned too: an HTML parser drops NUL, joining the text around it.
+  return s
+    .split("\n")
+    .map((line) => (line.includes("\0") || line.search(LINKABLE) !== -1 ? withoutLinks(line) : line))
+    .join("\n");
 }
 
 /**
@@ -63,7 +120,7 @@ export function summarizeReport(markdown: string | null | undefined, maxLines = 
       if (/^#{1,6}\s/.test(l)) break; // next section
       if (!l || /^\|/.test(l) || /^-{3,}$/.test(l)) continue;
       const text = plainInline(l.replace(/^([-*+]|\d+[.)])\s+/, ""));
-      if (text) pick.push(clip(text, maxChars));
+      if (text) pick.push(clipPlain(text, maxChars));
     }
   }
   if (pick.length === 0) {
@@ -72,7 +129,7 @@ export function summarizeReport(markdown: string | null | undefined, maxLines = 
       const l = raw.trim();
       if (!l || /^#{1,6}\s/.test(l) || /^\|/.test(l) || /^-{3,}$/.test(l) || /^>/.test(l)) continue;
       const text = plainInline(l.replace(/^([-*+]|\d+[.)])\s+/, ""));
-      if (text) pick.push(clip(text, maxChars));
+      if (text) pick.push(clipPlain(text, maxChars));
     }
   }
   return pick;
@@ -144,8 +201,10 @@ export interface RenderedEmail {
 export function taskCompletedEmail(args: { name: string; taskId: string; title: string; result: string | null }): RenderedEmail {
   const url = `${config.appUrl}/tasks/${encodeURIComponent(args.taskId)}`;
   const summary = summarizeReport(args.result, 3);
-  const title = clip(args.title, 120);
-  const subject = `Your report is ready: ${clip(args.title, 70)}`;
+  // A title can be a model's text (the planner names an objective): no e-mail links anything in it.
+  const plainTitle = withoutLinks(args.title);
+  const title = clipPlain(plainTitle, 120);
+  const subject = `Your report is ready: ${clipPlain(plainTitle, 70)}`;
   const html = layout({
     preheader: summary[0] ?? "Your AI agent team has finished your task.",
     heading: "Your report is ready",
@@ -175,12 +234,13 @@ export function taskCompletedEmail(args: { name: string; taskId: string; title: 
 
 export function taskFailedEmail(args: { name: string; taskId: string; title: string; refundedCents: number }): RenderedEmail {
   const url = `${config.appUrl}/tasks/${encodeURIComponent(args.taskId)}`;
-  const title = clip(args.title, 120);
+  const plainTitle = withoutLinks(args.title);
+  const title = clipPlain(plainTitle, 120);
   const refund =
     args.refundedCents > 0
       ? `We refunded the full ${eur(args.refundedCents)} to the wallet that paid for it.`
       : "You were not charged for it.";
-  const subject = `Your task couldn't be completed: ${clip(args.title, 60)}`;
+  const subject = `Your task couldn't be completed: ${clipPlain(plainTitle, 60)}`;
   const html = layout({
     preheader: `${refund} You can retry it in one click.`,
     heading: "Your task couldn't be completed",
@@ -244,8 +304,9 @@ export function outcomeReadyEmail(args: {
 }): RenderedEmail {
   const url = objectiveUrl(args.objectiveId);
   const summary = summarizeReport(args.result, 3);
-  const title = clip(args.title, 120);
-  const subject = `Outcome ready: ${clip(args.title, 70)}`;
+  const plainTitle = withoutLinks(args.title);
+  const title = clipPlain(plainTitle, 120);
+  const subject = `Outcome ready: ${clipPlain(plainTitle, 70)}`;
   const html = layout({
     preheader: `${args.outcomeLabel} · ${args.verificationLabel}`,
     heading: "Your outcome is ready",
@@ -273,24 +334,29 @@ export function outcomeReadyEmail(args: {
 
 export function attentionEmail(args: { name: string; objectiveId: string; title: string; headline: string; detail: string }): RenderedEmail {
   const url = objectiveUrl(args.objectiveId);
-  const title = clip(args.title, 120);
-  const subject = `Needs your attention: ${clip(args.title, 60)}`;
+  const plainTitle = withoutLinks(args.title);
+  const title = clipPlain(plainTitle, 120);
+  const subject = `Needs your attention: ${clipPlain(plainTitle, 60)}`;
+  // The detail may be a model's text (the planner's question, a step's title): it links nothing. It
+  // keeps its lines (a question can list options); a line without a URL or an address stays as written.
+  const detail = linkFreeLines(clip(linkFreeLines(args.detail), 400));
   const html = layout({
     preheader: args.headline,
     heading: args.headline,
-    paragraphs: [`Hi ${escapeHtml(args.name || "there")},`, `<strong>${escapeHtml(title)}</strong>: ${escapeHtml(clip(args.detail, 400))}`],
+    paragraphs: [`Hi ${escapeHtml(args.name || "there")},`, `<strong>${escapeHtml(title)}</strong>: ${escapeHtml(detail)}`],
     button: { label: "Review it", url },
     footer: "task",
   });
-  const text = [`Hi ${args.name || "there"},`, "", `${args.headline}`, `"${title}": ${clip(args.detail, 400)}`, "", `Review it: ${url}`].join("\n");
+  const text = [`Hi ${args.name || "there"},`, "", `${args.headline}`, `"${title}": ${detail}`, "", `Review it: ${url}`].join("\n");
   return { subject, html, text };
 }
 
 export function executionFailedEmail(args: { name: string; objectiveId: string; title: string; refundedCents: number; reason: string }): RenderedEmail {
   const url = objectiveUrl(args.objectiveId);
-  const title = clip(args.title, 120);
+  const plainTitle = withoutLinks(args.title);
+  const title = clipPlain(plainTitle, 120);
   const refund = args.refundedCents > 0 ? `We refunded ${eur(args.refundedCents)} to your organization's balance.` : "You were not charged for it.";
-  const subject = `Execution stopped: ${clip(args.title, 60)}`;
+  const subject = `Execution stopped: ${clipPlain(plainTitle, 60)}`;
   const html = layout({
     preheader: refund,
     heading: "An execution couldn't be completed",

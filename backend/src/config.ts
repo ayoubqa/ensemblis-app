@@ -3,6 +3,8 @@
 // runs locally without setting any of them.
 
 import "dotenv/config";
+import { isIP } from "node:net";
+import { isPublicAddress } from "./research/netGuard";
 
 function int(name: string, fallback: number, min = 0): number {
   const raw = process.env[name];
@@ -174,11 +176,69 @@ export function isAdminEmail(email: string | null | undefined): boolean {
   return !!email && config.adminEmails.includes(email.trim().toLowerCase());
 }
 
-/** Human-readable web research provider, shown in the UI and owner dashboard. */
-export function searchProviderLabel(): string {
-  if (config.search.provider === "tavily") return "Tavily web search";
-  if (config.search.provider === "wikipedia") return "Wikipedia";
-  return "Off";
+export const DEFAULT_TAVILY_BASE_URL = "https://api.tavily.com";
+
+/**
+ * TAVILY_BASE_URL (no trailing slash) when it points web search somewhere other than the public
+ * Tavily API — a test stub or a proxy — else null. The label for it is research/search.ts searchProviderLabel.
+ */
+export function customTavilyBaseUrl(): string | null {
+  const url = (process.env.TAVILY_BASE_URL?.trim() || "").replace(/\/+$/, "");
+  return url && url.toLowerCase() !== DEFAULT_TAVILY_BASE_URL ? url : null;
+}
+
+/** Names that resolve only on this machine or a private network. */
+const LOCAL_NAME = /^(localhost|.*\.localhost|.*\.local|.*\.internal|.*\.lan|.*\.home\.arpa)$/i;
+
+/**
+ * True for a host on this machine or a private network: an IP literal outside public unicast space
+ * (loopback, private, link-local, ULA…), a loopback/internal name (also with a trailing dot) or a
+ * single-label name such as a Docker service ("ollama"). A hostname is never resolved here.
+ */
+export function isLocalHost(hostname: string): boolean {
+  const literal = hostname.replace(/^\[|\]$/g, "");
+  if (isIP(literal)) return !isPublicAddress(literal);
+  const host = literal.replace(/\.+$/, "");
+  return !host.includes(".") || LOCAL_NAME.test(host);
+}
+
+export const DEFAULT_OPENAI_BASE_URL = "https://api.groq.com/openai/v1";
+export const DEFAULT_OLLAMA_BASE_URL = "http://localhost:11434";
+const DEFAULT_ANTHROPIC_BASE_URL = "https://api.anthropic.com";
+/** The public model APIs this server knows (llmProvider aiProviderLabel names them). */
+const PUBLIC_MODEL_HOSTS = new Set(["api.groq.com", "api.openai.com", "openrouter.ai", "api.anthropic.com"]);
+
+/** Where model calls go: a hosted API, an endpoint on this machine or a private network, or a test stub. */
+export type ModelEndpoint = "hosted" | "local" | "stub";
+
+/**
+ * Where the configured AI provider's calls go, with the endpoint's host (never its path or
+ * credentials); null for the mock and an unknown provider.
+ *   stub    E2E_STUB=1 and an OpenAI-compatible or Anthropic base URL that is not a known public
+ *           model API: the stub stack (scripts/e2e-stack.mjs PROD_LIKE=1) — not a real model;
+ *   local   a host on this machine or a private network: self-hosted or a test endpoint, possibly a real model;
+ *   hosted  anything else.
+ */
+export function modelEndpoint(): { kind: ModelEndpoint; host: string } | null {
+  const provider = (process.env.AI_PROVIDER || "ollama").trim().toLowerCase();
+  const raw =
+    provider === "openai"
+      ? process.env.OPENAI_BASE_URL || DEFAULT_OPENAI_BASE_URL
+      : provider === "anthropic"
+        ? process.env.ANTHROPIC_BASE_URL || DEFAULT_ANTHROPIC_BASE_URL // the Anthropic SDK reads ANTHROPIC_BASE_URL itself
+        : provider === "ollama"
+          ? process.env.OLLAMA_BASE_URL || DEFAULT_OLLAMA_BASE_URL
+          : null;
+  if (!raw) return null;
+  let url: URL | null = null;
+  try {
+    url = new URL(raw.trim());
+  } catch {
+    /* unparseable: calls fail anyway */
+  }
+  const host = url?.host ?? "";
+  if (provider !== "ollama" && process.env.E2E_STUB === "1" && !PUBLIC_MODEL_HOSTS.has(url?.hostname.toLowerCase() ?? "")) return { kind: "stub", host };
+  return { kind: url && isLocalHost(url.hostname) ? "local" : "hosted", host };
 }
 
 const INSECURE_SECRETS = new Set(["", "change-me-to-a-long-random-string", "dev-secret-change-me", "changeme", "secret"]);
@@ -218,6 +278,27 @@ export function productionConfigWarnings(role: "api" | "worker" = "api"): string
   }
   if (provider === "ollama") {
     warnings.push("AI_PROVIDER=ollama in production: a hosted server usually can't reach an Ollama instance. Use AI_PROVIDER=openai.");
+  }
+  // A stub or local model endpoint is labelled as such in the UI; a warning only, so the stub stack (E2E_STUB=1) still starts.
+  const model = provider === "ollama" ? null : modelEndpoint();
+  const baseVar = provider === "anthropic" ? "ANTHROPIC_BASE_URL" : "OPENAI_BASE_URL";
+  if (model?.kind === "stub") {
+    warnings.push(`${baseVar} points at a test stub (${model.host || "an unparseable URL"}, E2E_STUB=1): its output is not a real model's, and the UI labels it a test stub endpoint. Unset E2E_STUB and ${baseVar} in production.`);
+  } else if (model?.kind === "local") {
+    warnings.push(`${baseVar} is on this machine or a private network (${model.host}): the UI labels it a local model endpoint. Fine for a self-hosted model; if it is a test stub, unset it in production.`);
+  }
+  const tavilyBase = customTavilyBaseUrl();
+  if (tavilyBase && config.search.provider === "tavily" && config.search.tavilyApiKey) {
+    let host = "an unparseable URL";
+    try {
+      host = new URL(tavilyBase).host;
+    } catch {
+      /* keep the generic wording */
+    }
+    warnings.push(
+      `TAVILY_BASE_URL is set (${host}): web search goes there instead of the public Tavily API, and the UI labels it a custom search endpoint. ` +
+        `It is meant for tests${process.env.E2E_STUB === "1" ? " (E2E_STUB=1: this is a stub stack)" : ""}; unset it in production.`
+    );
   }
   if (config.adminEmails.length && !config.email.enabled) {
     warnings.push("ADMIN_EMAILS is set but email isn't configured: admins must verify their address, so the owner dashboard stays locked until RESEND_API_KEY and EMAIL_FROM are set (or the address is verified with `npm run ops:verify-email`).");

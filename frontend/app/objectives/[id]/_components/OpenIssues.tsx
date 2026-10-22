@@ -7,7 +7,7 @@
 
 import type { Execution, Objective } from "@/lib/api";
 import { Icon, type IconName } from "@/components";
-import { collectOpenIssues, groupOpenIssues, resultStateOf, type OpenIssueSeverity } from "@/lib/openIssues";
+import { collectOpenIssues, deliveredNothing, groupOpenIssues, resultStateOf, type OpenIssueSeverity } from "@/lib/openIssues";
 
 /** Items shown per group before "and N more". */
 const SHOWN = 5;
@@ -19,20 +19,23 @@ const SEVERITY: Record<OpenIssueSeverity, { icon: IconName; text: string }> = {
 };
 
 export function OpenIssuesCard({ objective, execution }: { objective: Objective; execution: Execution }) {
+  const state = resultStateOf(execution);
   const issues = collectOpenIssues({
     verification: execution.verification,
     measurements: execution.measurements,
     criteria: objective.criteria,
     plan: execution.plan,
     steps: execution.steps,
-    resultState: resultStateOf(execution),
+    resultState: state,
     resultReasons: execution.resultReasons ?? [],
     exceptions: execution.exceptions,
   });
-  const groups = groupOpenIssues(issues);
+  const groups = groupOpenIssues(issues, state);
+  // A cancelled or failed run delivered no report: nothing to rely on, only what it left open.
+  const ended = deliveredNothing(state) ? (state === "cancelled" ? "was cancelled" : "failed") : null;
   return (
     <section
-      className={`cs-card cs-issues${issues.length ? "" : " is-clear"}`}
+      className={`cs-card cs-issues${issues.length || ended ? "" : " is-clear"}`}
       id="open-issues"
       aria-labelledby="open-issues-h"
       data-testid="open-issues"
@@ -40,7 +43,7 @@ export function OpenIssuesCard({ objective, execution }: { objective: Objective;
     >
       <div className="cs-issues-head">
         <span className="cs-issues-ic" aria-hidden="true">
-          <Icon name={issues.length ? "flag" : "check"} size={16} />
+          <Icon name={issues.length ? "flag" : ended ? "info" : "check"} size={16} />
         </span>
         <h3 id="open-issues-h">
           Open issues <span className="cs-count">{issues.length}</span>
@@ -48,11 +51,17 @@ export function OpenIssuesCard({ objective, execution }: { objective: Objective;
       </div>
       {issues.length === 0 ? (
         <p className="cs-issues-none">
-          Nothing open: no check failed or warned, no claim is unsupported by its evidence, every success criterion is met and nothing is waiting for your judgment.
+          {ended
+            ? `Nothing else is open, but this execution ${ended} before it delivered a result: there is no report.`
+            : "Nothing open: no check failed or warned, no claim is unsupported by its evidence, every success criterion is met and nothing is waiting for your judgment."}
         </p>
       ) : (
         <>
-          <p className="cs-issues-sub">What is unresolved in this result, and where to look. Recommended next action: resolve or accept each one before you rely on the report.</p>
+          <p className="cs-issues-sub">
+            {ended
+              ? `This execution ${ended} before it delivered a result, so there is no report to rely on. What it left open, and where to look. Recommended next action: start a new attempt once these are addressed.`
+              : "What is unresolved in this result, and where to look. Recommended next action: resolve or accept each one before you rely on the report."}
+          </p>
           {groups.map((g) => (
             <div key={g.kind} className="cs-issues-g">
               <h4>{g.title}</h4>

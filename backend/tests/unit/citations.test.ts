@@ -48,6 +48,86 @@ describe("unlinkUnknownUrls", () => {
     expect(unlinkUnknownUrls("(see https://fake.com/a)", allowed)).toBe("(see `https://fake.com/a`)");
   });
 
+  it("never allows a protocol-relative or non-http(s) destination, whatever its host", () => {
+    // Links and images keep their text: "//host" (also as escapes or references), other schemes.
+    for (const dest of [
+      "//research.example.org/x",
+      String.raw`\/\/evil.example/x`,
+      String.raw`/\evil.example`,
+      String.raw`\\\\evil.example`,
+      "&#47;&#47;evil.example",
+      "<//evil.example> \"t\"",
+      "javascript:alert(1)",
+      "JaVaScRiPt:alert(1)",
+      "&#106;avascript&colon;alert(1)",
+      "data:text/html;base64,PHNjcmlwdD4=",
+      "mailto:x@example.com",
+      "https:/evil.example",
+    ]) {
+      expect(unlinkUnknownUrls(`See [the page](${dest}) now.`, allowed)).toBe("See the page now.");
+    }
+    expect(unlinkUnknownUrls("![pixel](//evil.example/p.gif)", allowed)).toBe("pixel");
+    expect(unlinkUnknownUrls("[https://fake.com/a](//fake.com/a)", allowed)).toBe("`https://fake.com/a`");
+    // A reference definition's destination goes in backticks, as an unknown https:// one does.
+    expect(unlinkUnknownUrls("See [r].\n\n[r]: //evil.example/x", allowed)).toBe("See [r].\n\n[r]: `//evil.example/x`");
+    expect(unlinkUnknownUrls('[r]: javascript:alert(1) "t"', allowed)).toBe('[r]: `javascript:alert(1)` "t"');
+    expect(unlinkUnknownUrls("- [r]:\n  //evil.example/x", allowed)).toBe("- [r]:\n  `//evil.example/x`");
+    expect(unlinkUnknownUrls("[r]: https://fake.com/x", allowed)).toBe("[r]: `https://fake.com/x`");
+    // Autolinks with another scheme are wrapped like unknown https:// ones.
+    expect(unlinkUnknownUrls("<mailto:x@example.com> or <javascript:alert(1)>", allowed)).toBe("`mailto:x@example.com` or `javascript:alert(1)`");
+    // Unchanged: relative links, footnotes, a backslash path that isn't "//", allowed https://, code.
+    for (const md of [
+      "[a](/about), [b](#sec), [c](report.pdf), [d](?q=1) and [e](./a:b)",
+      String.raw`[a](\\evil.example) and [b](\/path)`,
+      "[^1]: //cdn.example/x is a path",
+      "[r]: https://research.example.org/x\n\n[ok](https://research.example.org/x) <https://example.com/a>",
+      "Use `[a](//evil.example)` here.",
+    ]) {
+      expect(unlinkUnknownUrls(md, allowed)).toBe(md);
+    }
+  });
+
+  it("treats a line as a reference definition only when CommonMark does", () => {
+    // Prose that only looks like one: the rest of the line isn't empty or a title, or the line starts
+    // or ends at inline code. Unchanged, nothing counted.
+    for (const md of [
+      "[Update]: Revenue: up 5% year on year [1].",
+      "[1]: Eurostat: Energy statistics 2024",
+      "- [Risk]: Note: currency exposure.",
+      "> [Quote]: Source: annual report",
+      "[Status]:\nPending: board approval.",
+      "## Key findings\n[Finding 1]: Pricing: €20–€40 per seat [2].\n[Finding 2]: Demand: strong in DE [3].",
+      "Run `npm ci` [step 2]: Note: this is slow.",
+      "Run `npm ci` [step 2]: Note:",
+      "[Step]: Run: `npm ci`",
+      '[r]: //evil.example "t" and more', // a paragraph to CommonMark, not a link
+    ]) {
+      expect(cleanOutputWithStats(md, 3, allowed)).toEqual({ text: md, removedCitations: 0, unlinkedUrls: 0 });
+    }
+    // Definitions in containers, with a title (escaped quotes, over two lines) or a destination glued to code.
+    expect(unlinkUnknownUrls("> - [r]: javascript:x", allowed)).toBe("> - [r]: `javascript:x`");
+    expect(unlinkUnknownUrls("1.  > [r]: //x", allowed)).toBe("1.  > [r]: `//x`");
+    expect(unlinkUnknownUrls("[r]: //evil.example 'it\\'s'", allowed)).toBe("[r]: `//evil.example` 'it\\'s'");
+    expect(unlinkUnknownUrls('[r]: //evil.example "two\nlines"\r\nNext.', allowed)).toBe('[r]: `//evil.example` "two\nlines"\r\nNext.');
+    expect(unlinkUnknownUrls("[r]: //evil.example`x`", allowed)).toBe("[r]: `//evil.example``x`");
+  });
+
+  it("stays linear on adversarial input", () => {
+    const fast = (run: () => unknown) => {
+      const t = performance.now();
+      run();
+      return performance.now() - t;
+    };
+    // Container markers that each could take the following space (exponential backtracking once).
+    for (const unit of ["> ", ">\t", "-  ", "1.  ", "> - 1. "]) {
+      expect(fast(() => cleanOutputWithStats(`${unit.repeat(40)}x`, 3, allowed))).toBeLessThan(50);
+    }
+    // Long runs of spaces around a definition's destination that isn't followed by a title.
+    for (const md of [`[a]:${" ".repeat(20000)}x y`, `[a]:${" ".repeat(20000)}\n${" ".repeat(20000)}x y`]) {
+      expect(fast(() => unlinkUnknownUrls(md, allowed))).toBeLessThan(50);
+    }
+  });
+
   it("keeps bare URLs on allowed domains, and doesn't touch code", () => {
     const md = "Source: https://research.example.org/eu and https://www.example.com/a. Code: `https://fake.com` stays.";
     expect(unlinkUnknownUrls(md, allowed)).toBe(md);
@@ -81,5 +161,12 @@ describe("cleanOutputWithStats", () => {
     const dirty = "A [5] https://fake.com/x";
     const first = cleanOutput(dirty, 1, []);
     expect(cleanOutputWithStats(first, 1, [])).toEqual({ text: first, removedCitations: 0, unlinkedUrls: 0 });
+  });
+
+  it("counts each unsafe destination once and is idempotent on them", () => {
+    const md = "A [x](//evil.example) and ![y](javascript:alert(1)) <mailto:a@b.example> [r].\n\n[r]: //evil.example";
+    const once = cleanOutputWithStats(md, 1, ["research.example.org"]);
+    expect(once).toEqual({ text: "A x and y `mailto:a@b.example` [r].\n\n[r]: `//evil.example`", removedCitations: 0, unlinkedUrls: 4 });
+    expect(cleanOutputWithStats(once.text, 1, ["research.example.org"])).toEqual({ text: once.text, removedCitations: 0, unlinkedUrls: 0 });
   });
 });

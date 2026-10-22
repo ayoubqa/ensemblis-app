@@ -307,6 +307,15 @@ function DefineOutcome() {
             </div>
           )}
 
+          {configLoaded && !config.mockAI && config.aiEndpoint === "stub" && (
+            <div className="ws-callout" role="note">
+              <Icon name="info" size={16} />
+              <p>
+                <b>Test stub endpoint.</b> This server&apos;s model calls go to a test stub, not a real model: plans and results are not real analysis.
+              </p>
+            </div>
+          )}
+
           {aiProblem && (
             <div className="ws-callout" role="note" data-testid="ai-problem">
               <Icon name="alert" size={16} />

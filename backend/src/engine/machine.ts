@@ -19,7 +19,7 @@ import type { Execution, ExecutionStep } from "@prisma/client";
 import { prisma } from "../db";
 import { classifyProviderError } from "../ai/errors";
 import { log, redact } from "../lib/log";
-import { onExecutionSettled } from "../lib/notify";
+import { EMAIL_DETAIL, onExecutionSettled } from "../lib/notify";
 import { HttpError } from "../lib/http";
 import { DailyLimitError } from "../lib/usageLimits";
 import { contextCompleteness, formatCompanyProfile, getCompanyContext } from "../context/service";
@@ -31,6 +31,7 @@ import { readRevisionInputs, runStep, StepError } from "./executor";
 import { learnFromExecution } from "./learning";
 import { addRevisionStep, failExecution, notifyAttention, openException, requestApproval, startInTx } from "./lifecycle";
 import { recordOutcome } from "./outcome";
+import { incompleteWork } from "./resultState";
 import { DEFAULT_CRITERIA, planObjective, type Plan, type PlanBlockedKind } from "./planner";
 import { titleFor } from "./objectives";
 import { eur, refundExecution } from "./billing";
@@ -125,6 +126,7 @@ async function planPhase(ex: Execution): Promise<void> {
     questionsSettled,
     kind: objective.kind,
     constraints: objective.constraints,
+    website: ctx.website,
   });
 
   if (plan.blocked) {
@@ -248,7 +250,8 @@ async function blockPlanning(ex: Execution, plan: Plan, blocked: NonNullable<Pla
   });
   if (!opened) return;
   log.info("execution.blocked", { executionId: ex.id, orgId: ex.orgId, objectiveId: ex.objectiveId, kind: "PROVIDER_UNAVAILABLE", reason: blocked.kind, exceptionId: opened });
-  notifyAttention(ex.id, BLOCKED_TITLE[blocked.kind], message);
+  // The message names the operator's settings (env vars, the provider's error): the e-mail says only what to do.
+  notifyAttention(ex.id, BLOCKED_TITLE[blocked.kind], EMAIL_DETAIL.planBlocked);
 }
 
 /**
@@ -292,6 +295,7 @@ async function afterPlan(executionId: string): Promise<void> {
     );
     if (opened) {
       log.info("execution.blocked", { executionId: ex.id, orgId: ex.orgId, objectiveId: ex.objectiveId, kind: "MISSING_INFORMATION", exceptionId: opened });
+      // The planner model's question: attentionEmail drops any URL or address from it.
       notifyAttention(ex.id, "The Chief of Staff has a question", blocking[0].question);
     }
     return;
@@ -433,7 +437,7 @@ async function runOneStep(ex: Execution, step: ExecutionStep, steps: ExecutionSt
   const started = Date.now();
   try {
     const out = await runStep({
-      execution: { id: ex.id, orgId: ex.orgId },
+      execution: { id: ex.id, orgId: ex.orgId, plan: ex.plan },
       objective,
       criteria: objective.criteria,
       step: fresh,
@@ -656,7 +660,8 @@ async function verifyPhase(ex: Execution): Promise<TickResult> {
     );
     if (opened) {
       log.info("execution.blocked", { executionId: ex.id, orgId: ex.orgId, objectiveId: ex.objectiveId, kind: "VERIFICATION_FAILED", reason: "unverified", exceptionId: opened });
-      notifyAttention(ex.id, "A result could not be verified", assessorError ?? v.summary);
+      // assessorError is the provider's error (env var names, HTTP codes): the console shows it, the e-mail doesn't.
+      notifyAttention(ex.id, "A result could not be verified", EMAIL_DETAIL.verifierUnavailable);
     }
     return {};
   }
@@ -704,7 +709,8 @@ async function verifyPhase(ex: Execution): Promise<TickResult> {
     );
     if (opened) {
       log.info("execution.blocked", { executionId: ex.id, orgId: ex.orgId, objectiveId: ex.objectiveId, kind: "VERIFICATION_FAILED", exceptionId: opened });
-      notifyAttention(ex.id, "A result failed verification", v.summary);
+      // v.summary quotes the AI verifier's free text (it read the report, URLs included): the console shows it, the e-mail doesn't.
+      notifyAttention(ex.id, "A result failed verification", EMAIL_DETAIL.verificationFailed);
     }
     return {};
   }
@@ -717,6 +723,9 @@ async function finalize(ex: Execution, model: ModelAssessment | null, accepted: 
   const latest = await prisma.verification.findFirst({ where: { executionId: ex.id }, orderBy: { round: "desc" }, select: { id: true, status: true } });
   const verificationStatus = latest?.status ?? null;
   const hasUnsupported = latest ? (await prisma.claimCheck.count({ where: { verificationId: latest.id, status: { in: ["UNSUPPORTED", "UNCITED"] } } })) > 0 : false;
+  // A skipped or failed work step, or research that didn't deliver, makes the result partial for any objective kind.
+  const steps = await prisma.executionStep.findMany({ where: { executionId: ex.id }, select: { kind: true, status: true, researchStatus: true, title: true } });
+  const partial = incompleteWork(steps, objective.kind).length > 0;
   const unverified = verificationStatus === "UNVERIFIED";
   const outcome = await prisma.$transaction((tx) =>
     recordOutcome(tx, {
@@ -727,6 +736,7 @@ async function finalize(ex: Execution, model: ModelAssessment | null, accepted: 
       objectiveKind: objective.kind,
       verificationStatus,
       hasUnsupported,
+      partial,
     })
   );
   await emit(prisma, {

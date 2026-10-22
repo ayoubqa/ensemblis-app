@@ -2,6 +2,7 @@
 import { describe, expect, it } from "vitest";
 import type { ClaimCheck, Evidence, Execution, ExecutionStep, Objective, OutcomeMeasurement, Verification } from "@prisma/client";
 import {
+  confirmedOutcomeOf,
   criteriaFromAssessment,
   scrubError,
   summarizeUsage,
@@ -11,6 +12,7 @@ import {
   toPublicPlan,
   toPublicResearch,
   toPublicStep,
+  toPublicWarnings,
   type FullExecution,
   type UsageLite,
 } from "../../src/engine/serialize";
@@ -207,6 +209,26 @@ describe("usedMockAI", () => {
   });
 });
 
+describe("endpoints", () => {
+  const stamped = { title: "Plan", steps: [], runtime: { modelEndpoint: "stub", searchEndpoint: "public" } };
+  const searched = (endpoint?: string) => ({ status: "ok", attempts: [{ query: "q", provider: "tavily", ok: true, resultCount: 3, ms: 9, ...(endpoint ? { endpoint } : {}) }] });
+
+  it("combine the plan's runtime stamp with the search attempts' markers, in lists and the full execution", () => {
+    const steps = [step(), step({ id: "st2", researchStatus: "ok", research: searched("custom") })];
+    expect(toExecutionSummary({ ...execution({ plan: stamped }), steps }).endpoints).toEqual({ model: "stub", search: "custom" });
+    expect(toPublicExecution(full({ plan: stamped, steps })).endpoints).toEqual({ model: "stub", search: "custom" });
+    expect(toExecutionSummary({ ...execution({ plan: stamped }), steps: [step({ researchStatus: "ok", research: searched("public") })] }).endpoints.search).toBe("public");
+    // Stamped, but no step searched: search not used.
+    expect(toExecutionSummary({ ...execution({ plan: stamped }), steps: [step()] }).endpoints).toEqual({ model: "stub", search: null });
+  });
+
+  it("are null for an execution from before they were recorded, whatever the server runs on now", () => {
+    const legacy = { ...execution({ plan: { title: "Plan", steps: [] } }), steps: [step({ researchStatus: "ok", research: searched() })] };
+    expect(toExecutionSummary(legacy).endpoints).toEqual({ model: null, search: null });
+    expect(toExecutionSummary({ ...execution(), steps: [step()] }).endpoints).toEqual({ model: null, search: null });
+  });
+});
+
 describe("execution summary", () => {
   it("carries resultState/resultReasons and keeps the AI-measured outcome apart from a person's confirmation", () => {
     const s = toExecutionSummary(
@@ -217,6 +239,17 @@ describe("execution summary", () => {
     expect(s.resultReasons.some((r) => /Competitor scan/.test(r))).toBe(true);
     expect(s.outcomeStatus).toBe("PARTIALLY_ACHIEVED");
     expect(s.confirmedOutcomeStatus).toBe("ACHIEVED");
+  });
+
+  it("an outcome confirmed before confirmedOutcomeStatus existed (outcomeConfirmedAt only) still counts as confirmed", () => {
+    // Back then a confirmation overwrote outcomeStatus: that value is the confirmed one.
+    const legacy = execution({ outcomeStatus: "ACHIEVED", confirmedOutcomeStatus: null, outcomeConfirmedAt: T1, outcomeConfirmedById: "u1" });
+    expect(confirmedOutcomeOf(legacy)).toBe("ACHIEVED");
+    expect(toExecutionSummary(legacy).confirmedOutcomeStatus).toBe("ACHIEVED");
+    expect(toPublicExecution(full({ ...legacy })).confirmedOutcomeStatus).toBe("ACHIEVED");
+    // Not confirmed: AI-assessed only. Confirmed after the change: the person's answer wins.
+    expect(toExecutionSummary(execution({ outcomeStatus: "ACHIEVED" })).confirmedOutcomeStatus).toBeNull();
+    expect(confirmedOutcomeOf(execution({ outcomeStatus: "ACHIEVED", confirmedOutcomeStatus: "NOT_ACHIEVED", outcomeConfirmedAt: T1 }))).toBe("NOT_ACHIEVED");
   });
 
   it("uses the objective kind from the objective", () => {
@@ -448,6 +481,31 @@ describe("measurements and plan", () => {
     expect(toPublicPlan({ ...base, blocked: { kind: "made_up", message: "x" } })!.blocked).toBeNull();
     expect(toPublicPlan(base)!.blocked).toBeNull();
     expect(toPublicExecution(full({ plan: { ...base, blocked: { kind: "config", message: "The AI provider isn't configured." } } })).plan!.blocked).toEqual({ kind: "config", message: "The AI provider isn't configured." });
+  });
+});
+
+describe("toPublicWarnings (the public shared report)", () => {
+  it("replaces provider and operator detail with public-safe wording, keeps the rest, and drops repeats", () => {
+    const warnings = [
+      "Research: web research in “Market scan” failed (All 3 search attempts failed — Tavily: Tavily rejected the API key (HTTP 401); skipped for 10 min).",
+      "Research: web research in “Pricing” returned no usable sources (skipped: today's search budget (SEARCH_DAILY_BUDGET=50) is used up).",
+      "Research: “Competitor scan” was skipped, so its work is missing from the result.",
+      "The AI verifier could not run: The AI provider's quota is exhausted (Owner: check the usage limits and credits of the account behind OPENAI_API_KEY.)",
+      "Claim support checked by text match only: the AI claim check could not run (HTTP 429 from api.groq.com).",
+      "Claim support checked by text match only for 3 more claims (the AI claim check covers the first 12).",
+      "Unsupported claim: \"The market doubled in 2024\"",
+    ];
+    const pub = toPublicWarnings(warnings);
+    expect(pub).toEqual([
+      "Web research was incomplete for part of this result.",
+      "Research: “Competitor scan” was skipped, so its work is missing from the result.",
+      "The AI verifier was unavailable for this result.",
+      "Claims were checked by text match only.",
+      "Claim support checked by text match only for 3 more claims (the AI claim check covers the first 12).",
+      "Unsupported claim: \"The market doubled in 2024\"",
+    ]);
+    expect(pub.join(" ")).not.toMatch(/Tavily|HTTP \d|SEARCH_DAILY_BUDGET|OPENAI_API_KEY|quota|groq/);
+    expect(toPublicWarnings([])).toEqual([]);
   });
 });
 

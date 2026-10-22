@@ -81,6 +81,9 @@ test("research brief: keyboard-only launch and approval → research, evidence, 
   await expect(webMeta.first()).toContainText("query “");
   await expect(webMeta.first()).toContainText("retrieved");
   await expect(page.getByTestId("evidence-meta").filter({ hasText: "Provided, not retrieved" }).first()).toBeVisible();
+  // Both modes search the local stub (TAVILY_BASE_URL), recorded with this execution: never shown as the public Tavily API.
+  await expect(page.getByTestId("search-endpoint-notice")).toBeVisible();
+  await expect(page.getByTestId("search-endpoint-notice")).toContainText("Custom search endpoint — sources come from TAVILY_BASE_URL, not the public Tavily API.");
 
   // ---- Verification: one verdict per criterion, with the evidence it relies on; typed claims. ----
   const verdicts = page.getByTestId("criterion-assessment");
@@ -104,12 +107,16 @@ test("research brief: keyboard-only launch and approval → research, evidence, 
     // The OpenAI-compatible stub reports usage (x_groq.usage): tokens are measured, not estimated — and no mock label.
     // (The stub replays the mock model's text over the real wire format: this is still not a real model.)
     await expect(page.getByTestId("mock-tag")).toHaveCount(0);
+    // E2E_STUB=1 with a model base URL that is not a public model API: labelled a test stub, not a real model.
+    await expect(page.getByTestId("endpoint-tag")).toContainText("Test stub endpoint");
     await expect(usage).not.toContainText("est.");
     for (const m of await stepMeta.all()) await expect(m).not.toContainText("est.");
   } else {
     // The mock model: its output is labelled as test output, and its token counts are estimates.
     await expect(page.getByTestId("mock-tag")).toBeVisible();
     await expect(page.getByTestId("mock-tag")).toHaveText("Mock AI — test output");
+    // The mock provider records no model endpoint: the mock label alone says what it is.
+    await expect(page.getByTestId("endpoint-tag")).toHaveCount(0);
     await expect(usage).toContainText("est.");
     await expect(stepMeta.first()).toContainText("est.");
   }
