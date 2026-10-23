@@ -17,6 +17,7 @@ import type {
   OutcomeMeasurement,
   SuccessCriterion,
   UsageEvent,
+  ValueRecord,
   Verification,
 } from "@prisma/client";
 import { getCapability, getExecutive } from "../org/registry";
@@ -653,7 +654,16 @@ export type FullExecution = Execution & {
   usageEvents?: UsageLite[];
   objective?: ({ kind: string | null } & LinkObjective) | null;
   organization?: LinkOrg | null;
+  /** The latest feedback answer (FEEDBACK_METRIC), when loaded. */
+  values?: ValueRecord[];
 };
+
+/** ValueRecord.metric of a person's "was this useful?" answer on a result (value 1 = useful, 0 = not; note = their comment). */
+export const FEEDBACK_METRIC = "feedback_useful";
+
+export function toPublicFeedback(v: Pick<ValueRecord, "value" | "note" | "createdAt">) {
+  return { useful: v.value >= 1, comment: v.note || null, at: v.createdAt.toISOString() };
+}
 
 export const FULL_EXECUTION_INCLUDE = {
   steps: { orderBy: { order: "asc" as const } },
@@ -667,6 +677,7 @@ export const FULL_EXECUTION_INCLUDE = {
   usageEvents: { select: USAGE_EVENT_SELECT },
   objective: { select: { kind: true, statement: true, contextNotes: true } },
   organization: LINK_ORG_INCLUDE,
+  values: { where: { metric: FEEDBACK_METRIC }, orderBy: { createdAt: "desc" as const }, take: 1 },
 };
 
 export function toPublicExecution(e: FullExecution) {
@@ -688,6 +699,8 @@ export function toPublicExecution(e: FullExecution) {
     steps: e.steps.map((s) => toPublicStep(s, e.evidence)),
     /** Step counts by where each stands (delivered / with gaps / unchecked / failed / skipped / not finished). */
     workLedger: workLedger(e.steps),
+    /** The person's latest "was this useful?" answer, or null. */
+    feedback: e.values?.[0] ? toPublicFeedback(e.values[0]) : null,
     evidence: e.evidence.map(toPublicExecutionEvidence),
     /** The domains the result may link to (linkDomainsOf); the report renderers show any other link as text. */
     linkDomains: linkDomainsOf(e),

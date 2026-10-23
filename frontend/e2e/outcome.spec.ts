@@ -43,6 +43,18 @@ test("define → plan → approve → execute (with refresh) → verify → shar
   expect(await page.getByTestId("verification-check").count()).toBeGreaterThanOrEqual(3);
   await expect(page.getByTestId("evidence-list").locator("li").first()).toBeVisible();
   await expect(page.getByTestId("outcome-panel")).toBeVisible();
+
+  // Every completed step shows its deliverable check; the outcome shows the work ledger.
+  expect(await page.getByTestId("step-deliverable").count()).toBe(await steps.count());
+  await expect(page.getByTestId("work-ledger")).toContainText(/^\s*Work: \d+ /);
+  // "Was this result useful?" — saved with the result, and kept on reload.
+  const feedback = page.getByTestId("result-feedback");
+  await feedback.getByRole("button", { name: "Useful", exact: true }).click();
+  await feedback.getByLabel("Comment (optional)").fill("Clear recommendation, sources I can check.");
+  await feedback.getByRole("button", { name: "Send" }).click();
+  await expect(feedback).toContainText("You said it was useful");
+  await page.reload();
+  await expect(page.getByTestId("result-feedback")).toContainText("You said it was useful");
   const title = (await page.locator(".ohead h1").textContent())?.trim() ?? "";
   expect(title.length).toBeGreaterThan(5);
 

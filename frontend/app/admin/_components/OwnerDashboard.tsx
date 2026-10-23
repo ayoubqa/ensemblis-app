@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { Avatar, Icon, LineChart, Skeleton, SkeletonText, useToast, type IconName } from "@/components";
-import { api, ApiError, type AdminEconomics, type AdminOverview } from "@/lib/api";
+import { api, ApiError, type AdminEconomics, type AdminOverview, type AdminValidation } from "@/lib/api";
 import { errorText } from "@/lib/errors";
 import { credits, eur, num, pct, plural, relativeTime, dateTime } from "@/lib/format";
 import { usePolling } from "@/lib/hooks";
@@ -255,6 +255,7 @@ function Body({ d }: { d: AdminOverview }) {
       </div>
 
       <Economics />
+      <Validation />
 
       <h2 className="sr-only">Recent activity</h2>
       <div className="op-lanes">
@@ -402,10 +403,18 @@ function Economics() {
             <div>
               <dt>Variable AI and tool cost</dt>
               <dd>
-                {eurMicros(e.variableCost.eurMicros)} {!e.variableCost.complete && <small>lower bound</small>}
-                <small className="op-econ-split">
-                  measured {eurMicros(e.variableCost.measuredEurMicros)} · estimated {eurMicros(e.variableCost.estimatedEurMicros)}
-                </small>
+                {e.variableCost.pricedEvents === 0 ? (
+                  <>
+                    — <small>not priced</small>
+                  </>
+                ) : (
+                  <>
+                    {eurMicros(e.variableCost.eurMicros)} {!e.variableCost.complete && <small>lower bound</small>}
+                    <small className="op-econ-split">
+                      measured {eurMicros(e.variableCost.measuredEurMicros)} · estimated {eurMicros(e.variableCost.estimatedEurMicros)}
+                    </small>
+                  </>
+                )}
               </dd>
             </div>
             <div>
@@ -442,6 +451,122 @@ function Economics() {
                 ? `Priced from PROVIDER_PRICING (${plural(e.pricing.configuredModels.length, "model")}${e.pricing.configuredTools.length ? `, ${plural(e.pricing.configuredTools.length, "tool")}` : ""}${e.pricing.asOf ? `, checked ${e.pricing.asOf}` : ", no check date"}).${e.pricing.stale ? ` These prices are ${num(e.pricing.ageDays ?? 0)} days old: re-check them.` : ""}`
                 : "No prices configured (PROVIDER_PRICING): usage is recorded but not priced, so cost and margin stay blank."}
             {gaps.length > 0 && ` Not in the cost: ${gaps.join(", ")}.`} {e.creditValueNote} Excluded: {e.excludedCosts.join(", ")}.
+          </p>
+        </>
+      )}
+    </section>
+  );
+}
+
+const pctOrDash = (v: number | null) => (v == null ? "—" : pct(v));
+
+/** Market validation, last 30 days (GET /api/admin/validation): sign-up → verified result → repeat use, and feedback. */
+function Validation() {
+  const [v, setV] = useState<AdminValidation | null>(null);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    api.adminValidation(30).then(setV, () => setFailed(true));
+  }, []);
+  if (failed) return null;
+  const funnel = v
+    ? ([
+        ["Signed up", v.activation.signups, null],
+        ["Defined an objective", v.activation.definedObjective, v.activation.rates.definedObjective],
+        ["Got a completed result", v.activation.completedResult, v.activation.rates.completedResult],
+        ["Got a verified result", v.activation.verifiedResult, v.activation.rates.verifiedResult],
+        ["Came back (2+ days)", v.activation.cameBack, v.activation.rates.cameBack],
+      ] as const)
+    : [];
+  const rs = v?.resultStates;
+  const exc = v ? Object.entries(v.failures.exceptionsByKind).filter(([, n]) => n > 0) : [];
+  return (
+    <section className="op-panel op-econ" aria-labelledby="h-val" data-testid="validation-panel">
+      <div className="op-chart-h" style={{ padding: "16px 18px 4px", margin: 0 }}>
+        <h3 id="h-val">Market validation · last 30 days</h3>
+        <span className="op-meta">internal — operator accounts excluded</span>
+      </div>
+      {!v ? (
+        <div style={{ padding: "8px 18px 18px" }}>
+          <SkeletonText lines={2} />
+        </div>
+      ) : (
+        <>
+          <ol className="op-funnel" aria-label="Activation funnel for people who signed up in the period">
+            {funnel.map(([label, n, r]) => (
+              <li key={label}>
+                <span className="op-funnel-n">{num(n)}</span>
+                <span className="op-funnel-l">{label}</span>
+                {r != null && <span className="op-funnel-r">{pct(r)}</span>}
+              </li>
+            ))}
+          </ol>
+          <dl className="op-econ-grid">
+            <div>
+              <dt>Executions completed</dt>
+              <dd>
+                {num(v.executions.completed)} <small>of {num(v.executions.started)} · {pctOrDash(v.executions.completionRate)}</small>
+              </dd>
+            </div>
+            <div>
+              <dt>Verified results</dt>
+              <dd>
+                {num((rs?.verified ?? 0) + (rs?.verified_with_warnings ?? 0))}{" "}
+                <small>
+                  {num(rs?.partial ?? 0)} partial · {num(rs?.unverified ?? 0)} unverified · {num(rs?.accepted_failed_verification ?? 0)} failed & accepted
+                </small>
+              </dd>
+            </div>
+            <div>
+              <dt>Outcome confirmed by a person</dt>
+              <dd>
+                {num(v.outcomes.confirmedByPerson)} <small>{v.outcomes.agreementRate == null ? "no confirmations yet" : `${pct(v.outcomes.agreementRate)} agree with the AI`}</small>
+              </dd>
+            </div>
+            <div>
+              <dt>Useful, per feedback</dt>
+              <dd>
+                {pctOrDash(v.feedback.usefulRate)} <small>{plural(v.feedback.responses, "answer")}</small>
+              </dd>
+            </div>
+            <div>
+              <dt>Credits per completed execution</dt>
+              <dd>{v.credits.perCompletedExecution == null ? "—" : credits(v.credits.perCompletedExecution)}</dd>
+            </div>
+            <div>
+              <dt>Variable cost per completed execution</dt>
+              <dd>
+                {eurMicros(v.variableCost.perCompletedExecutionEurMicros)} {!v.variableCost.complete && <small>incomplete pricing</small>}
+              </dd>
+            </div>
+            <div>
+              <dt>Failures</dt>
+              <dd>
+                {num(v.failures.executionsFailed)}{" "}
+                <small>
+                  {num(v.failures.stepFailures)} step failures{exc.length ? ` · ${exc.map(([k, n]) => `${num(n)} ${k.toLowerCase().replace(/_/g, " ")}`).join(" · ")}` : ""}
+                </small>
+              </dd>
+            </div>
+            <div>
+              <dt>Repeat use</dt>
+              <dd>
+                {num(v.repeat.ranOnSeveralDays)} <small>of {plural(v.repeat.activeAccounts, "active account")} · {num(v.repeat.returningAccounts)} returning</small>
+              </dd>
+            </div>
+          </dl>
+          {v.feedback.recentComments.length > 0 && (
+            <ul className="op-fb-list" aria-label="Latest feedback comments">
+              {v.feedback.recentComments.map((c, i) => (
+                <li key={`${c.at}-${i}`}>
+                  <span className={`op-fb-v ${c.useful ? "is-up" : "is-down"}`}>{c.useful ? "Useful" : "Not useful"}</span> {c.comment}{" "}
+                  <span className="op-meta">{relativeTime(c.at)}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+          <p className="op-meta op-econ-note">
+            Activation follows people who signed up in the period ({plural(v.guestTrials, "guest trial")} not included); usage, outcomes and feedback cover every customer execution
+            started in the period. {v.activation.medianHoursToFirstResult != null && `Median time from sign-up to a first result: ${v.activation.medianHoursToFirstResult} h.`}
           </p>
         </>
       )}

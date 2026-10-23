@@ -117,7 +117,7 @@ export function summarizeCosts(rows: UsageRow[]): CostSummary {
 /** Free, keyless search providers have no per-call cost. */
 const FREE_SEARCH = new Set(["wikipedia"]);
 
-function costRowsWhere(where: object) {
+export function costRowsWhere(where: object) {
   return prisma.usageEvent.findMany({
     where,
     select: { kind: true, provider: true, ok: true, estimated: true, tokensIn: true, tokensOut: true, cachedTokensIn: true, costMicros: true, costCurrency: true },
@@ -125,7 +125,7 @@ function costRowsWhere(where: object) {
 }
 
 /** Rows that can carry a variable cost: model calls and paid search. */
-function billable<T extends { kind: string; provider: string }>(rows: T[]): T[] {
+export function billable<T extends { kind: string; provider: string }>(rows: T[]): T[] {
   return rows.filter((r) => r.kind === "llm" || (r.kind === "search" && !FREE_SEARCH.has(r.provider)));
 }
 

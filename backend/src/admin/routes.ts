@@ -5,6 +5,7 @@
 // GET /api/admin/overview -> AdminOverview
 // GET /api/admin/economics?days=30&margin=0.75 -> internal unit economics (billing/economics.ts)
 // GET /api/admin/executions/:id/economics -> one execution's credits, variable cost and margin
+// GET /api/admin/validation?days=30 -> market-validation metrics (admin/validation.ts)
 
 import { Router } from "express";
 import type { NextFunction, Response } from "express";
@@ -19,6 +20,7 @@ import { effectiveSearchProvider, searchProviderLabel } from "../research/search
 import { reconcileWallets } from "../lib/ledger";
 import { economicsSummary, executionEconomics } from "../billing/economics";
 import { premiumStatus } from "../ai/premium";
+import { validationMetrics } from "./validation";
 import { HttpError } from "../lib/http";
 
 const router = Router();
@@ -202,6 +204,15 @@ router.get(
     const margin = numberParam(req.query.margin, 0.75, 0, 0.95);
     res.set("Cache-Control", "no-store");
     res.json(await economicsSummary(days, margin));
+  })
+);
+
+router.get(
+  "/validation",
+  ah<AuthedRequest>(async (req, res) => {
+    const days = Math.round(numberParam(req.query.days, 30, 1, 365));
+    res.set("Cache-Control", "no-store");
+    res.json(await validationMetrics(days));
   })
 );
 

@@ -363,6 +363,19 @@ production database from a local checkout:
 cd backend && DATABASE_URL="<production URL>" npm run ops:verify-email -- you@example.com
 ```
 
+
+**Owner dashboard: economics and market validation.** Two internal panels (never
+shown to customers; `GET /api/admin/economics` and `GET /api/admin/validation`):
+unit economics (credits consumed, measured and estimated variable cost, cash
+collected, fixed plans and fees when configured — none of it net profit), and
+market validation for the last 30 days: people who signed up → defined an
+objective → got a completed result → got a verified result → came back, plus
+completion and result states, outcomes a person confirmed (and how often they
+agree with the AI), credits and variable cost per completed execution, failures
+by kind, repeat use and "Was this result useful?" answers with the latest
+comments. It is derived from existing records (no tracking scripts, no prompt or
+result text); operator accounts (`ADMIN_EMAILS`) are left out.
+
 ## 7. Rollback (application only — the database stays)
 
 The migration is additive, so rolling back never touches the database. But
