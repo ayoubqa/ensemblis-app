@@ -6,6 +6,7 @@ import "dotenv/config";
 import fs from "node:fs";
 import path from "node:path";
 import { productionConfigProblems, productionConfigWarnings } from "./config";
+import { premiumConfigWarnings } from "./ai/premium";
 import { prisma } from "./db";
 import { log } from "./lib/log";
 import { aiProviderLabel } from "./ai/llmProvider";
@@ -40,7 +41,7 @@ async function main() {
     for (const p of problems) log.error("config.problem", { problem: p });
     process.exit(1);
   }
-  for (const w of productionConfigWarnings("worker")) log.warn("config.warning", { warning: w });
+  for (const w of [...productionConfigWarnings("worker"), ...premiumConfigWarnings()]) log.warn("config.warning", { warning: w });
   await prisma.$queryRaw`SELECT 1`;
   // The API applies migrations at boot. During a deploy this new worker can start first: running new
   // code against the old schema would fail every job (and fail + refund executions), so wait.

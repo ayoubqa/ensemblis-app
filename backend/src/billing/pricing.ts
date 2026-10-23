@@ -12,7 +12,16 @@
 // A model key may be "<provider>:<model>" or just "<model>". An event whose
 // model or tool has no configured price gets no cost (null) — reported as
 // "unpriced", never estimated from a default. Prices change: keep the JSON in
-// the deployment's environment, not in code.
+// the deployment's environment (render.yaml), not in code.
+//
+// Optional, for the economics report:
+//   "asOf": "2026-10-23"                         date the prices were checked (older than
+//                                                PRICING_STALE_DAYS is flagged as stale)
+//   "sources": ["https://…"]                     where they were checked
+//   "fixedMonthlyEur": {"render": 0, "neon": 0}  hosting/database plans, EUR per month,
+//                                                allocated pro rata over the report period
+//   "paymentFees": {"percent": 1.5, "fixedEurCents": 25}  card fee per completed purchase
+// Anything not configured is reported as "not configured", never as zero.
 
 import { z } from "zod";
 import { config } from "../config";
@@ -31,6 +40,12 @@ const PricingSchema = z.object({
   tools: z.record(ToolPrice).default({}),
   /** EUR per 1 unit of each currency. EUR itself is implicit (1). */
   fx: z.record(z.number().positive()).default({}),
+  asOf: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "asOf must be YYYY-MM-DD").optional(),
+  sources: z.array(z.string().max(300)).max(20).optional(),
+  /** Fixed plans (hosting, database), EUR per month. */
+  fixedMonthlyEur: z.record(z.number().nonnegative()).optional(),
+  /** Payment processing fee per completed purchase. */
+  paymentFees: z.object({ percent: z.number().min(0).max(100), fixedEurCents: z.number().nonnegative() }).optional(),
 });
 export type PricingTable = z.infer<typeof PricingSchema>;
 
@@ -53,6 +68,28 @@ export function pricingTable(): { table: PricingTable; problem: string | null } 
   }
   cached = { raw, table, problem };
   return cached;
+}
+
+/** Prices checked longer ago than this are flagged on the owner dashboard. */
+export const PRICING_STALE_DAYS = 90;
+
+/** What the economics report can say about the configured prices (no prices themselves). */
+export function pricingStatus(now = new Date()) {
+  const { table, problem } = pricingTable();
+  const asOf = table.asOf ?? null;
+  const ageDays = asOf ? Math.floor((now.getTime() - Date.parse(`${asOf}T00:00:00Z`)) / 86_400_000) : null;
+  return {
+    configuredModels: Object.keys(table.models),
+    configuredTools: Object.keys(table.tools),
+    fxCurrencies: Object.keys(table.fx),
+    asOf,
+    ageDays,
+    stale: ageDays != null && ageDays > PRICING_STALE_DAYS,
+    sources: table.sources ?? [],
+    fixedCostsConfigured: table.fixedMonthlyEur != null,
+    paymentFeesConfigured: table.paymentFees != null,
+    problem,
+  };
 }
 
 export interface PricedCost {

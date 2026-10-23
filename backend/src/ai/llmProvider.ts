@@ -35,6 +35,8 @@ import { recordUsage } from "../lib/usage";
 import { log, redact } from "../lib/log";
 import { DEFAULT_OLLAMA_BASE_URL, DEFAULT_OPENAI_BASE_URL, mockAIForbidden, modelEndpoint, type ModelEndpoint } from "../config";
 import { mockLLM } from "./mockProvider";
+import { notePremiumSpend, onPremiumFailure, premiumRouteFor, premiumSettings, type PremiumSettings } from "./premium";
+import { priceModelCall } from "../billing/pricing";
 
 export type Provider = "ollama" | "openai" | "anthropic" | "mock";
 export type ModelTier = "main" | "fast";
@@ -574,19 +576,52 @@ function applyOpenAIChunk(
   }
 }
 
-async function runWithOpenAI(systemPrompt: string, userContent: string, opts: LLMOptions, sink: TextSink): Promise<LLMResult> {
-  const apiKey = process.env.OPENAI_API_KEY?.trim();
+/** One OpenAI-compatible endpoint + model; the names of its settings appear in operator-facing errors. */
+export interface OpenAIRoute {
+  baseUrl: string;
+  apiKey: string | undefined;
+  model: string;
+  maxTokens: number;
+  reasoningEffort: string;
+  keyVar: string;
+  modelVar: string;
+}
+
+/** The standard route: OPENAI_BASE_URL / OPENAI_API_KEY / OPENAI_MODEL (the fallback for the premium route). */
+function standardRoute(opts: LLMOptions): OpenAIRoute {
+  return {
+    baseUrl: openaiBaseUrl(),
+    apiKey: process.env.OPENAI_API_KEY?.trim(),
+    model: openaiModel(opts.model ?? "main"),
+    // Reasoning models (gpt-oss, o-series) spend part of this budget "thinking" before answering.
+    maxTokens: opts.maxTokens || Number(process.env.OPENAI_MAX_TOKENS) || 8192,
+    reasoningEffort: process.env.OPENAI_REASONING_EFFORT?.trim() || "",
+    keyVar: "OPENAI_API_KEY",
+    modelVar: "OPENAI_MODEL / OPENAI_FAST_MODEL",
+  };
+}
+
+function premiumRoute(s: PremiumSettings, opts: LLMOptions): OpenAIRoute {
+  const cap = opts.maxTokens || Number(process.env.OPENAI_MAX_TOKENS) || 8192;
+  return {
+    baseUrl: s.baseUrl,
+    apiKey: s.apiKey,
+    model: s.model,
+    maxTokens: s.maxTokens ? Math.min(cap, s.maxTokens) : cap,
+    reasoningEffort: s.reasoningEffort,
+    keyVar: "PREMIUM_API_KEY",
+    modelVar: "PREMIUM_MODEL",
+  };
+}
+
+async function runWithOpenAI(systemPrompt: string, userContent: string, opts: LLMOptions, sink: TextSink, route: OpenAIRoute = standardRoute(opts)): Promise<LLMResult> {
+  const { apiKey, baseUrl, model, maxTokens, reasoningEffort } = route;
   if (!apiKey) {
     throw new Error(
-      "The AI provider isn't configured: OPENAI_API_KEY is missing on the server. " +
+      `The AI provider isn't configured: ${route.keyVar} is missing on the server. ` +
         "(Owner: add your Groq/OpenAI-compatible API key to the backend's environment variables.)"
     );
   }
-  const baseUrl = openaiBaseUrl();
-  const model = openaiModel(opts.model ?? "main");
-  // Reasoning models (gpt-oss, o-series) spend part of this budget "thinking" before answering.
-  const maxTokens = opts.maxTokens || Number(process.env.OPENAI_MAX_TOKENS) || 8192;
-  const reasoningEffort = process.env.OPENAI_REASONING_EFFORT?.trim() || "";
   const requestBody = JSON.stringify(
     openaiRequestBody({ baseUrl, model, system: systemPrompt, user: userContent, maxTokens, temperature: opts.temperature, reasoningEffort })
   );
@@ -707,7 +742,7 @@ async function runWithOpenAI(systemPrompt: string, userContent: string, opts: LL
     // A 429 that means "quota" — exhausted credits, a per-day window, or a Retry-After longer than
     // we'd wait — fails now instead of burning the remaining retries on requests the provider will reject.
     if (res.status === 429 && ((hintedWait !== null && hintedWait > MAX_RETRY_WAIT_MS) || QUOTA_BODY_RE.test(body))) {
-      throw new Error(quotaExhaustedMessage(hintedWait ?? waitFromErrorBody(body), "the account behind OPENAI_API_KEY"));
+      throw new Error(quotaExhaustedMessage(hintedWait ?? waitFromErrorBody(body), `the account behind ${route.keyVar}`));
     }
     if (RETRYABLE.has(res.status) && attempt < MAX_RETRIES && !sink.emitted) {
       const wait = backoffMs(attempt, retryAfter);
@@ -721,14 +756,14 @@ async function runWithOpenAI(systemPrompt: string, userContent: string, opts: LL
     if (res.status === 401 || res.status === 403) {
       throw new Error(
         "The AI provider rejected the server's API key (invalid or revoked). " +
-          "(Owner: check OPENAI_API_KEY in the backend's environment variables.)"
+          `(Owner: check ${route.keyVar} in the backend's environment variables.)`
       );
     }
     if (res.status === 429) throw new Error(RATE_LIMITED_MESSAGE);
     if (res.status === 413) throw new Error(TOO_LARGE_MESSAGE);
     if (res.status === 404) {
       const detail = providerDetail(body);
-      throw new Error(`The AI provider doesn't recognise the model "${model}" (check OPENAI_MODEL / OPENAI_FAST_MODEL).${detail ? ` ${detail}` : ""}`);
+      throw new Error(`The AI provider doesn't recognise the model "${model}" (check ${route.modelVar}).${detail ? ` ${detail}` : ""}`);
     }
     if (res.status >= 500) {
       throw new Error(`The AI provider is having problems right now (HTTP ${res.status}). Please try again later.`);
@@ -888,18 +923,50 @@ export async function runLLM(systemPrompt: string, userContent: string, opts: LL
   const tier: ModelTier = opts.model === "fast" ? "fast" : "main";
   const sink = new TextSink(opts.onDelta);
   return getLimiter(tier).run(async () => {
-    const started = Date.now();
+    let started = Date.now();
     const meta = { provider, tier, purpose: opts.purpose ?? "other", executionId: opts.executionId ?? undefined };
+    /** The model the current attempt went to (the premium route's, until it falls back). */
+    let attemptModel = modelFor(provider, tier);
     try {
-      const result = testHandler
-        ? await runWithHandler(testHandler, provider, systemPrompt, userContent, opts, sink)
-        : provider === "mock"
-          ? await runWithHandler(mockLLM, provider, systemPrompt, userContent, opts, sink)
-          : provider === "anthropic"
-            ? await runWithAnthropic(systemPrompt, userContent, opts, sink)
-            : provider === "openai"
-              ? await runWithOpenAI(systemPrompt, userContent, opts, sink)
-              : await runWithOllama(systemPrompt, userContent, opts, sink);
+      let result: LLMResult;
+      if (testHandler) result = await runWithHandler(testHandler, provider, systemPrompt, userContent, opts, sink);
+      else if (provider === "mock") result = await runWithHandler(mockLLM, provider, systemPrompt, userContent, opts, sink);
+      else if (provider === "anthropic") result = await runWithAnthropic(systemPrompt, userContent, opts, sink);
+      else if (provider === "openai") {
+        const premium = await premiumRouteFor(opts.purpose, tier);
+        let premiumResult: LLMResult | null = null;
+        if (premium.use) {
+          attemptModel = premium.settings.model;
+          try {
+            premiumResult = await runWithOpenAI(systemPrompt, userContent, opts, sink, premiumRoute(premium.settings, opts));
+          } catch (err) {
+            // Fall back to the standard route only while nothing reached the caller (no duplicated live text).
+            const { fallBack, kind } = onPremiumFailure(err);
+            if (sink.emitted || !fallBack) throw err;
+            const message = err instanceof Error ? err.message : String(err);
+            log.warn("llm.premium_fallback", { ...meta, model: attemptModel, fallbackModel: modelFor(provider, tier), kind, error: message });
+            void recordUsage({
+              kind: "llm",
+              provider,
+              model: attemptModel,
+              tokensIn: approxTokens(systemPrompt + userContent),
+              tokensOut: 0,
+              ok: false,
+              taskId: opts.taskId ?? null,
+              executionId: opts.executionId ?? null,
+              stepId: opts.stepId ?? null,
+              latencyMs: Date.now() - started,
+              purpose: meta.purpose,
+              estimated: true,
+              error: message,
+            }).catch(() => undefined);
+            attemptModel = modelFor(provider, tier);
+            started = Date.now();
+          }
+        }
+        result = premiumResult ?? (await runWithOpenAI(systemPrompt, userContent, opts, sink));
+        if (premiumResult) notePremiumSpend(result.model, priceModelCall({ provider, model: result.model, tokensIn: result.tokensIn, cachedTokensIn: result.cachedTokensIn, tokensOut: result.tokensOut }));
+      } else result = await runWithOllama(systemPrompt, userContent, opts, sink);
       const latencyMs = Date.now() - started;
       log.info("llm.call", { ...meta, model: result.model, latencyMs, tokensIn: result.tokensIn, tokensOut: result.tokensOut, tokensEstimated: result.tokensEstimated });
       void recordUsage({
@@ -922,12 +989,12 @@ export async function runLLM(systemPrompt: string, userContent: string, opts: LL
     } catch (err) {
       const latencyMs = Date.now() - started;
       const message = err instanceof Error ? err.message : String(err);
-      log.warn("llm.call_failed", { ...meta, model: modelFor(provider, tier), latencyMs, error: message });
+      log.warn("llm.call_failed", { ...meta, model: attemptModel, latencyMs, error: message });
       // A failed call's token counts are always estimates (the provider never reported usage).
       void recordUsage({
         kind: "llm",
         provider,
-        model: modelFor(provider, tier),
+        model: attemptModel,
         tokensIn: approxTokens(systemPrompt + userContent),
         tokensOut: approxTokens(sink.text),
         ok: false,
@@ -1010,7 +1077,10 @@ export function aiProviderLabel(): string {
   } catch {
     return "Unconfigured";
   }
-  const label = modelLabel(provider);
+  // Named only when it can actually serve calls (configured and priced; see ai/premium.ts).
+  const s = provider === "openai" ? premiumSettings() : null;
+  const premium = s && priceModelCall({ provider, model: s.model, tokensIn: 1, tokensOut: 1 }) ? s : null;
+  const label = premium ? `${premium.model} with ${modelLabel(provider)} as fallback` : modelLabel(provider);
   const endpoint = provider === "mock" ? null : modelEndpoint();
   if (endpoint?.kind === "stub") return `Test stub endpoint (E2E_STUB=1) — ${label}, not a real model`;
   if (endpoint?.kind === "local") return `Local model endpoint (${endpoint.host}) — ${label}`;

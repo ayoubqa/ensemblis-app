@@ -1043,7 +1043,7 @@ model ValueRecord {
   objectiveId  String?
   metric       String // execution_cost | estimated_hours_returned | cycle_time | criteria_met | objective_achieved
   value        Float
-  unit         String
+  unit         String // execution_cost: "credits" ("eur_cents" on rows written before the credits release — same integer)
   isEstimate   Boolean      @default(false)
   note         String       @default("")
   createdAt    DateTime     @default(now())

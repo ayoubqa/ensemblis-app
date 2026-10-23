@@ -103,11 +103,35 @@ services:
         value: "8192"
       - key: OPENAI_FAST_MODEL
         value: openai/gpt-oss-20b
+      # Optional premium model for plan/step/verify calls, with Groq above as the fallback. OFF until
+      # PREMIUM_API_KEY (an api.openai.com key, not the Groq key) is set; spend is capped per UTC day
+      # from priced usage (PROVIDER_PRICING). See DEPLOYMENT.md §2.
+      - key: PREMIUM_MODEL
+        value: gpt-5.5
+      - key: PREMIUM_API_KEY # OpenAI API key; leave empty to keep every call on Groq
+        sync: false
+      - key: PREMIUM_REASONING_EFFORT
+        value: low
+      - key: PREMIUM_DAILY_BUDGET_EUR
+        value: "2"
       # Groq's free tier allows few tokens per minute: one model call at a time per process.
       - key: MAX_CONCURRENT_LLM
         value: "1"
       - key: LLM_TIMEOUT_MS
         value: "120000"
+
+      # --- internal cost accounting (owner dashboard only; never shown to customers) ---
+      # List prices checked on 2026-10-23 against the providers' own pages (listed in "sources"):
+      # Groq gpt-oss-120b $0.15 in / $0.075 cached / $0.60 out, gpt-oss-20b $0.075 / $0.037 / $0.30,
+      # OpenAI gpt-5.5 $5 / $0.50 / $30 per million tokens (standard tier, prompts under 272K tokens);
+      # Tavily basic search 1 credit = $0.008 pay-as-you-go (the 1,000 free monthly credits are not
+      # deducted, so search cost is an upper bound); 1 USD = 0.8925 EUR (ECB reference rate
+      # 22 Oct 2026: EUR 1 = USD 1.1205). Re-check and update "asOf" when prices change: the owner
+      # dashboard flags prices older than 90 days. Fixed hosting plans and payment fees are left
+      # unconfigured ("fixedMonthlyEur", "paymentFees" — see DEPLOYMENT.md) so they are reported as
+      # unknown rather than zero.
+      - key: PROVIDER_PRICING
+        value: '{"asOf":"2026-10-23","sources":["https://console.groq.com/docs/model/openai/gpt-oss-120b","https://console.groq.com/docs/model/openai/gpt-oss-20b","https://developers.openai.com/api/docs/models/gpt-5.5","https://docs.tavily.com/documentation/api-credits","https://www.ecb.europa.eu/stats/policy_and_exchange_rates/euro_reference_exchange_rates/html/index.en.html"],"models":{"openai/gpt-oss-120b":{"inputPerMTok":0.15,"cachedInputPerMTok":0.075,"outputPerMTok":0.6,"currency":"USD"},"openai/gpt-oss-20b":{"inputPerMTok":0.075,"cachedInputPerMTok":0.037,"outputPerMTok":0.3,"currency":"USD"},"gpt-5.5":{"inputPerMTok":5,"cachedInputPerMTok":0.5,"outputPerMTok":30,"currency":"USD"}},"tools":{"search:tavily":{"perCall":0.008,"currency":"USD"}},"fx":{"USD":0.8925}}'
 
       # --- cost & abuse protection ---
       - key: STARTING_CREDITS_CENTS
@@ -128,7 +152,7 @@ services:
       # --- guest trial ("try without an account") ---
       - key: GUEST_TRIAL_ENABLED
         value: "true"
-      - key: GUEST_CREDITS_CENTS # covers one execution (plans are capped at 7 steps ≈ €23 incl. verification)
+      - key: GUEST_CREDITS_CENTS # credits; covers one execution (plans are capped at 7 steps ≈ 2,300 credits incl. verification)
         value: "5000"
       - key: GUEST_MAX_TASKS # executions a guest may start
         value: "1"

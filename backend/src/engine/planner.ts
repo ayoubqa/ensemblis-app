@@ -39,6 +39,7 @@ import {
   type ExecutiveKey,
 } from "../org/registry";
 import { terms } from "../context/retrieval";
+import { formatCredits } from "../billing/credits";
 import { redact } from "../lib/log";
 import { currentSearchEndpoint, searchEnabled, type SearchEndpoint } from "../research/search";
 import type { ModelEndpoint } from "../config";
@@ -505,7 +506,7 @@ export function plannerPrompt(input: PlannerInput): { system: string; user: stri
       "context_notes",
       [
         input.deadline ? `Deadline: ${input.deadline.toISOString().slice(0, 10)}` : "Deadline: none",
-        `Execution budget: €${(input.budgetCents / 100).toFixed(2)}`,
+        `Execution budget: ${formatCredits(input.budgetCents)}`,
         input.contextNotes.trim() ? `Notes from the organization:\n${clip(input.contextNotes, 3000)}` : "",
       ]
         .filter(Boolean)

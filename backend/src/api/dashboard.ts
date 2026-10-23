@@ -158,6 +158,7 @@ router.get(
       value30d: {
         criteriaMet: v.get("criteria_met") ?? 0,
         estimatedHoursReturned: Math.round((v.get("estimated_hours_returned") ?? 0) * 10) / 10, // planner estimates, labelled as such in the UI
+        // Credits consumed; rows from before the credits release say unit "eur_cents" with the same integer (see CREDITS_UNIT).
         executionCostCents: v.get("execution_cost") ?? 0,
       },
     });
