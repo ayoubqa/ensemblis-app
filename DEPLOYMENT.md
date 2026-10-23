@@ -102,8 +102,30 @@ Credits and cost accounting (API only; defaults shown — none needs setting for
 | Variable | Default | What it does |
 |---|---|---|
 | `CREDITS_PER_EUR` | `100` | Internal value of a credit (1 credit = €0.01 at the default) for accounting and pricing. Balances are stored as whole credits and are **not** rewritten when it changes; every existing balance was issued at 100 per €1, so changing it revalues them internally (the API logs a warning). Leave it at 100 unless you deliberately re-denominate. |
-| `MAX_TOKENS_PER_EXECUTION` | `600000` | Runaway guard: an execution whose model calls have used this many tokens stops before its next step (or verification) and fails, which refunds its credits. `0` turns it off. A normal execution uses well under 100,000. |
+| `MAX_TOKENS_PER_EXECUTION` | `600000` (`render.yaml`: `400000`) | Runaway guard: an execution whose model calls have used this many tokens stops before its next step (or verification) and fails, which refunds its credits. `0` turns it off. The largest legitimate run (7 steps, a revision, two verification rounds at `OPENAI_MAX_TOKENS=8192`) is estimated at under ~300,000 tokens; that estimate is not yet measured on real traffic, so check the token figures on the owner dashboard after launch before lowering it further. |
 | `PROVIDER_PRICING` | set in `render.yaml` (checked 2026-10-23) | JSON price table for **internal** cost accounting (owner dashboard, `/api/admin/economics`): per-million-token prices per model, per-call prices per paid tool, exchange rates to EUR, plus `asOf` (the date the prices were checked; older than 90 days is flagged on the dashboard) and `sources`. Optional `fixedMonthlyEur` (e.g. `{"render":0,"neon":19}`, allocated pro rata) and `paymentFees` (`{"percent":1.5,"fixedEurCents":25}` per completed purchase) — left out, they are reported as *not configured*, never as zero. Change it in `render.yaml` (a dashboard edit is overwritten by the next Blueprint sync); take numbers only from the providers' own price pages. Unset or invalid: usage is still recorded, but costs stay unpriced (never guessed). None of the resulting figures is net profit: credit value is list price (demo credits are not revenue), and taxes and labour are never included. |
+
+| Variable | Default | What it does |
+|---|---|---|
+| `DAILY_TOKEN_BUDGET` | `0` = off (`render.yaml`: `10000000`) | The server's daily ceiling on model tokens, every call counted (planning, steps, verification, claim checks, suggestions, memory; failed calls at their estimate). New work — a plan, a new attempt, a scheduled routine — is refused (HTTP 429, nothing charged) while the rest of the day can't cover one execution's `MAX_TOKENS_PER_EXECUTION`; every model call stops once the ceiling is reached, and a running execution then waits for a person ("Today's AI processing quota is used up": retry after midnight UTC, or cancel for a refund of the work that didn't run). Read from the database every 30 s and kept current in memory between reads, so several processes can overshoot by the calls they make in that window. |
+
+**Worst-case daily spend (render.yaml settings, list prices checked 2026-10-23).** The per-call
+and per-execution caps alone do not bound a day: 150 executions × 400k tokens plus 600 plans ×
+~32k (a plan call with one repair) is ~80M tokens, up to ~$19 (80% input) to ~$48 (all output) a
+day on gpt-oss-120b. With `DAILY_TOKEN_BUDGET=10000000`:
+
+| Cost line | Daily ceiling | How it is bounded |
+|---|---|---|
+| Standard model (Groq gpt-oss-120b / -20b) | ~$2.40 (80% input) – $6.00 (all output) | `DAILY_TOKEN_BUDGET` 10M tokens |
+| Premium model (gpt-5.5), when a key is set | €2 | `PREMIUM_DAILY_BUDGET_EUR`, from priced usage |
+| Web search (Tavily basic, pay-as-you-go) | $0.24 | `SEARCH_DAILY_BUDGET` 30 calls × $0.008 (free monthly credits not deducted) |
+| Hosting (Render free web service; your Neon and Vercel plans) | not configured | `fixedMonthlyEur` in `PROVIDER_PRICING` once you know the plans |
+
+So a day of model and search spend tops out at about €7.60 (≈$8.50) with the premium route on and
+about €5.60 ($6.24) without it (1 USD = 0.8925 EUR); a month at roughly €230 / €170 in the worst case. Typical use is
+far lower (a run is estimated at ~100–150k tokens: ~$0.03–0.05 on gpt-oss-120b). These are
+ceilings from list prices, not invoices: free-tier allowances, Groq's own per-day limits and
+taxes are not modelled. Real figures: the owner dashboard's Unit economics panel.
 
 Premium model route (optional; same values on the API and a standalone worker). `render.yaml`
 sets `PREMIUM_MODEL=gpt-5.5`, `PREMIUM_REASONING_EFFORT=low` and `PREMIUM_DAILY_BUDGET_EUR=2`; the
@@ -211,6 +233,63 @@ reset their database (the scripts refuse names without `smoke`/`test`).
 Deploy order caveat: Render and Vercel build in parallel. For a minute or two
 the new frontend may talk to the old API (or the reverse). Nothing is lost,
 but pages can error until both are live — deploy at a quiet time.
+
+## 4b. Releasing the credits stack (PRs #3 → #7)
+
+**Merge each PR with "Create a merge commit" — never "Squash and merge" or "Rebase and merge".** Each PR
+contains the previous one's commits: merged with merge commits the five merge with no conflicts and
+the result is identical to the tip of #7 (checked in a throwaway worktree); squashing #3 makes #4
+conflict in 12 files. After each merge, change the next PR's base to `main` (GitHub does it
+automatically only if you delete the merged branch).
+
+**Custom domain.** If the site is served from a custom domain (e.g. `getensemblist.com`), then before
+releasing check: Vercel → Settings → Domains shows it assigned to **Production** (branch `main`), not
+a preview; on Render, `CORS_ORIGIN` lists that exact origin (`https://getensemblist.com`, comma-separated
+with any others — a missing origin makes the site load but every API call fail) and `APP_URL` is the
+same origin (used in e-mails, share links and Stripe redirects); on Vercel, `NEXT_PUBLIC_API_URL` is the
+API URL and, optionally, `NEXT_PUBLIC_SITE_URL` the custom origin. After the last merge, open the custom
+domain and confirm it serves the new build (the owner dashboard shows "Market validation").
+
+Every push to `main` deploys production: Vercel promotes it, and Render builds `ensemblis-api`, runs
+`dist/ops/migrate.js` (pending migrations) and starts it. Render marks a deploy live only after
+`/health` (database included) passes. Release one PR at a time, in order, at a quiet hour.
+
+0. **Independent of the merges, do now:** replace `SIGNUP_INVITE_CODE` (§6). Expect the API to restart.
+1. **Backup.** Neon → your project → Branches → *Create branch* from the production branch, named
+   e.g. `pre-credits-2026-10` (a copy-on-write snapshot, kept until you delete it). Optional
+   rehearsal: point a local build of `feat/beta-hardening` at that branch with
+   `DATABASE_URL=<branch URL> node dist/ops/migrate.js`, then run the ledger check below — expect 0.
+2. **#3 credit ledger** (2 migrations). Merge. Render log: `Applying migration
+   20261023120000_credit_ledger`, `… 20261023120100_ledger_opening_balances`, then `api.listening`.
+   Check: `/health` ok; owner dashboard ledger tile **0 mismatches**; your Usage balance unchanged
+   (shown in credits, same number as before); a throwaway sign-up shows a "Starting credits" row;
+   one objective with *review the plan*: approve → charged once at the estimate; cancel another
+   before approving → nothing charged.
+   Ledger check (read-only, Neon SQL editor):
+   ```sql
+   SELECT COUNT(*) FROM "User" u
+   LEFT JOIN (SELECT "userId", SUM("amountCents") s FROM "Transaction" GROUP BY "userId") t ON t."userId" = u."id"
+   WHERE u."credits" <> COALESCE(t.s, 0);   -- expect 0
+   ```
+3. **#4 economics + premium route** (no migration). Change the PR's base to `main` (GitHub does it
+   for you when the merged branch is deleted), check CI, merge. If the Render Blueprint does not
+   auto-sync, set `PROVIDER_PRICING`, `PREMIUM_MODEL`, `PREMIUM_REASONING_EFFORT`,
+   `PREMIUM_DAILY_BUDGET_EUR` from `render.yaml` by hand. Check: Unit economics says "Priced from
+   PROVIDER_PRICING (… checked 2026-10-23)"; the boot log says `PREMIUM_MODEL=gpt-5.5 is set but
+   PREMIUM_API_KEY is not` (expected: the premium route stays off).
+4. **#5 step deliverable checks** (1 additive migration, `20261024090000_step_deliverable`). Retarget,
+   merge. Check: a new run shows a deliverable verdict under each completed step and a "Work:" line
+   in the outcome.
+5. **#6 validation metrics + feedback** (no migration). Retarget, merge. Check: the owner dashboard
+   shows "Market validation"; a completed result shows "Was this result useful?".
+6. **#7 beta hardening** (no migration). Retarget, merge; set `MAX_TOKENS_PER_EXECUTION=400000` and
+   `DAILY_TOKEN_BUDGET=10000000` by hand if the Blueprint does not sync. Check: the AI tile reads
+   "… tokens of 10M daily budget"; no red invite-code notice (once step 0 is done).
+7. Only later, if wanted: `PREMIUM_API_KEY` (an OpenAI key) — then watch the AI tile's premium line.
+
+Rollback at any stage: Vercel → *Promote* the previous production deployment; Render → *Rollback*
+to the previous deploy. The database needs nothing, except when going back before #3: run the §7
+SQL first. Restoring the Neon backup branch is the last resort — it loses everything written since.
 
 ## 5. After deploy: smoke test (use a throwaway account, no real business data)
 
@@ -363,6 +442,21 @@ production database from a local checkout:
 cd backend && DATABASE_URL="<production URL>" npm run ops:verify-email -- you@example.com
 ```
 
+
+**Sign-up invite code.** With `SIGNUP_INVITE_CODE` set, only people who have the
+code can create accounts (and the guest trial is off), so the code is what stands
+between the internet and your model spend. Use a long random value, never a word
+and a year. The owner dashboard shows a red notice, and the API logs a boot
+warning, while the configured code is short or guessable; neither ever prints it.
+To rotate it:
+
+1. On your own machine: `openssl rand -base64 24 | tr -d '/+=' ` (about 32 characters).
+2. Render → ensemblis-api → Environment → `SIGNUP_INVITE_CODE` → paste → Save (the
+   service restarts). Existing accounts are not affected.
+3. Share sign-up links as `https://<frontend>/signup#invite=<code>`: the part after
+   `#` is never sent to a server, so the code stays out of request logs, and the
+   sign-up page fills it in and removes it from the address bar. Send links over a
+   private channel; anyone with the link can sign up.
 
 **Owner dashboard: economics and market validation.** Two internal panels (never
 shown to customers; `GET /api/admin/economics` and `GET /api/admin/validation`):

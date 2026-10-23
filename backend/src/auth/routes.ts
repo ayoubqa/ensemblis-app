@@ -1,4 +1,4 @@
-import { createHash, randomBytes } from "crypto";
+import { createHash, randomBytes, timingSafeEqual } from "crypto";
 import { Router } from "express";
 import { startingGrant } from "../lib/wallet";
 import bcrypt from "bcryptjs";
@@ -52,6 +52,13 @@ const signupSchema = z.object({
 const isUniqueViolation = (err: unknown) =>
   err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002";
 
+/** Constant-time comparison of a submitted secret with the configured one (hashed first, so lengths don't leak). */
+function sameSecret(given: string, expected: string): boolean {
+  const a = createHash("sha256").update(given).digest();
+  const b = createHash("sha256").update(expected).digest();
+  return timingSafeEqual(a, b);
+}
+
 // The real version of the prototype's role-based sign-up flow
 // (company vs. developer persona) — it actually creates an account.
 router.post(
@@ -60,7 +67,7 @@ router.post(
   ah(async (req, res) => {
     const { email, password, name, company, accountType, builds, inviteCode, turnstileToken } = parse(signupSchema, req.body);
 
-    if (config.signupInviteCode && inviteCode !== config.signupInviteCode) {
+    if (config.signupInviteCode && !sameSecret(inviteCode ?? "", config.signupInviteCode)) {
       throw new HttpError(403, "Invalid invite code");
     }
     await assertTurnstile(turnstileToken, clientIp(req));

@@ -951,6 +951,8 @@ export interface AdminValidation {
 
 export interface AdminOverview {
   generatedAt: string;
+  /** Security posture flags (never the secrets themselves). */
+  security?: { inviteCode: "off" | "weak" | "strong" };
   users: { total: number; guests: number; organizations: number; signupsLast14d: DayCount[] };
   executions: {
     total: number;
@@ -976,6 +978,8 @@ export interface AdminOverview {
     tokensInToday: number;
     tokensOutToday: number;
     tokensLast14d: DayCount[];
+    /** DAILY_TOKEN_BUDGET (0 = no daily ceiling). */
+    dailyTokenBudget?: number;
     /** The optional premium model route (server-side configuration). */
     premium?:
       | { configured: false }

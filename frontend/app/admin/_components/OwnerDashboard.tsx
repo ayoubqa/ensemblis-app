@@ -125,6 +125,13 @@ function Body({ d }: { d: AdminOverview }) {
 
   return (
     <>
+      {d.security?.inviteCode === "weak" && (
+        <div className="notice" role="alert" data-testid="weak-invite" style={{ marginBottom: 16, background: "var(--bad-soft)", color: "var(--bad)" }}>
+          The sign-up invite code is short or easy to guess, so anyone who guesses it can create accounts and spend starting credits. Replace
+          SIGNUP_INVITE_CODE on the API service with a long random value (for example the output of <code>openssl rand -base64 24</code>) and share sign-up
+          links as <code>/signup#invite=…</code>.
+        </div>
+      )}
       <h2 className="sr-only">Today at a glance</h2>
       <div className="op-tiles">
         <Tile icon="user" label="Users" value={num(users.total)} delta={signups14 ? `+${num(signups14)} in 14 days` : undefined}>
@@ -174,6 +181,7 @@ function Body({ d }: { d: AdminOverview }) {
         </Tile>
         <Tile icon="chart" label="AI calls today" value={num(ai.callsToday)} flag={ai.failuresToday > 0 ? { tone: "bad", text: `${num(ai.failuresToday)} failed` } : undefined}>
           {ai.providerLabel || "AI provider"} · {compact(tokensToday)} tokens
+          {ai.dailyTokenBudget ? ` of ${compact(ai.dailyTokenBudget)} daily budget` : ""}
           {ai.premium && "model" in ai.premium && <PremiumLine p={ai.premium} />}
         </Tile>
         <Tile

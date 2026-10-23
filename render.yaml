@@ -148,6 +148,20 @@ services:
         value: "4000"
       - key: SEARCH_DAILY_BUDGET
         value: "30"
+      # Runaway guard per execution (the code default is 600000). The largest legitimate run — 7 steps,
+      # a revision, two verification rounds, at OPENAI_MAX_TOKENS=8192 — stays under ~300k tokens, so
+      # 400k never cuts real work short. A runaway then costs at most ~$0.10–0.25 on gpt-oss-120b
+      # (~$4.50–12 on gpt-5.5, where PREMIUM_DAILY_BUDGET_EUR caps the day anyway). A stopped
+      # execution fails and is refunded in full.
+      - key: MAX_TOKENS_PER_EXECUTION
+        value: "400000"
+      # The server's daily ceiling on model tokens, all calls together (planning, steps, verification,
+      # suggestions, memory). Without it the caps above multiply out to ~80M tokens/day (150 executions
+      # x 400k + 600 plans): up to ~$19-48/day on gpt-oss-120b. 10M tokens is ~65 executions of ~150k
+      # and caps a day at ~$2.40 (input-heavy) to $6 (all output). New work is refused when the rest of
+      # the day can't finish one execution; every call stops at the ceiling. See DEPLOYMENT.md §2.
+      - key: DAILY_TOKEN_BUDGET
+        value: "10000000"
 
       # --- guest trial ("try without an account") ---
       - key: GUEST_TRIAL_ENABLED

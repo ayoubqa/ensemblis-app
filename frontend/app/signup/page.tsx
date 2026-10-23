@@ -37,6 +37,14 @@ function SignupForm() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [invite, setInvite] = useState(params.get("invite") || "");
+  // Invite links put the code after "#" (/signup#invite=…): a fragment is never sent to a server, so the
+  // code stays out of request logs. Read it once, then drop it from the address bar.
+  useEffect(() => {
+    const fromHash = new URLSearchParams(window.location.hash.slice(1)).get("invite");
+    if (!fromHash) return;
+    setInvite(fromHash);
+    window.history.replaceState(null, "", window.location.pathname + window.location.search);
+  }, []);
   const [inviteError, setInviteError] = useState<string | null>(null);
   const [agreed, setAgreed] = useState(false);
   const [tsToken, setTsToken] = useState<string | null>(null);

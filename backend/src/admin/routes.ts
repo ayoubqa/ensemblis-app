@@ -10,7 +10,7 @@
 import { Router } from "express";
 import type { NextFunction, Response } from "express";
 import { prisma } from "../db";
-import { config, isAdminEmail } from "../config";
+import { config, inviteCodeStrength, isAdminEmail } from "../config";
 import { requireAuth, AuthedRequest } from "../auth/middleware";
 import { ah } from "../lib/http";
 import { globalRunsToday, startOfTodayUTC } from "../lib/usageLimits";
@@ -172,12 +172,16 @@ export async function adminOverview(now = new Date()) {
       tokensInToday: llmTokensToday._sum.tokensIn ?? 0,
       tokensOutToday: llmTokensToday._sum.tokensOut ?? 0,
       tokensLast14d: bucketByDay(days, llmRows, (r) => r.createdAt, (r) => r.tokensIn + r.tokensOut),
+      /** DAILY_TOKEN_BUDGET (0 = no daily ceiling). */
+      dailyTokenBudget: config.dailyTokenBudget,
       premium: await premiumStatus(),
     },
     search: { providerLabel: searchProviderLabel(), callsToday: searchToday, callsThisMonth: searchMonth, dailyBudget: config.search.dailyBudget },
     email: { enabled: config.email.enabled, sentToday: emailsToday },
     money: { purchasesCents: purchases._sum.amountCents ?? 0, purchasesCount: purchases._count._all, demoTopupsCents: topups._sum.amountCents ?? 0 },
     // Every wallet's balance must equal the sum of its ledger rows (lib/ledger.ts).
+    /** Security posture flags (never the secrets themselves). */
+    security: { inviteCode: inviteCodeStrength(config.signupInviteCode) },
     ledger: { walletsChecked: ledger.checked, mismatches: ledger.mismatchCount, sample: ledger.mismatches.map((m) => ({ walletUserId: m.walletUserId, balance: m.balance, ledgerSum: m.ledgerSum })) },
     recentFailures: failures.map((f) => ({
       executionId: f.id,
