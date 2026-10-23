@@ -3340,3 +3340,33 @@ a.cs-life-i:focus-visible {
     align-items: stretch;
   }
 }
+
+/* Step deliverable check (objective console timeline) and the outcome's work ledger. */
+.cs-tl-dlv {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  margin: 8px 0 0;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+.cs-tl-dlv-facts {
+  font-variant-numeric: tabular-nums;
+}
+.cs-tl-dlv-gaps {
+  flex-basis: 100%;
+  margin: 0;
+  padding-left: 18px;
+  list-style: disc;
+  line-height: 1.5;
+}
+.cs-out-ledger {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  margin: 6px 0 0;
+  font-size: 13px;
+  color: var(--muted);
+}

@@ -795,6 +795,8 @@ model ExecutionStep {
   attempts          Int                 @default(0)
   output            String?             @db.Text
   partialOutput     String?             @db.Text // streamed text while RUNNING (persisted, throttled)
+  /// Whether the output delivers what the plan said the step would (engine/stepChecks.ts); null before it completed
+  deliverable       Json?
   summary           String?
   error             String?             @db.Text
   provider          String?

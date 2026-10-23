@@ -6,6 +6,7 @@ import { CriterionTag, Icon, outcomeLabel, useToast, type IconName } from "@/com
 import { outcomeTagLabel } from "@/components/Tags";
 import { relativeTime } from "@/lib/format";
 import { EvidenceChips } from "./Evidence";
+import { ledgerSentence } from "@/lib/deliverable";
 
 const METHOD: Record<OutcomeMeasurement["method"], string> = {
   "model-assessed": "Assessed by AI review",
@@ -36,6 +37,7 @@ export function OutcomePanel({ objective, execution, onExecution, readOnly = fal
   const aiValue = execution.confirmedOutcomeStatus ? execution.outcomeStatus : execution.outcomeConfirmedAt ? null : execution.outcomeStatus;
   const confirmed = !!confirmedValue;
   const status = confirmedValue ?? aiValue ?? "UNKNOWN";
+  const ledger = ledgerSentence(execution.workLedger);
   const confirm = async (s: Exclude<OutcomeStatus, "UNKNOWN">) => {
     setBusy(s);
     try {
@@ -57,6 +59,14 @@ export function OutcomePanel({ objective, execution, onExecution, readOnly = fal
         <div className="cs-out-tt">
           <p className="cs-out-v">{outcomeTagLabel(status, confirmed)}</p>
           {execution.outcomeSummary && <p className="cs-out-sum">{execution.outcomeSummary}</p>}
+          {ledger && (
+            <p className="cs-out-ledger" data-testid="work-ledger">
+              <Icon name="list" size={13} /> Work: {ledger}.{" "}
+              <a href="#cs-execution" className="cs-inline-link">
+                See each step
+              </a>
+            </p>
+          )}
           <p className="cs-out-basis" data-testid="outcome-basis" data-confirmed={confirmed ? "true" : "false"}>
             {confirmed
               ? `Confirmed by a person.${

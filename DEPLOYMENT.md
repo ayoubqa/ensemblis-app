@@ -445,6 +445,11 @@ DROP TABLE "_rollback_credits_tx";
 The other credits columns (`reason`, `balanceAfter`, `idempotencyKey`, the
 `UsageEvent` cost fields) are nullable additions an older build ignores.
 
+**Rolling back past the step deliverable check** (`20261024090000_step_deliverable`):
+nothing to do. It adds one nullable JSON column (`ExecutionStep.deliverable`)
+that an older build ignores; steps completed while rolled back simply have no
+deliverable verdict ("Not checked" in the work ledger).
+
 ## 8. If the migration step fails at boot
 
 `dist/ops/migrate.js` handles the known states itself: a database created by
