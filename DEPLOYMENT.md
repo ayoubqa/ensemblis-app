@@ -234,6 +234,49 @@ Deploy order caveat: Render and Vercel build in parallel. For a minute or two
 the new frontend may talk to the old API (or the reverse). Nothing is lost,
 but pages can error until both are live — deploy at a quiet time.
 
+## 4b. Releasing the credits stack (PRs #3 → #7)
+
+Every push to `main` deploys production: Vercel promotes it, and Render builds `ensemblis-api`, runs
+`dist/ops/migrate.js` (pending migrations) and starts it. Render marks a deploy live only after
+`/health` (database included) passes. Release one PR at a time, in order, at a quiet hour.
+
+0. **Independent of the merges, do now:** replace `SIGNUP_INVITE_CODE` (§6). Expect the API to restart.
+1. **Backup.** Neon → your project → Branches → *Create branch* from the production branch, named
+   e.g. `pre-credits-2026-10` (a copy-on-write snapshot, kept until you delete it). Optional
+   rehearsal: point a local build of `feat/beta-hardening` at that branch with
+   `DATABASE_URL=<branch URL> node dist/ops/migrate.js`, then run the ledger check below — expect 0.
+2. **#3 credit ledger** (2 migrations). Merge. Render log: `Applying migration
+   20261023120000_credit_ledger`, `… 20261023120100_ledger_opening_balances`, then `api.listening`.
+   Check: `/health` ok; owner dashboard ledger tile **0 mismatches**; your Usage balance unchanged
+   (shown in credits, same number as before); a throwaway sign-up shows a "Starting credits" row;
+   one objective with *review the plan*: approve → charged once at the estimate; cancel another
+   before approving → nothing charged.
+   Ledger check (read-only, Neon SQL editor):
+   ```sql
+   SELECT COUNT(*) FROM "User" u
+   LEFT JOIN (SELECT "userId", SUM("amountCents") s FROM "Transaction" GROUP BY "userId") t ON t."userId" = u."id"
+   WHERE u."credits" <> COALESCE(t.s, 0);   -- expect 0
+   ```
+3. **#4 economics + premium route** (no migration). Change the PR's base to `main` (GitHub does it
+   for you when the merged branch is deleted), check CI, merge. If the Render Blueprint does not
+   auto-sync, set `PROVIDER_PRICING`, `PREMIUM_MODEL`, `PREMIUM_REASONING_EFFORT`,
+   `PREMIUM_DAILY_BUDGET_EUR` from `render.yaml` by hand. Check: Unit economics says "Priced from
+   PROVIDER_PRICING (… checked 2026-10-23)"; the boot log says `PREMIUM_MODEL=gpt-5.5 is set but
+   PREMIUM_API_KEY is not` (expected: the premium route stays off).
+4. **#5 step deliverable checks** (1 additive migration, `20261024090000_step_deliverable`). Retarget,
+   merge. Check: a new run shows a deliverable verdict under each completed step and a "Work:" line
+   in the outcome.
+5. **#6 validation metrics + feedback** (no migration). Retarget, merge. Check: the owner dashboard
+   shows "Market validation"; a completed result shows "Was this result useful?".
+6. **#7 beta hardening** (no migration). Retarget, merge; set `MAX_TOKENS_PER_EXECUTION=400000` and
+   `DAILY_TOKEN_BUDGET=10000000` by hand if the Blueprint does not sync. Check: the AI tile reads
+   "… tokens of 10M daily budget"; no red invite-code notice (once step 0 is done).
+7. Only later, if wanted: `PREMIUM_API_KEY` (an OpenAI key) — then watch the AI tile's premium line.
+
+Rollback at any stage: Vercel → *Promote* the previous production deployment; Render → *Rollback*
+to the previous deploy. The database needs nothing, except when going back before #3: run the §7
+SQL first. Restoring the Neon backup branch is the last resort — it loses everything written since.
+
 ## 5. After deploy: smoke test (use a throwaway account, no real business data)
 
 1. Landing page loads; sign up a new test account.
