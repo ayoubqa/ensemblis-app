@@ -856,6 +856,10 @@ export interface DayCount {
 /** Variable cost of a set of usage events (backend billing/economics.ts). Internal only. */
 export interface CostSummary {
   eurMicros: number;
+  /** Priced from provider-reported token counts. */
+  measuredEurMicros: number;
+  /** Priced from our own token estimate. */
+  estimatedEurMicros: number;
   complete: boolean;
   events: number;
   pricedEvents: number;
@@ -866,7 +870,7 @@ export interface CostSummary {
   tokens: { in: number; cachedIn: number; out: number };
 }
 
-/** Internal unit economics for the owner dashboard. Credit value is list price, not revenue. */
+/** Internal unit economics for the owner dashboard. Credit value is list price, not revenue; nothing here is net profit. */
 export interface AdminEconomics {
   days: number;
   since: string;
@@ -875,13 +879,31 @@ export interface AdminEconomics {
   creditsPerEur: number;
   creditValueEurCents: number;
   creditValueNote: string;
+  /** Real money: completed credit-pack purchases in the period. */
+  cash: { purchases: number; collectedEurCents: number };
   variableCost: CostSummary;
   overheadCost: CostSummary;
+  /** null = not configured (unknown), not zero. */
+  fixedCost: { eurCents: number | null; items: Record<string, number> };
+  paymentFeesEurCents: number | null;
   costPerCompletedExecutionEurMicros: number | null;
-  contributionEurCents: number | null;
-  grossMarginPct: number | null;
+  variableContributionEurCents: number | null;
+  variableMarginPct: number | null;
+  operatingContributionEurCents: number | null;
   targetMargin: number;
-  pricing: { configuredModels: string[]; configuredTools: string[]; fxCurrencies: string[]; problem: string | null };
+  notNetProfit: string;
+  pricing: {
+    configuredModels: string[];
+    configuredTools: string[];
+    fxCurrencies: string[];
+    asOf: string | null;
+    ageDays: number | null;
+    stale: boolean;
+    sources: string[];
+    fixedCostsConfigured: boolean;
+    paymentFeesConfigured: boolean;
+    problem: string | null;
+  };
   excludedCosts: string[];
 }
 

@@ -36,6 +36,7 @@ import { DEFAULT_CRITERIA, planObjective, type Plan, type PlanBlockedKind } from
 import { titleFor } from "./objectives";
 import { formatCredits, refundExecution } from "./billing";
 import { tokenCeilingReached } from "./budget";
+import { CREDITS_UNIT } from "../billing/credits";
 import { verifyExecution } from "./verification/service";
 import type { ModelAssessment } from "./verification/checks";
 import type { Prisma } from "@prisma/client";
@@ -803,7 +804,7 @@ async function finalize(ex: Execution, model: ModelAssessment | null, accepted: 
     const fresh = await tx.execution.findUniqueOrThrow({ where: { id: ex.id } });
     await tx.objective.update({ where: { id: ex.objectiveId }, data: { status: "COMPLETED", outcomeStatus: outcome.status, completedAt: now } });
     const values: Prisma.ValueRecordCreateManyInput[] = [
-      { orgId: ex.orgId, executionId: ex.id, objectiveId: ex.objectiveId, metric: "execution_cost", value: fresh.costCents - fresh.refundedCents, unit: "eur_cents" },
+      { orgId: ex.orgId, executionId: ex.id, objectiveId: ex.objectiveId, metric: "execution_cost", value: fresh.costCents - fresh.refundedCents, unit: CREDITS_UNIT },
       { orgId: ex.orgId, executionId: ex.id, objectiveId: ex.objectiveId, metric: "criteria_met", value: outcome.measurements.filter((m) => m.result === "MET").length, unit: "count" },
     ];
     if (fresh.startedAt) {

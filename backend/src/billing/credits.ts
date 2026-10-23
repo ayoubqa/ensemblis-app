@@ -24,6 +24,15 @@ export function creditValueEurCents(credits: number): number {
   return (credits * 100) / config.creditsPerEur;
 }
 
+/**
+ * ValueRecord.unit for amounts of credits (metric "execution_cost").
+ * Rows written before the credits release say "eur_cents": the integer is the
+ * same (credits were issued 1:1 with euro cents), so readers treat both units
+ * as credits and no stored row is rewritten.
+ */
+export const CREDITS_UNIT = "credits";
+export const LEGACY_CREDITS_UNITS: readonly string[] = ["eur_cents"];
+
 /** Machine-readable reason on every ledger row (Transaction.reason). */
 export const LEDGER_REASONS = {
   execution_charge: "Execution charged at its planned estimate",

@@ -331,7 +331,6 @@ function Body({ d }: { d: AdminOverview }) {
 }
 
 
-/** KPI tile: label, big value (optionally "/ limit"), muted context line, optional usage meter or flag. */
 /** Millionths of EUR: "€0.0123" below €1, "€12.34" above. */
 function eurMicros(m: number | null): string {
   if (m == null) return "—";
@@ -375,9 +374,18 @@ function Economics() {
               </dd>
             </div>
             <div>
+              <dt>Cash collected</dt>
+              <dd>
+                {eur(e.cash.collectedEurCents)} <small>{plural(e.cash.purchases, "purchase")}</small>
+              </dd>
+            </div>
+            <div>
               <dt>Variable AI and tool cost</dt>
               <dd>
                 {eurMicros(e.variableCost.eurMicros)} {!e.variableCost.complete && <small>lower bound</small>}
+                <small className="op-econ-split">
+                  measured {eurMicros(e.variableCost.measuredEurMicros)} · estimated {eurMicros(e.variableCost.estimatedEurMicros)}
+                </small>
               </dd>
             </div>
             <div>
@@ -385,19 +393,33 @@ function Economics() {
               <dd>{eurMicros(e.costPerCompletedExecutionEurMicros)}</dd>
             </div>
             <div>
-              <dt>Contribution at list value</dt>
-              <dd>{e.contributionEurCents == null ? "—" : eur(Math.round(e.contributionEurCents))}</dd>
+              <dt>Variable contribution at list value</dt>
+              <dd>
+                {e.variableContributionEurCents == null ? "—" : eur(Math.round(e.variableContributionEurCents))}{" "}
+                {e.variableMarginPct != null && <small>{pct(e.variableMarginPct)} variable margin</small>}
+              </dd>
             </div>
             <div>
-              <dt>Gross margin at list value</dt>
-              <dd>{e.grossMarginPct == null ? "—" : pct(e.grossMarginPct)}</dd>
+              <dt>Fixed plans · payment fees</dt>
+              <dd>
+                {e.fixedCost.eurCents == null ? "not configured" : eur(Math.round(e.fixedCost.eurCents))}
+                <small className="op-econ-split">fees {e.paymentFeesEurCents == null ? "not configured" : eur(Math.round(e.paymentFeesEurCents))}</small>
+              </dd>
+            </div>
+            <div>
+              <dt>After all known costs</dt>
+              <dd>
+                {e.operatingContributionEurCents == null ? "—" : eur(Math.round(e.operatingContributionEurCents))}{" "}
+                {e.operatingContributionEurCents == null && <small>needs every cost priced</small>}
+              </dd>
             </div>
           </dl>
           <p className="op-meta op-econ-note">
+            <strong>{e.notNetProfit}</strong>{" "}
             {e.pricing.problem
               ? e.pricing.problem
               : e.pricing.configuredModels.length
-                ? `Priced from PROVIDER_PRICING (${plural(e.pricing.configuredModels.length, "model")}${e.pricing.configuredTools.length ? `, ${plural(e.pricing.configuredTools.length, "tool")}` : ""}).`
+                ? `Priced from PROVIDER_PRICING (${plural(e.pricing.configuredModels.length, "model")}${e.pricing.configuredTools.length ? `, ${plural(e.pricing.configuredTools.length, "tool")}` : ""}${e.pricing.asOf ? `, checked ${e.pricing.asOf}` : ", no check date"}).${e.pricing.stale ? ` These prices are ${num(e.pricing.ageDays ?? 0)} days old: re-check them.` : ""}`
                 : "No prices configured (PROVIDER_PRICING): usage is recorded but not priced, so cost and margin stay blank."}
             {gaps.length > 0 && ` Not in the cost: ${gaps.join(", ")}.`} {e.creditValueNote} Excluded: {e.excludedCosts.join(", ")}.
           </p>

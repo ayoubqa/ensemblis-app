@@ -1,23 +1,33 @@
 // Internal unit economics (owner dashboard / operators only; never customers).
 //
-//   contribution = credit value consumed − variable cost
-//   gross margin = contribution / credit value consumed
+//   variable contribution = credit value consumed − variable API/tool cost
+//   variable margin       = variable contribution / credit value consumed
 //
-// Credit value is the euro value of the NET credits an execution consumed
-// (charged − refunded) at CREDITS_PER_EUR. While credits are demo/trial
-// credits this is list-price value, not revenue — say so wherever it is shown.
-// Variable cost is the sum of priced usage events (billing/pricing.ts):
-// model calls and paid tools. Events without a configured price, failed calls
-// (cost unknown) and events in a currency without an exchange rate are
-// counted, not guessed, and make the figure "incomplete". Not included at all:
-// fixed hosting, payment fees (payments are off), taxes.
+// None of these figures is net profit, and the report says so in every
+// response (NOT_NET_PROFIT):
+// - Credit value is the euro value of the NET credits consumed (charged −
+//   refunded) at CREDITS_PER_EUR. Demo, trial and starting credits are not
+//   revenue, so this is a list-price value. Cash actually collected (completed
+//   Stripe purchases) is reported apart.
+// - Variable cost is split into MEASURED (provider-reported token counts at the
+//   configured list price) and ESTIMATED (our own token estimate when the
+//   provider reported none). It is not the provider's invoice: free-tier
+//   allowances, batch/cache billing quirks and taxes are not modelled.
+// - Fixed hosting/database plans and payment fees are included only when
+//   configured in PROVIDER_PRICING; otherwise they are "not configured" (null),
+//   never zero.
+// - Never included: taxes, labour, refunds of real money.
+// Events without a configured price, failed calls (cost unknown) and events in
+// a currency without an exchange rate are counted, not guessed, and make the
+// figure "incomplete".
 
 import { prisma } from "../db";
 import { config } from "../config";
 import { creditValueEurCents } from "./credits";
-import { pricingTable, suggestedCredits, toEurMicros } from "./pricing";
+import { pricingStatus, pricingTable, suggestedCredits, toEurMicros } from "./pricing";
 
-export const EXCLUDED_COSTS = ["fixed hosting and database plans", "payment processing fees (payments are disabled)", "taxes"];
+export const NOT_NET_PROFIT =
+  "Not net profit: credit value is list price (demo and trial credits are not revenue), variable cost is priced from token counts at list price, and taxes and labour are never included.";
 
 interface UsageRow {
   kind: string;
@@ -31,8 +41,12 @@ interface UsageRow {
 }
 
 export interface CostSummary {
-  /** Sum of every priced, convertible event, in millionths of EUR. */
+  /** Sum of every priced, convertible event, in millionths of EUR (measured + estimated). */
   eurMicros: number;
+  /** Priced from provider-reported token counts. */
+  measuredEurMicros: number;
+  /** Priced from our own token estimate (the provider reported no usage). */
+  estimatedEurMicros: number;
   /** True when every event has a known cost in EUR (otherwise eurMicros is a lower bound). */
   complete: boolean;
   events: number;
@@ -41,7 +55,7 @@ export interface CostSummary {
   unpricedEvents: number;
   /** Failed calls: their cost is unknown. */
   failedEvents: number;
-  /** Priced from estimated token counts (the provider reported no usage). */
+  /** Priced from estimated token counts. */
   estimatedTokenEvents: number;
   /** Priced in a currency with no configured exchange rate. */
   unconvertibleEvents: number;
@@ -49,9 +63,21 @@ export interface CostSummary {
 }
 
 export function summarizeCosts(rows: UsageRow[]): CostSummary {
-  const s: CostSummary = { eurMicros: 0, complete: true, events: rows.length, pricedEvents: 0, unpricedEvents: 0, failedEvents: 0, estimatedTokenEvents: 0, unconvertibleEvents: 0, tokens: { in: 0, cachedIn: 0, out: 0 } };
-  // Summed per currency and converted once, so rounding doesn't accumulate per event.
-  const byCurrency = new Map<string, { micros: number; events: number }>();
+  const s: CostSummary = {
+    eurMicros: 0,
+    measuredEurMicros: 0,
+    estimatedEurMicros: 0,
+    complete: true,
+    events: rows.length,
+    pricedEvents: 0,
+    unpricedEvents: 0,
+    failedEvents: 0,
+    estimatedTokenEvents: 0,
+    unconvertibleEvents: 0,
+    tokens: { in: 0, cachedIn: 0, out: 0 },
+  };
+  // Summed per (currency, measured|estimated) and converted once, so rounding doesn't accumulate per event.
+  const buckets = new Map<string, { currency: string; estimated: boolean; micros: number; events: number }>();
   for (const r of rows) {
     if (r.kind === "llm") {
       s.tokens.in += r.tokensIn;
@@ -68,17 +94,22 @@ export function summarizeCosts(rows: UsageRow[]): CostSummary {
       continue;
     }
     s.pricedEvents++;
-    if (r.estimated) s.estimatedTokenEvents++;
-    const c = byCurrency.get(r.costCurrency ?? "USD") ?? { micros: 0, events: 0 };
-    c.micros += r.costMicros;
-    c.events++;
-    byCurrency.set(r.costCurrency ?? "USD", c);
+    const estimated = !!r.estimated;
+    if (estimated) s.estimatedTokenEvents++;
+    const currency = r.costCurrency ?? "USD";
+    const key = `${currency}|${estimated ? "e" : "m"}`;
+    const b = buckets.get(key) ?? { currency, estimated, micros: 0, events: 0 };
+    b.micros += r.costMicros;
+    b.events++;
+    buckets.set(key, b);
   }
-  for (const [currency, c] of byCurrency) {
-    const eur = toEurMicros({ micros: c.micros, currency });
-    if (eur == null) s.unconvertibleEvents += c.events;
-    else s.eurMicros += eur;
+  for (const b of buckets.values()) {
+    const eur = toEurMicros({ micros: b.micros, currency: b.currency });
+    if (eur == null) s.unconvertibleEvents += b.events;
+    else if (b.estimated) s.estimatedEurMicros += eur;
+    else s.measuredEurMicros += eur;
   }
+  s.eurMicros = s.measuredEurMicros + s.estimatedEurMicros;
   s.complete = s.unpricedEvents === 0 && s.failedEvents === 0 && s.unconvertibleEvents === 0;
   return s;
 }
@@ -98,11 +129,43 @@ function billable<T extends { kind: string; provider: string }>(rows: T[]): T[] 
   return rows.filter((r) => r.kind === "llm" || (r.kind === "search" && !FREE_SEARCH.has(r.provider)));
 }
 
-function marginOf(creditValueCents: number, cost: CostSummary) {
+const cents2 = (n: number) => Math.round(n * 100) / 100;
+
+/** Credit value consumed minus variable cost; null while the cost is incomplete. */
+function variableMargin(creditValueCents: number, cost: CostSummary) {
   const costCents = cost.eurMicros / 10_000;
-  const contributionEurCents = cost.complete ? Math.round((creditValueCents - costCents) * 100) / 100 : null;
-  const grossMarginPct = cost.complete && creditValueCents > 0 ? Math.round(((creditValueCents - costCents) / creditValueCents) * 1000) / 10 : null;
-  return { contributionEurCents, grossMarginPct };
+  return {
+    variableContributionEurCents: cost.complete ? cents2(creditValueCents - costCents) : null,
+    variableMarginPct: cost.complete && creditValueCents > 0 ? Math.round(((creditValueCents - costCents) / creditValueCents) * 1000) / 10 : null,
+  };
+}
+
+/** Fixed plans allocated pro rata to `days`; null when not configured. */
+export function fixedCostsFor(days: number): { eurCents: number | null; items: Record<string, number> } {
+  const monthly = pricingTable().table.fixedMonthlyEur;
+  if (!monthly) return { eurCents: null, items: {} };
+  const items = Object.fromEntries(Object.entries(monthly).map(([k, eur]) => [k, cents2((eur * 100 * days) / 30)]));
+  return { eurCents: cents2(Object.values(items).reduce((n, v) => n + v, 0)), items };
+}
+
+/** Real money collected (completed Stripe purchases) and its processing fees since `since`. */
+async function cashFor(since: Date) {
+  const paid = await prisma.stripePayment.findMany({ where: { status: "completed", completedAt: { gte: since } }, select: { amountCents: true } });
+  const fees = pricingTable().table.paymentFees;
+  const collectedEurCents = paid.reduce((n, p) => n + p.amountCents, 0);
+  // No purchases means no fees — a fact, not a guess. With purchases, fees are known only when configured.
+  const paymentFeesEurCents = paid.length === 0 ? 0 : fees ? cents2(paid.reduce((n, p) => n + (p.amountCents * fees.percent) / 100 + fees.fixedEurCents, 0)) : null;
+  return { purchases: paid.length, collectedEurCents, paymentFeesEurCents };
+}
+
+function excludedCosts(fixed: "included" | "not configured" | "not allocated per execution", fees: "included" | "not configured" | "not allocated per execution"): string[] {
+  return [
+    ...(fixed === "included" ? [] : [`fixed hosting and database plans (${fixed})`]),
+    ...(fees === "included" ? [] : [`payment processing fees (${fees})`]),
+    "provider free-tier allowances and invoice adjustments",
+    "taxes",
+    "labour",
+  ];
 }
 
 export async function executionEconomics(executionId: string, targetMargin = 0.75) {
@@ -122,13 +185,16 @@ export async function executionEconomics(executionId: string, targetMargin = 0.7
     createdAt: ex.createdAt.toISOString(),
     completedAt: ex.completedAt?.toISOString() ?? null,
     credits: { estimated: ex.estimatedCostCents, charged: ex.costCents, refunded: ex.refundedCents, net },
-    creditValueEurCents: Math.round(creditValue * 100) / 100,
+    creditValueEurCents: cents2(creditValue),
     creditValueNote: "List-price value of the net credits consumed at CREDITS_PER_EUR; demo and trial credits are not revenue.",
     variableCost: cost,
-    ...marginOf(creditValue, cost),
+    ...variableMargin(creditValue, cost),
     targetMargin,
+    /** Credits that would cover this execution's variable cost at the target margin. A price floor, not a profit figure. */
     suggestedCreditsAtTargetMargin: cost.complete ? suggestedCredits(cost.eurMicros, targetMargin, { roundTo: 10, minimum: 10 }) : null,
-    excludedCosts: EXCLUDED_COSTS,
+    suggestedCreditsNote: "Covers variable API/tool cost at the target margin only; fixed costs and fees are not in it.",
+    notNetProfit: NOT_NET_PROFIT,
+    excludedCosts: excludedCosts("not allocated per execution", "not allocated per execution"),
   };
 }
 
@@ -150,7 +216,16 @@ export async function economicsSummary(days = 30, targetMargin = 0.75) {
   const creditValue = creditValueEurCents(net);
   const cost = summarizeCosts(rows);
   const overhead = summarizeCosts(overheadRows);
-  const { table, problem } = pricingTable();
+  const fixed = fixedCostsFor(days);
+  const cash = await cashFor(since);
+  const pricing = pricingStatus();
+
+  // After every cost category: known only when each one is.
+  const allKnown = cost.complete && overhead.complete && fixed.eurCents != null && cash.paymentFeesEurCents != null;
+  const operatingContributionEurCents = allKnown
+    ? cents2(creditValue - cost.eurMicros / 10_000 - overhead.eurMicros / 10_000 - (fixed.eurCents ?? 0) - (cash.paymentFeesEurCents ?? 0))
+    : null;
+
   return {
     days,
     since: since.toISOString(),
@@ -162,20 +237,22 @@ export async function economicsSummary(days = 30, targetMargin = 0.75) {
     },
     credits: { charged, refunded, net, perCompletedExecution: completed ? Math.round(net / completed) : null },
     creditsPerEur: config.creditsPerEur,
-    creditValueEurCents: Math.round(creditValue * 100) / 100,
+    creditValueEurCents: cents2(creditValue),
     creditValueNote: "List-price value of the net credits consumed; demo and trial credits are not revenue.",
+    /** Real money: completed credit-pack purchases in the period (not matched to the credits consumed). */
+    cash: { purchases: cash.purchases, collectedEurCents: cash.collectedEurCents },
     variableCost: cost,
     overheadCost: overhead,
+    fixedCost: fixed,
+    paymentFeesEurCents: cash.paymentFeesEurCents,
     /** Variable cost of ALL executions in the period divided by the successful ones (failed work is part of the price of success). */
     costPerCompletedExecutionEurMicros: completed && cost.complete ? Math.round(cost.eurMicros / completed) : null,
-    ...marginOf(creditValue, cost),
+    ...variableMargin(creditValue, cost),
+    /** Credit value minus variable, overhead, fixed costs and fees; null unless every category is known. Still not net profit. */
+    operatingContributionEurCents,
     targetMargin,
-    pricing: {
-      configuredModels: Object.keys(table.models),
-      configuredTools: Object.keys(table.tools),
-      fxCurrencies: Object.keys(table.fx),
-      problem,
-    },
-    excludedCosts: EXCLUDED_COSTS,
+    notNetProfit: NOT_NET_PROFIT,
+    pricing,
+    excludedCosts: excludedCosts(fixed.eurCents != null ? "included" : "not configured", cash.paymentFeesEurCents != null ? "included" : "not configured"),
   };
 }
