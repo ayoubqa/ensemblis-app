@@ -27,6 +27,13 @@ describe("step deliverable checks", () => {
     expect(byKey.citations.status).toBe("warn");
   });
 
+  it("a web step whose searches only found sources already in the evidence is judged by what it cites", () => {
+    const reused = assessStep({ ...base, capabilityKind: "research", searchesWeb: true, ownEvidence: [], evidenceCount: 3, output: LONG("Competitors [2][3]."), expectedOutputs: [] });
+    expect(reused.checks.find((c) => c.key === "evidence")).toMatchObject({ status: "pass", detail: "Its searches found no new sources; it cites 2 already in the evidence." });
+    const none = assessStep({ ...base, capabilityKind: "research", searchesWeb: true, ownEvidence: [], evidenceCount: 3, output: LONG("Competitors."), expectedOutputs: [] });
+    expect(none.checks.find((c) => c.key === "evidence")?.status).toBe("warn");
+  });
+
   it("not delivered: an output too thin to be the step's deliverable", () => {
     const d = assessStep({ ...base, output: "OK, done.", expectedOutputs: ["Competitor comparison"] });
     expect(d.status).toBe("not_delivered");

@@ -111,7 +111,12 @@ export function assessStep(args: {
         : { key: "evidence", status: "warn", detail: `Gathered ${args.ownEvidence.length} source${args.ownEvidence.length === 1 ? "" : "s"} but cites none of them.` }
     );
   } else if (args.searchesWeb) {
-    checks.push({ key: "evidence", status: "warn", detail: "Gathered no sources (see its research status)." });
+    // Its searches added no new sources (none found, or only ones already in the evidence).
+    checks.push(
+      cited.length
+        ? { key: "evidence", status: "pass", detail: `Its searches found no new sources; it cites ${cited.length} already in the evidence.` }
+        : { key: "evidence", status: "warn", detail: "Its searches added no new sources, and it cites none." }
+    );
   } else if (args.capabilityKind === "synthesis" && args.evidenceCount > 0) {
     checks.push(
       cited.length
