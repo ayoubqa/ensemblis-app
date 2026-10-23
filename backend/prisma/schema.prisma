@@ -51,6 +51,8 @@ enum TransactionType {
   REFUND
   TOP_UP
   PURCHASE // real money via Stripe Checkout (v3)
+  GRANT // starting credits for a new account or guest trial
+  ADJUSTMENT // opening balance when the ledger was introduced; operator corrections
 }
 
 enum TeamRole {
@@ -246,19 +248,25 @@ model Workflow {
 // Credit ledger. amountCents is signed: negative for charges, positive for
 // refunds and top-ups.
 model Transaction {
-  id          String          @id @default(cuid())
-  user        User            @relation("TransactionWallet", fields: [userId], references: [id])
-  userId      String // the WALLET whose balance changed (a team task charges the team owner's wallet)
-  actor       User?           @relation("TransactionActor", fields: [actorUserId], references: [id], onDelete: SetNull)
-  actorUserId String? // who triggered it (null on pre-v3 rows = same as userId)
-  type        TransactionType
-  amountCents Int
-  description String
-  task        Task?           @relation(fields: [taskId], references: [id], onDelete: SetNull)
-  taskId      String?
-  execution   Execution?      @relation(fields: [executionId], references: [id], onDelete: SetNull)
-  executionId String? // v4: charge / refund for an objective execution
-  createdAt   DateTime        @default(now())
+  id             String          @id @default(cuid())
+  user           User            @relation("TransactionWallet", fields: [userId], references: [id])
+  userId         String // the WALLET whose balance changed (a team task charges the team owner's wallet)
+  actor          User?           @relation("TransactionActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+  actorUserId    String? // who triggered it (null on pre-v3 rows = same as userId)
+  type           TransactionType
+  amountCents    Int
+  description    String
+  task           Task?           @relation(fields: [taskId], references: [id], onDelete: SetNull)
+  taskId         String?
+  execution      Execution?      @relation(fields: [executionId], references: [id], onDelete: SetNull)
+  executionId    String? // v4: charge / refund for an objective execution
+  createdAt      DateTime        @default(now())
+  /// Machine-readable reason (billing/credits.ts LEDGER_REASONS). Null on rows written before credits.
+  reason         String?
+  /// The wallet balance right after this movement. Null on rows written before credits.
+  balanceAfter   Int?
+  /// At most one row per key (e.g. "charge:<executionId>"): a retried or duplicated request can't apply twice.
+  idempotencyKey String?         @unique
 
   @@index([userId, createdAt])
   @@index([actorUserId, createdAt])
@@ -404,24 +412,35 @@ model StripePayment {
 
 // Metering for the owner dashboard and budget guards.
 model UsageEvent {
-  id          String     @id @default(cuid())
-  kind        String // llm | search | email | fetch
-  provider    String
-  model       String?
-  tokensIn    Int        @default(0)
-  tokensOut   Int        @default(0)
-  ok          Boolean    @default(true)
-  task        Task?      @relation(fields: [taskId], references: [id], onDelete: SetNull)
-  taskId      String?
-  execution   Execution? @relation(fields: [executionId], references: [id], onDelete: SetNull)
-  executionId String? // v4
-  latencyMs   Int? // v4
-  createdAt   DateTime   @default(now())
+  id             String     @id @default(cuid())
+  kind           String // llm | search | email | fetch
+  provider       String
+  model          String?
+  tokensIn       Int        @default(0)
+  tokensOut      Int        @default(0)
+  ok             Boolean    @default(true)
+  task           Task?      @relation(fields: [taskId], references: [id], onDelete: SetNull)
+  taskId         String?
+  execution      Execution? @relation(fields: [executionId], references: [id], onDelete: SetNull)
+  executionId    String? // v4
+  latencyMs      Int? // v4
+  createdAt      DateTime   @default(now())
   /// plan | step | verify | verify_claims | queries | memory | suggest
-  purpose     String?
+  purpose        String?
   /// True when token counts are estimated (no provider usage)
-  estimated   Boolean?
-  error       String?
+  estimated      Boolean?
+  error          String?
+  /// The execution step the call was made for, when there is one.
+  stepId         String?
+  /// Input tokens the provider reported as served from its prompt cache (part of tokensIn).
+  cachedTokensIn Int?
+  /// HTTP attempts the call took (1 = no retry).
+  attempts       Int?
+  /// Variable provider cost of this event in millionths of costCurrency. Null when no price is configured: never guessed.
+  costMicros     Int?
+  costCurrency   String?
+  /// "provider" (reported by the provider) | "computed" (measured tokens x configured price) | "estimated" (estimated tokens x configured price)
+  costSource     String?
 
   @@index([kind, createdAt])
   @@index([executionId])

@@ -6,7 +6,7 @@ import { Icon, StepStatusTag, Tag, VerificationTag } from "@/components";
 import { ResearchTag, providerName } from "@/components/Tags";
 import { CiteProvider, ReportMarkdown } from "@/components/report";
 import { ExecBadge, evidenceToSources } from "@/components/ops";
-import { duration, eur, relativeTime } from "@/lib/format";
+import { credits, duration, relativeTime } from "@/lib/format";
 import { UNFINISHED_STEP, unfinishedStep, verificationStopped } from "@/lib/openIssues";
 import { EvidenceChips, evidenceId, focusEvidence } from "./Evidence";
 
@@ -102,7 +102,7 @@ export function PlanSummary({ execution }: { execution: Execution }) {
         <div>
           <dt>Estimated cost</dt>
           <dd>
-            {eur(plan.estimatedCostCents, { decimals: true })} <small>estimate</small>
+            {credits(plan.estimatedCostCents)} <small>estimate</small>
           </dd>
         </div>
       </dl>
@@ -295,7 +295,7 @@ function StepItem({ step, partial, sources, charged, runStatus }: { step: Execut
           )}
           {step.costCents > 0 && (
             <span>
-              {eur(step.costCents, { decimals: true })}
+              {credits(step.costCents)}
               {!charged && <small className="cs-est">estimate</small>}
             </span>
           )}

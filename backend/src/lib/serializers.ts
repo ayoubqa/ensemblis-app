@@ -285,6 +285,8 @@ export function toPublicTransaction(t: Transaction & { actor?: { id: string; nam
     type: t.type,
     amountCents: t.amountCents,
     description: t.description,
+    reason: t.reason,
+    balanceAfter: t.balanceAfter,
     taskId: t.taskId,
     executionId: t.executionId,
     createdAt: t.createdAt.toISOString(),

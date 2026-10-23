@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useConfig } from "@/lib/config";
-import { eur } from "@/lib/format";
+import { credits } from "@/lib/format";
 import { ROUTES } from "@/lib/routes";
 import { AiProvider, Contact, LegalPage, Sec, type LegalSection } from "../_legal/LegalBits";
 
@@ -90,7 +90,7 @@ export function TermsView() {
       <Sec id="credits">
         <p>
           {/* Amounts come from /api/config: never render the €0 fallback (server render, or config unavailable). */}
-          {loaded && <>New accounts receive {eur(config.startingCreditsCents)} of demo balance to try the service. </>}
+          {loaded && <>New accounts receive {credits(config.startingCreditsCents)} of demo balance to try the service. </>}
           {config.maxTasksPerUserPerDay > 0 && <>Each account can start up to {config.maxTasksPerUserPerDay} executions per day. </>}
           The demo balance:
         </p>

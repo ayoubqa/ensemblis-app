@@ -7,7 +7,7 @@ import { Icon, statusLabel } from "@/components";
 import { outcomeTagLabel } from "@/components/Tags";
 import { ExecBadge } from "@/components/ops";
 import { resultStateOf } from "@/lib/openIssues";
-import { eur, relativeTime } from "@/lib/format";
+import { credits, relativeTime } from "@/lib/format";
 import type { StreamState } from "./useObjectiveLive";
 
 type Tone = "live" | "wait" | "ok" | "bad" | "idle";
@@ -116,12 +116,12 @@ export function NowCard({
       case "FAILED":
         tone = "bad";
         title = "Execution failed";
-        sub = ex.refundedCents > 0 ? `${eur(ex.refundedCents, { decimals: true })} was refunded.` : "Completed work and the event log are kept.";
+        sub = ex.refundedCents > 0 ? `${credits(ex.refundedCents)} was refunded.` : "Completed work and the event log are kept.";
         break;
       case "CANCELLED":
         tone = "idle";
         title = "Execution cancelled";
-        sub = ex.refundedCents > 0 ? `${eur(ex.refundedCents, { decimals: true })} was refunded.` : "Nothing more will be executed.";
+        sub = ex.refundedCents > 0 ? `${credits(ex.refundedCents)} was refunded.` : "Nothing more will be executed.";
         break;
     }
 

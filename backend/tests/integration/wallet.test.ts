@@ -31,7 +31,7 @@ describe("wallet", () => {
     const org = await prisma.organization.create({ data: { ownerId: user.id, name: "Org" } });
     const objective = await prisma.objective.create({ data: { orgId: org.id, title: "t", statement: "s", budgetCents: 1000 } });
     const ex = await prisma.execution.create({ data: { orgId: org.id, objectiveId: objective.id, costCents: 500, walletUserId: user.id, chargedAt: new Date(), status: "RUNNING" } });
-    const r = await Promise.all([1, 2, 3].map(() => prisma.$transaction((tx) => refundExecution(tx, ex.id, 400, "test"))));
+    const r = await Promise.all([1, 2, 3].map(() => prisma.$transaction((tx) => refundExecution(tx, ex.id, 400, "execution_failed"))));
     expect(r.reduce((a, b) => a + b, 0)).toBe(500);
     expect(await balance(user.id)).toBe(500);
   });

@@ -5,7 +5,7 @@ import { useState } from "react";
 import { Icon, useToast } from "@/components";
 import { api, type CreditPack, type Transaction } from "@/lib/api";
 import { toastApiError } from "@/lib/errors";
-import { eur } from "@/lib/format";
+import { credits, eur } from "@/lib/format";
 import { ROUTES } from "@/lib/routes";
 import { storage } from "@/lib/utils";
 
@@ -19,7 +19,7 @@ export interface PendingCheckout {
 }
 
 /**
- * Add funds through Stripe Checkout. Only rendered when config.paymentsEnabled.
+ * Buy credit packs through Stripe Checkout (prices in euros). Only rendered when config.paymentsEnabled.
  * Each option states two facts from the server config: what you pay and what
  * is added to the balance. No tiers, badges or upsell.
  */
@@ -53,7 +53,7 @@ export function AddFunds({ packs, transactions, orgName }: { packs: CreditPack[]
     <div className="op-panel op-pad">
       <div className="op-inline" style={{ justifyContent: "space-between" }}>
         <p className="op-sec-sub" style={{ marginTop: 0 }}>
-          Choose an amount.{orgName ? ` Funds go into the ${orgName} organization balance.` : ""}
+          Choose a credit pack.{orgName ? ` Credits go into the ${orgName} organization balance.` : ""}
         </p>
         <span className="tag gray">
           <Icon name="lock" />
@@ -65,7 +65,7 @@ export function AddFunds({ packs, transactions, orgName }: { packs: CreditPack[]
           <li key={p.id}>
             <div className="op-fund">
               <span className="op-kpi-l">Added to your balance</span>
-              <span className="op-fund-v">{eur(p.credits, { decimals: p.credits % 100 !== 0 })}</span>
+              <span className="op-fund-v">{credits(p.credits)}</span>
               <span className="op-meta">
                 You pay {eur(p.priceCents, { decimals: p.priceCents % 100 !== 0 })}
               </span>
@@ -77,7 +77,7 @@ export function AddFunds({ packs, transactions, orgName }: { packs: CreditPack[]
                 aria-busy={busy === p.id}
               >
                 Pay {eur(p.priceCents)}
-                <span className="sr-only"> to add {eur(p.credits)} to your balance</span>
+                <span className="sr-only"> to add {credits(p.credits)} to your balance</span>
               </button>
             </div>
           </li>
@@ -86,7 +86,7 @@ export function AddFunds({ packs, transactions, orgName }: { packs: CreditPack[]
       <p className="op-secure">
         <Icon name="shield" />
         <span>
-          Payments are processed by Stripe. You finish on Stripe&apos;s secure checkout page — Ensemblis never sees or stores your card details. Funds are
+          Payments are processed by Stripe. You finish on Stripe&apos;s secure checkout page — Ensemblis never sees or stores your card details. Credits are
           added as soon as Stripe confirms the payment. See our <Link href={ROUTES.terms}>Terms</Link> and <Link href={ROUTES.privacy}>Privacy Policy</Link>.
         </span>
       </p>

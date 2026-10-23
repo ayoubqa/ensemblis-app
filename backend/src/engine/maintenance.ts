@@ -1,6 +1,7 @@
 // Periodic housekeeping, run by the worker (never by more than the processes
 // that run a worker): recovery sweep, recurring objectives, legacy run
-// refunds, expired guest trials, unused legacy attachments, old jobs.
+// refunds, expired guest trials, unused legacy attachments, old jobs, and the
+// hourly ledger check (lib/ledger.ts).
 
 import { log } from "../lib/log";
 import { cleanupExpiredGuests } from "../guest/cleanup";
@@ -9,6 +10,7 @@ import { sweepLegacyRuns } from "../legacy/tasks";
 import { schedulerTick } from "../workflows/schedule";
 import { pruneJobs } from "./queue";
 import { recoverExecutions } from "./recovery";
+import { checkLedger } from "../lib/ledger";
 
 let running = false;
 let lastHourly = 0;
@@ -32,6 +34,7 @@ export async function maintenance(): Promise<void> {
       await step("guests", () => cleanupExpiredGuests());
       await step("attachments", () => cleanupOrphanAttachments());
       await step("jobs", () => pruneJobs());
+      await step("ledger", () => checkLedger());
     }
   } finally {
     running = false;

@@ -1,6 +1,7 @@
 // =====================================================================
 // Ensemblis API contract — mirrors backend/src (engine/serialize.ts and the
-// route files). Money is always integer EUR cents. Dates are ISO strings.
+// route files). Wallet and price amounts (the "*Cents" fields) are whole credits;
+// only credit-pack prices are euro cents (real money). Dates are ISO strings.
 //
 // The product model:
 //   Objective        a desired business outcome (+ success criteria)
@@ -633,9 +634,14 @@ export interface Attention {
 
 export interface Transaction {
   id: string;
-  type: "TASK_CHARGE" | "REFUND" | "TOP_UP" | "PURCHASE";
-  amountCents: number; // negative for charges
+  /** GRANT = starting credits; ADJUSTMENT = opening balance or an operator correction. */
+  type: "TASK_CHARGE" | "REFUND" | "TOP_UP" | "PURCHASE" | "GRANT" | "ADJUSTMENT";
+  amountCents: number; // credits; negative for charges
   description: string;
+  /** Machine-readable reason (e.g. execution_charge, execution_failed, step_skipped); null on rows from before credits. */
+  reason?: string | null;
+  /** Wallet balance right after this movement; null on rows from before credits. */
+  balanceAfter?: number | null;
   taskId: string | null;
   executionId: string | null;
   createdAt: string;
@@ -822,6 +828,8 @@ export interface PublicConfig {
   /** Where this server's model calls go now: stub also for the mock AI (neither is a real model). Absent from an older API. */
   aiEndpoint?: "hosted" | "local" | "stub";
   verificationCostCents: number;
+  /** Credits needed before an objective can be planned (the cheapest possible plan). Absent from an older API. */
+  minimumPlanCents?: number;
   searchEnabled: boolean;
   /** The search provider actually used: tavily, wikipedia (no Tavily key) or off. */
   searchProvider: "tavily" | "wikipedia" | "off";
@@ -843,6 +851,38 @@ export interface PublicConfig {
 export interface DayCount {
   day: string;
   count: number;
+}
+
+/** Variable cost of a set of usage events (backend billing/economics.ts). Internal only. */
+export interface CostSummary {
+  eurMicros: number;
+  complete: boolean;
+  events: number;
+  pricedEvents: number;
+  unpricedEvents: number;
+  failedEvents: number;
+  estimatedTokenEvents: number;
+  unconvertibleEvents: number;
+  tokens: { in: number; cachedIn: number; out: number };
+}
+
+/** Internal unit economics for the owner dashboard. Credit value is list price, not revenue. */
+export interface AdminEconomics {
+  days: number;
+  since: string;
+  executions: { total: number; completed: number; failed: number; cancelled: number };
+  credits: { charged: number; refunded: number; net: number; perCompletedExecution: number | null };
+  creditsPerEur: number;
+  creditValueEurCents: number;
+  creditValueNote: string;
+  variableCost: CostSummary;
+  overheadCost: CostSummary;
+  costPerCompletedExecutionEurMicros: number | null;
+  contributionEurCents: number | null;
+  grossMarginPct: number | null;
+  targetMargin: number;
+  pricing: { configuredModels: string[]; configuredTools: string[]; fxCurrencies: string[]; problem: string | null };
+  excludedCosts: string[];
 }
 
 export interface AdminOverview {
@@ -868,7 +908,10 @@ export interface AdminOverview {
   ai: { providerLabel: string; callsToday: number; failuresToday: number; tokensInToday: number; tokensOutToday: number; tokensLast14d: DayCount[] };
   search: { providerLabel: string; callsToday: number; callsThisMonth: number; dailyBudget: number };
   email: { enabled: boolean; sentToday: number };
+  /** purchasesCents is real money (EUR cents); demoTopupsCents is credits. */
   money: { purchasesCents: number; purchasesCount: number; demoTopupsCents: number };
+  /** Every wallet's balance must equal the sum of its ledger rows. Absent from an older API. */
+  ledger?: { walletsChecked: number; mismatches: number; sample: { walletUserId: string; balance: number; ledgerSum: number }[] };
   recentFailures: { executionId: string; objectiveId: string; title: string; error: string; at: string }[];
   recentUsers: { id: string; name: string; email: string; isGuest: boolean; verified: boolean; createdAt: string }[];
 }
@@ -1064,4 +1107,5 @@ export const api = {
 
   // Owner dashboard (verified ADMIN_EMAILS only)
   adminOverview: () => request<AdminOverview>("/api/admin/overview"),
+  adminEconomics: (days = 30) => request<AdminEconomics>(`/api/admin/economics?days=${days}`),
 };

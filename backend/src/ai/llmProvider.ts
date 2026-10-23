@@ -50,6 +50,8 @@ export interface LLMOptions {
   taskId?: string | null;
   /** Links the usage event to an objective execution. */
   executionId?: string | null;
+  /** Links the usage event to the execution step it was made for. */
+  stepId?: string | null;
   /** What the call is for (metering / logs / mock provider). */
   purpose?: LLMPurpose;
   /** Output token cap for this call (defaults: OPENAI_MAX_TOKENS / 4096 for Claude). */
@@ -74,6 +76,10 @@ export interface LLMResult {
    * the mock/test handler.
    */
   tokensEstimated: boolean;
+  /** Input tokens the provider served from its prompt cache (included in tokensIn), when it reports them. */
+  cachedTokensIn?: number;
+  /** HTTP attempts the call took (1 = no retry), when known. */
+  attempts?: number;
 }
 
 export function currentProvider(): Provider {
@@ -534,8 +540,8 @@ export function openaiRequestBody(a: {
 interface OpenAIChunk {
   error?: { message?: unknown } | string;
   choices?: { delta?: { content?: unknown }; message?: { content?: unknown }; finish_reason?: unknown }[];
-  usage?: { prompt_tokens?: unknown; completion_tokens?: unknown } | null;
-  x_groq?: { usage?: { prompt_tokens?: unknown; completion_tokens?: unknown } | null };
+  usage?: { prompt_tokens?: unknown; completion_tokens?: unknown; prompt_tokens_details?: { cached_tokens?: unknown } | null } | null;
+  x_groq?: { usage?: { prompt_tokens?: unknown; completion_tokens?: unknown; prompt_tokens_details?: { cached_tokens?: unknown } | null } | null };
 }
 
 /**
@@ -545,7 +551,7 @@ interface OpenAIChunk {
 function applyOpenAIChunk(
   obj: OpenAIChunk,
   sink: TextSink,
-  state: { usage: { in: number; out: number } | null; finish: string | null }
+  state: { usage: { in: number; out: number; cached?: number } | null; finish: string | null }
 ): void {
   if (obj.error) {
     const m = typeof obj.error === "string" ? obj.error : String(obj.error.message ?? "unknown error");
@@ -559,9 +565,11 @@ function applyOpenAIChunk(
   if (typeof choice?.finish_reason === "string") state.finish = choice.finish_reason;
   const u = obj.usage ?? obj.x_groq?.usage;
   if (u && (typeof u.prompt_tokens === "number" || typeof u.completion_tokens === "number")) {
+    const cached = u.prompt_tokens_details?.cached_tokens;
     state.usage = {
       in: typeof u.prompt_tokens === "number" ? u.prompt_tokens : 0,
       out: typeof u.completion_tokens === "number" ? u.completion_tokens : 0,
+      ...(typeof cached === "number" ? { cached } : {}),
     };
   }
 }
@@ -616,7 +624,7 @@ async function runWithOpenAI(systemPrompt: string, userContent: string, opts: LL
     }
 
     if (res.ok) {
-      const state: { usage: { in: number; out: number } | null; finish: string | null } = { usage: null, finish: null };
+      const state: { usage: { in: number; out: number; cached?: number } | null; finish: string | null } = { usage: null, finish: null };
       const contentType = (res.headers.get("content-type") || "").toLowerCase();
       try {
         if (contentType.includes("application/json")) {
@@ -687,6 +695,8 @@ async function runWithOpenAI(systemPrompt: string, userContent: string, opts: LL
         tokensOut: state.usage?.out ?? approxTokens(sink.text),
         truncated: state.finish === "length",
         tokensEstimated: state.usage === null,
+        ...(state.usage?.cached !== undefined ? { cachedTokensIn: state.usage.cached } : {}),
+        attempts: attempt + 1,
       };
     }
 
@@ -811,13 +821,16 @@ async function runWithAnthropic(systemPrompt: string, userContent: string, opts:
       .map((block) => block.text)
       .join("\n\n");
     if (!text.trim()) throw new Error("The AI model returned an empty response");
-    const usage = message.usage as { input_tokens?: unknown; output_tokens?: unknown } | undefined;
+    const usage = message.usage as { input_tokens?: unknown; output_tokens?: unknown; cache_read_input_tokens?: unknown } | undefined;
+    // Anthropic counts cache reads apart from input_tokens; tokensIn includes them, like the OpenAI format.
+    const cacheRead = typeof usage?.cache_read_input_tokens === "number" ? usage.cache_read_input_tokens : 0;
     const reported = typeof usage?.input_tokens === "number" && typeof usage?.output_tokens === "number";
     return {
       text,
       provider: "anthropic",
       model,
-      tokensIn: reported ? (usage!.input_tokens as number) : approxTokens(systemPrompt + userContent),
+      tokensIn: reported ? (usage!.input_tokens as number) + cacheRead : approxTokens(systemPrompt + userContent),
+      ...(reported && cacheRead > 0 ? { cachedTokensIn: cacheRead } : {}),
       tokensOut: reported ? (usage!.output_tokens as number) : approxTokens(text),
       truncated: message.stop_reason === "max_tokens",
       tokensEstimated: !reported,
@@ -898,9 +911,12 @@ export async function runLLM(systemPrompt: string, userContent: string, opts: LL
         ok: true,
         taskId: opts.taskId ?? null,
         executionId: opts.executionId ?? null,
+        stepId: opts.stepId ?? null,
         latencyMs,
         purpose: meta.purpose,
         estimated: result.tokensEstimated,
+        cachedTokensIn: result.cachedTokensIn ?? null,
+        attempts: result.attempts ?? null,
       }).catch(() => undefined);
       return { ...result, latencyMs };
     } catch (err) {
@@ -917,6 +933,7 @@ export async function runLLM(systemPrompt: string, userContent: string, opts: LL
         ok: false,
         taskId: opts.taskId ?? null,
         executionId: opts.executionId ?? null,
+        stepId: opts.stepId ?? null,
         latencyMs,
         purpose: meta.purpose,
         estimated: true,

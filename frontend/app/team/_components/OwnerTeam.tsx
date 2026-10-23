@@ -6,7 +6,7 @@ import { Avatar, Icon, Modal, useToast } from "@/components";
 import { api, type TeamDetail, type TeamInviteInfo, type TeamMemberInfo } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { toastApiError } from "@/lib/errors";
-import { dateTime, dayLabel, eur, longDate, num, plural, relativeTime } from "@/lib/format";
+import { credits, dateTime, dayLabel, longDate, num, plural, relativeTime } from "@/lib/format";
 import { ROUTES } from "@/lib/routes";
 import { SectionHead, TEAM_NAME_MAX, copyText, inviteUrl, teamNameError } from "./teamShared";
 
@@ -207,7 +207,7 @@ export function OwnerTeam({ team, setTeam }: { team: TeamDetail; setTeam: (t: Te
             <Icon name="wallet" />
             Organization balance
           </span>
-          <span className="op-kpi-v">{eur(team.walletCents)}</span>
+          <span className="op-kpi-v">{credits(team.walletCents)}</span>
           <span className="op-kpi-m">Your balance, shared with {plural(Math.max(0, memberCount - 1), "member")}</span>
           <span className="op-kpi-a">
             <Link className="op-link" href={ROUTES.usage}>

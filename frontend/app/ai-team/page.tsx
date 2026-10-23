@@ -6,7 +6,7 @@ import { api, type AITeam, type CapabilityInfo, type ExecutiveInfo, type ToolRef
 import { EmptyState, Icon, PageHead, PageSkeleton, RequireAuth } from "@/components";
 import { ExecBadge } from "@/components/ops";
 import { errorText } from "@/lib/errors";
-import { eur, num, plural } from "@/lib/format";
+import { credits, num, plural } from "@/lib/format";
 import { usePolling } from "@/lib/hooks";
 import { ROUTES } from "@/lib/routes";
 
@@ -104,7 +104,7 @@ function Capability({ c }: { c: CapabilityInfo }) {
                 </ul>
               </div>
             )}
-            <p className="op-meta">Each step using this capability is estimated at {eur(c.costCents, { decimals: true })} in the plan you approve.</p>
+            <p className="op-meta">Each step using this capability is estimated at {credits(c.costCents)} in the plan you approve.</p>
           </div>
         </details>
         <span className="op-meta">{plural(c.completedLast30d, "step")} completed in 30 days</span>
@@ -291,7 +291,7 @@ function Team() {
             )}
             <p className="op-note">
               Capability registry {team.version}. Every step records the capability version it used, and every execution is checked by an independent verification (
-              {eur(team.verificationCostCents, { decimals: true })} per execution, included in plan estimates).
+              {credits(team.verificationCostCents)} per execution, included in plan estimates).
             </p>
           </div>
           <ul className="op-list" aria-label="Granted tools">

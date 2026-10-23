@@ -6,7 +6,7 @@ import { Icon, RequireAuth, Skeleton, SkeletonText, useToast } from "@/component
 import { api, type TeamDetail } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { errorText, toastApiError } from "@/lib/errors";
-import { eur } from "@/lib/format";
+import { credits } from "@/lib/format";
 import { ROUTES } from "@/lib/routes";
 import { MemberTeam } from "./_components/MemberTeam";
 import { OwnerTeam } from "./_components/OwnerTeam";
@@ -203,8 +203,8 @@ function CreateTeam({ onCreated }: { onCreated: (t: TeamDetail) => void }) {
         <div className="notice" style={{ marginTop: 14, background: "var(--accent-soft)", color: "var(--ink)" }}>
           <Icon name="wallet" style={{ color: "var(--accent)" }} />
           <span>
-            You&apos;ll be the owner. Your balance ({eur(user.credits)}) becomes the organization balance: members&apos; executions are paid from
-            it, and only you can add funds.
+            You&apos;ll be the owner. Your balance ({credits(user.credits)}) becomes the organization balance: members&apos; executions are paid from
+            it, and only you can add credits.
           </span>
         </div>
         {err && (

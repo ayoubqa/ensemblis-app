@@ -2,6 +2,7 @@
 // Pure functions — unit tested in tests/unit/policy.test.ts.
 
 import type { Autonomy, RiskLevel } from "@prisma/client";
+import { formatCredits } from "../billing/credits";
 import { getCapability } from "./registry";
 import { TOOLS, type ToolKey, type ToolPermission } from "./tools";
 
@@ -64,7 +65,6 @@ export interface ApprovalDecision {
   recommendation: string;
 }
 
-const eur = (cents: number) => `€${(cents / 100).toFixed(2)}`;
 
 /**
  * Decides whether an execution may start on its own. Approval is required when:
@@ -86,13 +86,13 @@ export function decideApproval(input: ApprovalInput): ApprovalDecision {
   const overBudget = input.estimatedCostCents > input.budgetCents;
   if (overBudget) {
     kind = kind ?? "BUDGET";
-    reasons.push(`The estimated cost (${eur(input.estimatedCostCents)}) is above this objective's budget (${eur(input.budgetCents)}).`);
+    reasons.push(`The estimated cost (${formatCredits(input.estimatedCostCents)}) is above this objective's budget (${formatCredits(input.budgetCents)}).`);
   }
   const overThreshold = input.estimatedCostCents > input.approvalThresholdCents;
   if (overThreshold) {
     kind = kind ?? "BUDGET";
     reasons.push(
-      `The estimated cost (${eur(input.estimatedCostCents)}) is above your organization's approval threshold (${eur(input.approvalThresholdCents)}).`
+      `The estimated cost (${formatCredits(input.estimatedCostCents)}) is above your organization's approval threshold (${formatCredits(input.approvalThresholdCents)}).`
     );
   }
   if (input.autonomy === "REVIEW_PLAN") {
@@ -109,12 +109,12 @@ export function decideApproval(input: ApprovalInput): ApprovalDecision {
     recommendation = "Reject unless you have reviewed exactly which external actions will be taken. This release only runs read-only work.";
   } else if (overBudget) {
     recommendedDecision = "APPROVE";
-    recommendation = `Approve only if the result is worth ${eur(input.estimatedCostCents)}; otherwise reject and narrow the objective or raise its budget.`;
+    recommendation = `Approve only if the result is worth ${formatCredits(input.estimatedCostCents)}; otherwise reject and narrow the objective or raise its budget.`;
   } else {
     recommendation =
       `Approve. The plan is read-only research and analysis` +
       (input.criteriaCount ? ` that addresses ${input.criteriaCount} success criteri${input.criteriaCount === 1 ? "on" : "a"}` : "") +
-      `, and the estimate of ${eur(input.estimatedCostCents)} is within budget.`;
+      `, and the estimate of ${formatCredits(input.estimatedCostCents)} is within budget.`;
   }
   return { required, kind: required ? kind : null, reasons, risk, recommendedDecision, recommendation };
 }

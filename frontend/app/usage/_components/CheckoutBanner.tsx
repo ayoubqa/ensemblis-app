@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { Icon, useToast } from "@/components";
 import { api, type Billing, type Transaction } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
-import { eur } from "@/lib/format";
+import { credits } from "@/lib/format";
 import { usePolling } from "@/lib/hooks";
 import { ROUTES } from "@/lib/routes";
 import { storage } from "@/lib/utils";
@@ -75,7 +75,7 @@ export function CheckoutBanner({ onBilling }: { onBilling: (b: Billing) => void 
         setState("done");
         storage.set(CHECKOUT_KEY, null);
 
-        toast(`${eur(found.amountCents)} added to your balance`, { icon: "check" });
+        toast(`${credits(found.amountCents)} added to your balance`, { icon: "check" });
         return false;
       }
       return true;
@@ -90,7 +90,7 @@ export function CheckoutBanner({ onBilling }: { onBilling: (b: Billing) => void 
     return (
       <div className="notice" role="status" style={{ marginBottom: 18, background: "var(--surface2)", color: "var(--ink)", boxShadow: "inset 0 0 0 1px var(--line)", alignItems: "center" }}>
         <Icon name="info" />
-        <span className="sp">Checkout cancelled — no payment was taken. You can add funds again whenever you&apos;re ready.</span>
+        <span className="sp">Checkout cancelled — no payment was taken. You can buy credits whenever you&apos;re ready.</span>
         <button type="button" className="btn sm ghost" onClick={() => setState(null)} aria-label="Dismiss">
           <Icon name="x" />
         </button>
@@ -102,7 +102,7 @@ export function CheckoutBanner({ onBilling }: { onBilling: (b: Billing) => void 
       <div className="notice" role="status" style={{ marginBottom: 18, background: "var(--ok-soft)", color: "var(--ok)", alignItems: "center" }}>
         <Icon name="check" />
         <span className="sp">
-          <b>Payment complete.</b> {amount !== null ? `${eur(amount)} ` : "Your payment"} landed in your balance. Thank you!
+          <b>Payment complete.</b> {amount !== null ? `${credits(amount)} were added to your balance.` : "Your credits landed in your balance."} Thank you!
         </span>
         <button type="button" className="btn sm ghost" onClick={() => setState(null)} aria-label="Dismiss">
           <Icon name="x" />

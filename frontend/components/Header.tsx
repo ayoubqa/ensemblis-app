@@ -5,7 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useCallback, useEffect, useId, useRef, useState, type FocusEvent, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import type { Attention } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
-import { eur } from "@/lib/format";
+import { credits } from "@/lib/format";
 import { useOnClickOutside } from "@/lib/hooks";
 import { ROUTES } from "@/lib/routes";
 import { Avatar } from "./Avatar";
@@ -219,10 +219,10 @@ export function Header() {
                 className={cx("sh-bal", isGuest && "guest", onUsage && "on")}
                 title={balanceTitle}
                 aria-current={onUsage ? "page" : undefined}
-                aria-label={`Balance ${eur(user.credits)}, open Usage`}
+                aria-label={`Balance ${credits(user.credits)}, open Usage`}
               >
                 <Icon name="wallet" size={15} />
-                <span className="sh-bal-amt">{eur(user.credits)}</span>
+                <span className="sh-bal-amt">{credits(user.credits)}</span>
               </Link>
               {isGuest && (
                 <Link href={CLAIM_HREF} className="btn sm sh-save" title="Create a free account and keep everything from your trial">
@@ -263,7 +263,7 @@ export function Header() {
                     <Link href={ROUTES.usage} className="sh-acct-bal" onClick={close} aria-current={onUsage ? "page" : undefined}>
                       <span>
                         <span className="sh-acct-k">{isGuest ? "Trial balance" : user.walletOwner === "team" ? "Organization balance" : "Balance"}</span>
-                        <b>{eur(user.credits)}</b>
+                        <b>{credits(user.credits)}</b>
                       </span>
                       <span className="sh-acct-go">
                         Usage
@@ -476,7 +476,7 @@ export function BottomNav() {
           </ul>
           <h4 className="sh-more-h">Account</h4>
           <ul className="sh-tiles">
-            {tile(ROUTES.usage, "wallet", "Usage", `Balance ${eur(user.credits)}`)}
+            {tile(ROUTES.usage, "wallet", "Usage", `Balance ${credits(user.credits)}`)}
             {tile(ROUTES.routines, "redo", "Recurring objectives")}
             {!isGuest && tile(ROUTES.members, "users", "Organization members", user.team?.name)}
             {!isGuest && tile(ROUTES.settings, "settings", "Settings")}

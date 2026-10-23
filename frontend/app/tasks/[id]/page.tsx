@@ -6,7 +6,7 @@ import { useParams } from "next/navigation";
 import { api, ApiError, type LegacyTask } from "@/lib/api";
 import { EmptyState, Icon, PageSkeleton, RequireAuth, useToast } from "@/components";
 import { ExportMenu, LEGACY_NOTE, ReportView, copyText, reportTitle } from "@/components/report";
-import { eur, longDate } from "@/lib/format";
+import { credits, longDate } from "@/lib/format";
 import { ROUTES } from "@/lib/routes";
 
 const EARLIER = ROUTES.legacyReports;
@@ -123,7 +123,7 @@ function LegacyReport() {
         </div>
         <p className="cs-legacy-meta">
           {task.createdBy.name} · {longDate(task.completedAt ?? task.createdAt)}
-          {task.costCents > 0 && ` · ${eur(task.costCents, { decimals: true })}`}
+          {task.costCents > 0 && ` · ${credits(task.costCents)}`}
         </p>
       </header>
 

@@ -1,5 +1,6 @@
 import { createHash, randomBytes } from "crypto";
 import { Router } from "express";
+import { startingGrant } from "../lib/wallet";
 import bcrypt from "bcryptjs";
 import { Prisma } from "@prisma/client";
 import { z } from "zod";
@@ -79,6 +80,7 @@ router.post(
           accountType,
           builds,
           credits: config.startingCreditsCents,
+          ...startingGrant(config.startingCreditsCents, "signup_grant"),
           termsAcceptedAt: new Date(),
           role: accountType === "DEVELOPER" ? "Agent developer" : "Founder",
           seats: { create: [{ name, role: "Owner" }] },
