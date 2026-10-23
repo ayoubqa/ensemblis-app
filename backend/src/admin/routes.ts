@@ -18,6 +18,7 @@ import { queueStats } from "../engine/queue";
 import { effectiveSearchProvider, searchProviderLabel } from "../research/search";
 import { reconcileWallets } from "../lib/ledger";
 import { economicsSummary, executionEconomics } from "../billing/economics";
+import { premiumStatus } from "../ai/premium";
 import { HttpError } from "../lib/http";
 
 const router = Router();
@@ -169,6 +170,7 @@ export async function adminOverview(now = new Date()) {
       tokensInToday: llmTokensToday._sum.tokensIn ?? 0,
       tokensOutToday: llmTokensToday._sum.tokensOut ?? 0,
       tokensLast14d: bucketByDay(days, llmRows, (r) => r.createdAt, (r) => r.tokensIn + r.tokensOut),
+      premium: await premiumStatus(),
     },
     search: { providerLabel: searchProviderLabel(), callsToday: searchToday, callsThisMonth: searchMonth, dailyBudget: config.search.dailyBudget },
     email: { enabled: config.email.enabled, sentToday: emailsToday },

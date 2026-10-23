@@ -927,7 +927,18 @@ export interface AdminOverview {
     legacyTasks: number;
   };
   queue: { queued: number; running: number; deadLast24h: number; oldestQueuedSeconds: number };
-  ai: { providerLabel: string; callsToday: number; failuresToday: number; tokensInToday: number; tokensOutToday: number; tokensLast14d: DayCount[] };
+  ai: {
+    providerLabel: string;
+    callsToday: number;
+    failuresToday: number;
+    tokensInToday: number;
+    tokensOutToday: number;
+    tokensLast14d: DayCount[];
+    /** The optional premium model route (server-side configuration). */
+    premium?:
+      | { configured: false }
+      | { configured: boolean; model: string; priced: boolean; pausedFor: string | null; dailyBudgetEur: number | null; spentTodayEurMicros: number | null; purposes: string[] };
+  };
   search: { providerLabel: string; callsToday: number; callsThisMonth: number; dailyBudget: number };
   email: { enabled: boolean; sentToday: number };
   /** purchasesCents is real money (EUR cents); demoTopupsCents is credits. */

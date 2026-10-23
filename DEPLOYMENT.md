@@ -69,6 +69,7 @@ applies only if you add a standalone worker:
 | `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` | ✔ | – | optional real payments |
 | `TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET_KEY` | ✔ | – | optional bot check |
 | `SIGNUP_INVITE_CODE` | ✔ | – | optional invite-only sign-up |
+| `PREMIUM_API_KEY` | ✔ | ✔ | optional: an **OpenAI** API key (not the Groq key) for the premium model route below; empty keeps every call on Groq |
 
 Set by `render.yaml`: `NODE_VERSION=22`, `NODE_ENV=production`,
 `AI_PROVIDER=openai`, `OPENAI_BASE_URL`, `OPENAI_MODEL`, `OPENAI_FAST_MODEL`,
@@ -103,6 +104,28 @@ Credits and cost accounting (API only; defaults shown — none needs setting for
 | `CREDITS_PER_EUR` | `100` | Internal value of a credit (1 credit = €0.01 at the default) for accounting and pricing. Balances are stored as whole credits and are **not** rewritten when it changes; every existing balance was issued at 100 per €1, so changing it revalues them internally (the API logs a warning). Leave it at 100 unless you deliberately re-denominate. |
 | `MAX_TOKENS_PER_EXECUTION` | `600000` | Runaway guard: an execution whose model calls have used this many tokens stops before its next step (or verification) and fails, which refunds its credits. `0` turns it off. A normal execution uses well under 100,000. |
 | `PROVIDER_PRICING` | set in `render.yaml` (checked 2026-10-23) | JSON price table for **internal** cost accounting (owner dashboard, `/api/admin/economics`): per-million-token prices per model, per-call prices per paid tool, exchange rates to EUR, plus `asOf` (the date the prices were checked; older than 90 days is flagged on the dashboard) and `sources`. Optional `fixedMonthlyEur` (e.g. `{"render":0,"neon":19}`, allocated pro rata) and `paymentFees` (`{"percent":1.5,"fixedEurCents":25}` per completed purchase) — left out, they are reported as *not configured*, never as zero. Change it in `render.yaml` (a dashboard edit is overwritten by the next Blueprint sync); take numbers only from the providers' own price pages. Unset or invalid: usage is still recorded, but costs stay unpriced (never guessed). None of the resulting figures is net profit: credit value is list price (demo credits are not revenue), and taxes and labour are never included. |
+
+Premium model route (optional; same values on the API and a standalone worker). `render.yaml`
+sets `PREMIUM_MODEL=gpt-5.5`, `PREMIUM_REASONING_EFFORT=low` and `PREMIUM_DAILY_BUDGET_EUR=2`; the
+route stays **off** until `PREMIUM_API_KEY` is set:
+
+| Variable | Default | What it does |
+|---|---|---|
+| `PREMIUM_MODEL` | unset (off) | Model id at the premium endpoint, served over Chat Completions. Main-tier calls for the purposes below go to it; fast-tier calls (search queries, memory, claim checks) stay on `OPENAI_MODEL`/`OPENAI_FAST_MODEL`. |
+| `PREMIUM_BASE_URL` | `https://api.openai.com/v1` | The premium endpoint. |
+| `PREMIUM_REASONING_EFFORT` | `low` | `none`, `low`, `medium`, `high` or `xhigh` (GPT-5.5's own default is `medium`, which spends more tokens). |
+| `PREMIUM_MAX_TOKENS` | the call's own cap | Output cap per premium call (reasoning tokens count towards it). |
+| `PREMIUM_PURPOSES` | `plan,step,verify` | Which calls it serves. |
+| `PREMIUM_DAILY_BUDGET_EUR` | `2` | Premium spend per UTC day, summed from priced usage; once reached, every call uses the fallback until midnight UTC. `0` turns the route off. |
+
+The fallback is the standard route (`OPENAI_BASE_URL`/`OPENAI_API_KEY`/`OPENAI_MODEL`, Groq
+gpt-oss-120b). A premium call that fails before any output reached the user (bad key, unknown
+model, quota, rate limit, provider error, timeout) is retried on the fallback within the same call;
+key, model and quota errors pause the premium route for 15 minutes, rate limits for 1 minute. The
+route is used only while `PREMIUM_MODEL` has a price in `PROVIDER_PRICING` (otherwise the daily
+budget can't be enforced). The owner dashboard's AI tile shows whether it is on, paused or over
+budget. Whether the OpenAI account behind the key can use the model is only known after a call —
+check the boot log and the dashboard after setting the key.
 
 **Credits.** Customers see balances, budgets, estimates, charges and refunds in
 credits. No balance is converted: the stored integer was already one cent of

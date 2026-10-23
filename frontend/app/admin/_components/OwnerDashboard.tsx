@@ -174,6 +174,7 @@ function Body({ d }: { d: AdminOverview }) {
         </Tile>
         <Tile icon="chart" label="AI calls today" value={num(ai.callsToday)} flag={ai.failuresToday > 0 ? { tone: "bad", text: `${num(ai.failuresToday)} failed` } : undefined}>
           {ai.providerLabel || "AI provider"} · {compact(tokensToday)} tokens
+          {ai.premium && "model" in ai.premium && <PremiumLine p={ai.premium} />}
         </Tile>
         <Tile
           icon="globe"
@@ -330,6 +331,25 @@ function Body({ d }: { d: AdminOverview }) {
   );
 }
 
+
+/** Premium model route status under the AI tile: why it isn't serving calls, or today's spend against its budget. */
+function PremiumLine({ p }: { p: Extract<NonNullable<AdminOverview["ai"]["premium"]>, { model: string }> }) {
+  const state = !p.configured
+    ? "off: PREMIUM_API_KEY not set"
+    : !p.priced
+      ? "off: no price in PROVIDER_PRICING"
+      : p.pausedFor
+        ? `paused (${p.pausedFor}), using the fallback`
+        : p.dailyBudgetEur != null && p.spentTodayEurMicros != null
+          ? `${eurMicros(p.spentTodayEurMicros)} of €${p.dailyBudgetEur} today`
+          : "on";
+  return (
+    <>
+      <br />
+      {p.model}: {state}
+    </>
+  );
+}
 
 /** Millionths of EUR: "€0.0123" below €1, "€12.34" above. */
 function eurMicros(m: number | null): string {

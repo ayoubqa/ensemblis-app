@@ -149,7 +149,9 @@ describe("the deployed price table (render.yaml)", () => {
     expect(status.sources.length).toBeGreaterThan(0);
     const model = /- key: OPENAI_MODEL\n\s+value: (\S+)/.exec(yaml)?.[1];
     const fast = /- key: OPENAI_FAST_MODEL\n\s+value: (\S+)/.exec(yaml)?.[1];
-    for (const m of [model, fast]) expect(priceModelCall({ provider: "openai", model: m, tokensIn: 1000, tokensOut: 1000 })).not.toBeNull();
+    // The premium route (ai/premium.ts) stays off for an unpriced model, so its model must be priced too.
+    const premium = /- key: PREMIUM_MODEL\n\s+value: (\S+)/.exec(yaml)?.[1];
+    for (const m of [model, fast, premium]) expect(priceModelCall({ provider: "openai", model: m, tokensIn: 1000, tokensOut: 1000 })).not.toBeNull();
     expect(priceToolCall("search:tavily")).not.toBeNull();
     // Every priced currency converts to EUR.
     const t = pricingTable().table;

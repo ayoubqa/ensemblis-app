@@ -103,6 +103,17 @@ services:
         value: "8192"
       - key: OPENAI_FAST_MODEL
         value: openai/gpt-oss-20b
+      # Optional premium model for plan/step/verify calls, with Groq above as the fallback. OFF until
+      # PREMIUM_API_KEY (an api.openai.com key, not the Groq key) is set; spend is capped per UTC day
+      # from priced usage (PROVIDER_PRICING). See DEPLOYMENT.md §2.
+      - key: PREMIUM_MODEL
+        value: gpt-5.5
+      - key: PREMIUM_API_KEY # OpenAI API key; leave empty to keep every call on Groq
+        sync: false
+      - key: PREMIUM_REASONING_EFFORT
+        value: low
+      - key: PREMIUM_DAILY_BUDGET_EUR
+        value: "2"
       # Groq's free tier allows few tokens per minute: one model call at a time per process.
       - key: MAX_CONCURRENT_LLM
         value: "1"
