@@ -94,6 +94,8 @@ router.post(
     const ex = await own(req, req.params.id);
     if (!["COMPLETED", "FAILED", "CANCELLED"].includes(ex.status)) throw new HttpError(409, "You can rate the result once the execution has finished.");
     const saved = await prisma.$transaction(async (tx) => {
+      // Serialise answers for this execution, so two at once can't both insert (one answer per execution).
+      await tx.$executeRaw`SELECT 1 FROM "Execution" WHERE "id" = ${ex.id} FOR UPDATE`;
       await tx.valueRecord.deleteMany({ where: { executionId: ex.id, metric: FEEDBACK_METRIC } });
       return tx.valueRecord.create({
         data: { orgId: ex.orgId, executionId: ex.id, objectiveId: ex.objectiveId, metric: FEEDBACK_METRIC, value: body.useful ? 1 : 0, unit: "boolean", note: body.comment ?? "" },

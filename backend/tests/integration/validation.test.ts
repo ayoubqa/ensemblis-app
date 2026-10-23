@@ -30,6 +30,10 @@ describe("validation metrics", () => {
     expect(fb).toMatchObject({ useful: true, comment: "Saved me a day of desk research." });
     expect((await getExecution(a.auth, first)).feedback).toMatchObject({ useful: true });
     await api().post(`/api/executions/${first}/feedback`).set(owner.auth).send({ useful: false }).expect(404);
+    // Answers sent at the same time still leave one answer.
+    await Promise.all([true, false, true, false].map((useful) => api().post(`/api/executions/${first}/feedback`).set(a.auth).send({ useful }).expect(200)));
+    expect(await prisma.valueRecord.count({ where: { executionId: first, metric: "feedback_useful" } })).toBe(1);
+    await api().post(`/api/executions/${first}/feedback`).set(a.auth).send({ useful: true, comment: "Saved me a day of desk research." }).expect(200);
     await api().post(`/api/executions/${first}/feedback`).set(a.auth).send({ useful: true, comment: "x".repeat(501) }).expect(400);
 
     // A second run on another day (moved back a day) and one before the period: repeat and returning use.
