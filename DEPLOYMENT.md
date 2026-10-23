@@ -236,6 +236,20 @@ but pages can error until both are live — deploy at a quiet time.
 
 ## 4b. Releasing the credits stack (PRs #3 → #7)
 
+**Merge each PR with "Create a merge commit" — never "Squash and merge" or "Rebase and merge".** Each PR
+contains the previous one's commits: merged with merge commits the five merge with no conflicts and
+the result is identical to the tip of #7 (checked in a throwaway worktree); squashing #3 makes #4
+conflict in 12 files. After each merge, change the next PR's base to `main` (GitHub does it
+automatically only if you delete the merged branch).
+
+**Custom domain.** If the site is served from a custom domain (e.g. `getensemblist.com`), then before
+releasing check: Vercel → Settings → Domains shows it assigned to **Production** (branch `main`), not
+a preview; on Render, `CORS_ORIGIN` lists that exact origin (`https://getensemblist.com`, comma-separated
+with any others — a missing origin makes the site load but every API call fail) and `APP_URL` is the
+same origin (used in e-mails, share links and Stripe redirects); on Vercel, `NEXT_PUBLIC_API_URL` is the
+API URL and, optionally, `NEXT_PUBLIC_SITE_URL` the custom origin. After the last merge, open the custom
+domain and confirm it serves the new build (the owner dashboard shows "Market validation").
+
 Every push to `main` deploys production: Vercel promotes it, and Render builds `ensemblis-api`, runs
 `dist/ops/migrate.js` (pending migrations) and starts it. Render marks a deploy live only after
 `/health` (database included) passes. Release one PR at a time, in order, at a quiet hour.
