@@ -3,6 +3,7 @@
 // "*Cents" fields; billing/credits.ts).
 // Never exposed: prompts, evidence `content` (only excerpts), document text.
 
+import { toPublicDeliverable, workLedger } from "./stepChecks";
 import type {
   Approval,
   ClaimCheck,
@@ -269,6 +270,8 @@ export function toPublicStep(s: ExecutionStep, evidence: Evidence[] = []) {
     evidenceNs: evidence.filter((e) => e.stepId === s.id).map((e) => e.n),
     researchStatus: toResearchStatus(s.researchStatus),
     research: toPublicResearch(s.research),
+    /** Whether the output delivers what the plan said the step would (engine/stepChecks.ts); null until completed, and for steps from before the check. */
+    deliverable: s.status === "COMPLETED" ? toPublicDeliverable(s.deliverable) : null,
   };
 }
 
@@ -683,6 +686,8 @@ export function toPublicExecution(e: FullExecution) {
     outcomeConfirmedAt: iso(e.outcomeConfirmedAt),
     revisionCount: e.revisionCount,
     steps: e.steps.map((s) => toPublicStep(s, e.evidence)),
+    /** Step counts by where each stands (delivered / with gaps / unchecked / failed / skipped / not finished). */
+    workLedger: workLedger(e.steps),
     evidence: e.evidence.map(toPublicExecutionEvidence),
     /** The domains the result may link to (linkDomainsOf); the report renderers show any other link as text. */
     linkDomains: linkDomainsOf(e),

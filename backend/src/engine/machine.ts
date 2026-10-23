@@ -469,6 +469,7 @@ async function runOneStep(ex: Execution, step: ExecutionStep, steps: ExecutionSt
           tokensOut: out.tokensOut,
           tokensEstimated: out.tokensEstimated,
           latencyMs: out.latencyMs,
+          deliverable: out.deliverable as unknown as Prisma.InputJsonValue,
           completedAt: new Date(),
         },
       });
@@ -492,6 +493,7 @@ async function runOneStep(ex: Execution, step: ExecutionStep, steps: ExecutionSt
           tokensEstimated: out.tokensEstimated,
           citationsRemoved: out.citationsRemoved,
           researchStatus: out.research?.status ?? null,
+          deliverable: out.deliverable.status,
         },
       });
       return true;

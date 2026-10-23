@@ -29,7 +29,8 @@ import { formatCompanyProfile, getCompanyContext, retrievePassages } from "../co
 import { relevantMemories } from "../memory/service";
 import { redact } from "../lib/log";
 import { checkToolAccess, DEFAULT_TOOL_GRANTS, deniedToolsFor } from "../org/policy";
-import { getCapability, getExecutive, type Capability } from "../org/registry";
+import { getCapability, getExecutive, searchesWeb, type Capability } from "../org/registry";
+import { assessStep, notDeliveredReason, type StepDeliverable } from "./stepChecks";
 import { allowedLinkDomains, buildSourcesBlock, citationRules, cleanOutputWithStats, stripPreamble } from "../research/citations";
 import { research, type ResearchOutcome, type ResearchStatus, type SearchAttempt, type SearchProviderName } from "../research/sources";
 import { searchEnabled } from "../research/search";
@@ -119,6 +120,8 @@ export interface StepRunOutput {
   research: StepResearchSummary | null;
   /** Only the evidence rows this call created (rows reused from earlier steps or attempts are not included). */
   newEvidence: AddedEvidence[];
+  /** Whether the output delivers what the plan said this step would (engine/stepChecks.ts). */
+  deliverable: StepDeliverable;
 }
 
 /** The shape stored in ExecutionStep.research (no secrets, no raw provider bodies). */
@@ -710,6 +713,22 @@ export async function runStep(input: StepRunInput): Promise<StepRunOutput> {
   const cleaned = cleanOutputWithStats(raw, evidence.length, allowed);
   const output = cleaned.text;
   if (!output) throw new StepError(`${cap.specialist} returned an empty response`, true, "empty");
+  // A reply is not a delivery: an intermediate step whose output plainly doesn't do the step is a failed
+  // attempt (retried), never a completed step. The result itself (synthesis, revisions) is judged by the
+  // verification gate instead, whose failure path refunds everything on cancel.
+  const deliverable = assessStep({
+    output,
+    expectedOutputs: Array.isArray(input.step.outputs) ? (input.step.outputs as unknown[]).filter((o): o is string => typeof o === "string") : [],
+    kind: isRevision ? "revision" : "work",
+    capabilityKind: cap.kind,
+    searchesWeb: searchesWeb(cap),
+    ownEvidence: evidence.filter((e) => e.stepId === input.step.id).map((e) => e.n),
+    evidenceCount: evidence.length,
+    citationsRemoved: cleaned.removedCitations,
+  });
+  if (deliverable.status === "not_delivered" && !isSynthesis && !isRevision) {
+    throw new StepError(`${cap.specialist}'s output did not deliver this step: ${notDeliveredReason(deliverable)}`, true, "empty");
+  }
 
   return {
     output,
@@ -723,5 +742,6 @@ export async function runStep(input: StepRunInput): Promise<StepRunOutput> {
     citationsRemoved: cleaned.removedCitations,
     research: gathered.research,
     newEvidence: gathered.created,
+    deliverable,
   };
 }

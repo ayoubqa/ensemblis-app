@@ -64,6 +64,56 @@ describe("step failures and recovery paths", () => {
     expect(ex.events.map((e: { type: string }) => e.type)).toContain("EXECUTION_RESUMED");
   });
 
+  it("a reply is not a delivery: a thin intermediate output is retried, never completed, and every completed step records its deliverable check", async () => {
+    const { auth } = await createUser({ credits: 5000 });
+    await fillContext(auth);
+    let thin = 1;
+    scriptLLM((system, _user, opts) => {
+      if (opts.purpose === "step" && /Market Research Analyst/.test(system) && thin > 0) {
+        thin--;
+        return "Done. See above.";
+      }
+      return undefined;
+    });
+    const { executionId } = await defineObjective(auth);
+    await runWorker();
+    await approvePending(auth);
+    await runWorker();
+    const ex = await getExecution(auth, executionId);
+    expect(ex.status).toBe("COMPLETED");
+    const research = ex.steps.find((s: { capability: string }) => s.capability === "market_research");
+    expect(research.attempts).toBe(2);
+    expect(research.output).not.toMatch(/^Done\. See above\./);
+    const retry = ex.events.find((e: { type: string }) => e.type === "STEP_RETRY_SCHEDULED");
+    expect(retry.message).toMatch(/did not deliver this step: The output has only 3 words\./);
+    for (const s of ex.steps.filter((x: { status: string }) => x.status === "COMPLETED")) {
+      expect(["delivered", "delivered_with_gaps", "unchecked"]).toContain(s.deliverable.status);
+      expect(s.deliverable.checks.map((c: { key: string }) => c.key)).toEqual(["substance", "expected_outputs", "evidence", "citations"]);
+    }
+    const stepsDone = ex.steps.filter((x: { status: string }) => x.status === "COMPLETED").length;
+    const l = ex.workLedger;
+    expect(l.delivered + l.delivered_with_gaps + l.unchecked).toBe(stepsDone);
+    expect(l).toMatchObject({ not_delivered: 0, failed: 0, skipped: 0, pending: 0, running: 0 });
+    const stored = await prisma.executionStep.findFirstOrThrow({ where: { id: research.id } });
+    expect(stored.deliverable).toMatchObject({ version: 1, status: research.deliverable.status });
+  });
+
+  it("an intermediate step that keeps replying without delivering fails after its retries, and is never shown as completed", async () => {
+    const { auth } = await createUser({ credits: 5000 });
+    await fillContext(auth);
+    scriptLLM((system, _user, opts) => (opts.purpose === "step" && /Competitive Intelligence Analyst/.test(system) ? "N/A" : undefined));
+    const { executionId } = await defineObjective(auth);
+    await runWorker();
+    await approvePending(auth);
+    await runWorker();
+    const ex = await getExecution(auth, executionId);
+    expect(ex.status).toBe("BLOCKED");
+    const failed = ex.steps.find((s: { capability: string }) => s.capability === "competitor_analysis");
+    expect(failed).toMatchObject({ status: "FAILED", output: null, deliverable: null });
+    expect(failed.error).toMatch(/did not deliver this step/);
+    expect(ex.workLedger.failed).toBe(1);
+  });
+
   it("refunds the work that didn't run when a blocked execution is cancelled", async () => {
     const { auth, user } = await createUser({ credits: 5000 });
     await fillContext(auth);

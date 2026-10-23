@@ -248,6 +248,8 @@ export interface ExecutionStep {
   evidenceNs: number[];
   /** Set on steps that searched the web (or would have, with search off). */
   researchStatus?: ResearchStatus | null;
+  /** Whether the output delivers what the plan said the step would; null until completed (and for older steps). */
+  deliverable?: StepDeliverable | null;
   research?: StepResearch | null;
 }
 
@@ -444,6 +446,17 @@ export interface MemoryItem {
   updatedAt: string;
 }
 
+export type DeliverableStatus = "delivered" | "delivered_with_gaps" | "not_delivered" | "unchecked";
+export interface StepDeliverable {
+  status: DeliverableStatus;
+  checks: { key: "substance" | "expected_outputs" | "evidence" | "citations"; status: "pass" | "warn" | "fail" | "not_assessed"; detail: string }[];
+  expected: { output: string; addressed: boolean }[];
+  citedEvidence: number[];
+  ownEvidence: number[];
+}
+/** Step counts by where each stands. */
+export type WorkLedger = Record<DeliverableStatus | "failed" | "skipped" | "pending" | "running", number>;
+
 export interface Execution extends ExecutionSummary {
   objectiveId: string;
   plan: PlanInfo | null;
@@ -464,6 +477,7 @@ export interface Execution extends ExecutionSummary {
   /** Every round, oldest first (e.g. round 1 failed → revision → round 2). */
   verificationHistory?: VerificationRound[];
   usage?: ExecutionUsage;
+  workLedger?: WorkLedger;
   measurements: OutcomeMeasurement[];
   approvals: Approval[];
   exceptions: ExceptionItem[];

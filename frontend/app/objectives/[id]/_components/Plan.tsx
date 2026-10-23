@@ -1,13 +1,14 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { Execution, ExecutionStatus, ExecutionStep, PlanInfo, TaskSource } from "@/lib/api";
+import type { Execution, ExecutionStatus, ExecutionStep, PlanInfo, StepDeliverable, TaskSource } from "@/lib/api";
 import { Icon, StepStatusTag, Tag, VerificationTag } from "@/components";
 import { ResearchTag, providerName } from "@/components/Tags";
 import { CiteProvider, ReportMarkdown } from "@/components/report";
 import { ExecBadge, evidenceToSources } from "@/components/ops";
 import { credits, duration, relativeTime } from "@/lib/format";
 import { UNFINISHED_STEP, unfinishedStep, verificationStopped } from "@/lib/openIssues";
+import { DELIVERABLE, deliverableFacts, deliverableGaps } from "@/lib/deliverable";
 import { EvidenceChips, evidenceId, focusEvidence } from "./Evidence";
 
 /** The Chief of Staff at work before a plan exists. */
@@ -193,6 +194,28 @@ function StepNode({ step }: { step: ExecutionStep }) {
   );
 }
 
+/** The deliverable check of a completed step: verdict, the facts behind it, and any gaps. */
+function DeliverableLine({ d }: { d: StepDeliverable }) {
+  const meta = DELIVERABLE[d.status];
+  const facts = deliverableFacts(d);
+  const gaps = deliverableGaps(d);
+  return (
+    <div className="cs-tl-dlv" data-testid="step-deliverable" data-status={d.status}>
+      <Tag variant={meta.variant} title={meta.title}>
+        {meta.label}
+      </Tag>
+      {facts && <span className="cs-tl-dlv-facts">{facts}</span>}
+      {gaps.length > 0 && (
+        <ul className="cs-tl-dlv-gaps">
+          {gaps.map((g) => (
+            <li key={g}>{g}</li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 function StepItem({ step, partial, sources, charged, runStatus }: { step: ExecutionStep; partial?: string; sources: TaskSource[]; charged: boolean; runStatus: ExecutionStatus }) {
   const [open, setOpen] = useState(false);
   const live = step.status === "RUNNING";
@@ -242,6 +265,7 @@ function StepItem({ step, partial, sources, charged, runStatus }: { step: Execut
         </div>
         <p className="cs-tl-purpose">{step.purpose}</p>
         {step.summary && step.status === "COMPLETED" && <p className="cs-tl-sum">{step.summary}</p>}
+        {step.status === "COMPLETED" && step.deliverable && <DeliverableLine d={step.deliverable} />}
         {live && <LiveOutput agent={step.agent} text={text} />}
         {step.status === "FAILED" && step.error && (
           <p className="cs-tl-err">
