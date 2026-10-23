@@ -24,7 +24,7 @@ ensemblis-app/
   backend/     Express + TypeScript + Prisma + Postgres: API, execution engine, worker
   frontend/    Next.js 14 (App Router)
   docker-compose.yml     local Postgres
-  render.yaml            production blueprint: API + worker
+  render.yaml            production blueprint: API (runs the worker in-process)
   .github/workflows/ci.yml
 ```
 
@@ -147,20 +147,21 @@ v4 schema).
 | Piece | Host |
 |---|---|
 | Database | Managed Postgres, e.g. [Neon](https://neon.tech) (direct, non-pooled URL with `?sslmode=require`) |
-| API + worker | [Render](https://render.com) via `render.yaml` (worker = paid plan), or any Docker host via `backend/Dockerfile` |
+| API + worker | [Render](https://render.com) via `render.yaml` (free plan, worker embedded in the API; a standalone worker needs a paid plan), or any Docker host via `backend/Dockerfile` |
 | AI model | Groq free tier (`AI_PROVIDER=openai`) or any supported provider |
 | Frontend | [Vercel](https://vercel.com) (root directory `frontend`) |
 
-**Render.** New → Blueprint → this repo. It creates `ensemblis-api` (web) and
-`ensemblis-worker` (background worker; settings both read are listed on each
-service and must stay identical), and asks for `DATABASE_URL`, `CORS_ORIGIN`,
-`APP_URL`, `OPENAI_API_KEY` and the optional keys. The API start command is `npm run start:render`:
+**Render.** New → Blueprint → this repo. It creates `ensemblis-api` (web, free
+plan, with `EMBEDDED_WORKER="true"` so the API also runs the worker), and asks
+for `DATABASE_URL`, `CORS_ORIGIN`, `APP_URL`, `OPENAI_API_KEY` and the optional
+keys. The API start command is `npm run start:render`:
 `dist/ops/migrate.js` (apply pending migrations; a database created by v3's
 `prisma db push` is first marked as baseline `0_init`, no data touched) then
-the server. **`prisma db push` is no longer used anywhere.** Background workers
-need a paid plan; on the free plan remove the worker service **in
-`render.yaml`** and set `EMBEDDED_WORKER` to `"true"` there (a dashboard edit is
-overwritten by the next Blueprint sync).
+the server. **`prisma db push` is no longer used anywhere.** Executions pause
+while the free instance sleeps. Background workers need a paid plan: to add a
+standalone one, add a `type: worker` service **in `render.yaml`** and set
+`EMBEDDED_WORKER` to `"false"` there (a dashboard edit is overwritten by the
+next Blueprint sync; see `DEPLOYMENT.md` section 1).
 
 **Docker.** One image: the default command migrates then serves the API; run
 the worker with `node dist/worker.js` (it waits until the API has applied the
