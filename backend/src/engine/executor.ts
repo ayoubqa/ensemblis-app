@@ -688,6 +688,7 @@ export async function runStep(input: StepRunInput): Promise<StepRunOutput> {
       model: "main",
       purpose: "step",
       executionId: input.execution.id,
+      stepId: input.step.id,
       onDelta: (d) => partial.push(d),
     });
   } catch (err) {

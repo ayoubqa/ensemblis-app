@@ -6,6 +6,7 @@ import { config, modelEndpoint } from "../config";
 import { aiConfigProblem, aiProviderLabel, currentProvider } from "../ai/llmProvider";
 import { effectiveSearchProvider, searchCustomEndpoint, searchEnabled, searchProviderLabel } from "../research/search";
 import { VERIFICATION_COST_CENTS } from "../org/registry";
+import { minimumPlanCost } from "../engine/budget";
 
 export function publicConfig() {
   // Why model calls can't work right now (unknown provider, missing key, mock where forbidden), or null.
@@ -34,6 +35,8 @@ export function publicConfig() {
     // Where model calls go (config.ts modelEndpoint): "stub" also for the mock — neither is a real model. Never the host.
     aiEndpoint: mockAI ? "stub" : modelEndpoint()?.kind ?? "hosted",
     verificationCostCents: VERIFICATION_COST_CENTS,
+    // Credits needed before any objective can be planned (engine/budget.ts).
+    minimumPlanCents: minimumPlanCost(),
     // v3. The provider actually used: SEARCH_PROVIDER=tavily without a key means Wikipedia.
     searchEnabled: searchEnabled(),
     searchProvider: effectiveSearchProvider(),

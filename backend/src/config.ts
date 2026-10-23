@@ -56,6 +56,16 @@ export const config = {
   topupEnabled: bool("DEMO_TOPUP_ENABLED", true),
   topupMaxCents: int("DEMO_TOPUP_MAX_CENTS", 5000),
 
+  // Ensemblis credits. Balances and prices are stored as whole credits (the
+  // historical "*Cents" columns). CREDITS_PER_EUR only values a credit for
+  // internal accounting and pricing: at the default 100, 1 credit = €0.01 of
+  // credit value, the rate every existing balance was issued at. It is not a
+  // token count. See billing/credits.ts.
+  creditsPerEur: int("CREDITS_PER_EUR", 100, 1),
+  // Runaway guard: an execution whose model calls have used this many tokens
+  // stops (and is refunded like any failed execution). 0 = off.
+  maxTokensPerExecution: int("MAX_TOKENS_PER_EXECUTION", 600_000, 0),
+
   // Daily task caps — the "kill switch" protecting the AI bill. Every task run
   // (create, retry, workflow run, scheduled run) counts once.
   maxTasksPerUserPerDay: int("MAX_TASKS_PER_USER_PER_DAY", 10),
@@ -298,6 +308,11 @@ export function productionConfigWarnings(role: "api" | "worker" = "api"): string
     warnings.push(
       `TAVILY_BASE_URL is set (${host}): web search goes there instead of the public Tavily API, and the UI labels it a custom search endpoint. ` +
         `It is meant for tests${process.env.E2E_STUB === "1" ? " (E2E_STUB=1: this is a stub stack)" : ""}; unset it in production.`
+    );
+  }
+  if (config.creditsPerEur !== 100) {
+    warnings.push(
+      `CREDITS_PER_EUR=${config.creditsPerEur}: existing balances were issued at 100 credits per €1, so internal accounting now values each of those credits at €${(1 / config.creditsPerEur).toFixed(4)} instead of €0.0100. Stored balances are unchanged.`
     );
   }
   if (config.adminEmails.length && !config.email.enabled) {

@@ -5,7 +5,7 @@ import { useCallback, useEffect, useState } from "react";
 import { api, type LegacyTask, type Objective } from "@/lib/api";
 import { EmptyState, Icon, OutcomeTag, PageHead, RequireAuth, Skeleton, Tag, VerificationTag, useToast } from "@/components";
 import { ResultStateTag } from "@/components/Tags";
-import { eur, plural, shortDate } from "@/lib/format";
+import { credits, plural, shortDate } from "@/lib/format";
 import { MOCK_TAG_LABEL, listedEndpointTag, listedResultState, resultScore } from "@/lib/openIssues";
 import { ROUTES } from "@/lib/routes";
 
@@ -201,8 +201,8 @@ function Reports() {
 
 /** What the execution cost after refunds (a skipped step, a verification that could not run). */
 function costLine(ex: NonNullable<Objective["latestExecution"]>): string {
-  const net = eur(Math.max(0, ex.costCents - ex.refundedCents), { decimals: true });
-  return ex.refundedCents > 0 ? `Net cost ${net} · ${eur(ex.refundedCents, { decimals: true })} refunded` : `Cost ${net}`;
+  const net = credits(Math.max(0, ex.costCents - ex.refundedCents));
+  return ex.refundedCents > 0 ? `${net} used · ${credits(ex.refundedCents)} refunded` : `${net} used`;
 }
 
 function ReportCard({ o }: { o: Objective }) {

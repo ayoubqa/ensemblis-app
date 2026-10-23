@@ -1,6 +1,28 @@
-// Formatting helpers. Money in the API is always integer cents (EUR).
+// Formatting helpers.
+//
+// Credits are the customer-facing unit: every wallet and price integer the API
+// sends (balance, budget, estimate, charge, refund — the "*Cents" fields) is a
+// whole number of credits. Euros are only for real money: credit pack prices.
 
-/** Cents → "€25", "€12.50", "€2,840". Whole euros drop the decimals. */
+/** 1150 → "1,150 credits", 1 → "1 credit". */
+export function credits(n: number | null | undefined): string {
+  const v = Math.round(Number(n) || 0);
+  return `${v < 0 ? "−" : ""}${Math.abs(v).toLocaleString("en-US")} ${Math.abs(v) === 1 ? "credit" : "credits"}`;
+}
+
+/** Signed credits for ledgers: "+3,000 credits", "−1,150 credits". */
+export function creditsSigned(n: number): string {
+  if (n === 0) return credits(0);
+  return n > 0 ? `+${credits(n)}` : credits(n);
+}
+
+/** Just the number, for places that show the unit separately: 1150 → "1,150". */
+export function creditsNum(n: number | null | undefined): string {
+  const v = Math.round(Number(n) || 0);
+  return `${v < 0 ? "−" : ""}${Math.abs(v).toLocaleString("en-US")}`;
+}
+
+/** Real money in euro cents → "€25", "€12.50", "€2,840". Whole euros drop the decimals. Not for credits. */
 export function eur(cents: number | null | undefined, opts: { decimals?: boolean } = {}): string {
   const c = Math.round(Number(cents) || 0);
   const neg = c < 0;

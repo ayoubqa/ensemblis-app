@@ -11,7 +11,7 @@ import { ResultStateTag, resultReportLabel, resultStateLabel } from "@/component
 import { MOCK_EXPORT_NOTE, MODEL_ENDPOINT_DETAIL, endpointNote, modelEndpointOf, modelEndpointTag, resultStateOf, usedMockAI } from "@/lib/openIssues";
 import { AI_NOTE, ExportMenu, ReportView, copyText } from "@/components/report";
 import { ApprovalCard, EventFeed, ExceptionCard, evidenceToSources } from "@/components/ops";
-import { eur, longDate, relativeTime } from "@/lib/format";
+import { credits, longDate, relativeTime } from "@/lib/format";
 import { ROUTES } from "@/lib/routes";
 import { useObjectiveLive } from "./_components/useObjectiveLive";
 import { ExecutionTimeline, PlanSummary } from "./_components/Plan";
@@ -302,7 +302,7 @@ function ObjectiveConsole() {
         <dl className="cs-facts">
           <div>
             <dt>Budget</dt>
-            <dd>{eur(o.budgetCents)}</dd>
+            <dd>{credits(o.budgetCents)}</dd>
           </div>
           {ex && (
             <div>
@@ -310,15 +310,19 @@ function ObjectiveConsole() {
                 <>
                   <dt>Charged</dt>
                   <dd>
-                    {eur(ex.costCents, { decimals: true })}
-                    {ex.refundedCents > 0 && <small>{eur(ex.refundedCents, { decimals: true })} refunded</small>}
+                    {credits(ex.costCents)}
+                    {ex.refundedCents > 0 && (
+                      <small>
+                        {credits(ex.refundedCents)} refunded · {credits(Math.max(0, ex.costCents - ex.refundedCents))} used
+                      </small>
+                    )}
                   </dd>
                 </>
               ) : (
                 <>
                   <dt>Estimate</dt>
                   <dd>
-                    {eur(ex.estimatedCostCents, { decimals: true })}
+                    {credits(ex.estimatedCostCents)}
                     <small>Chief of Staff estimate</small>
                   </dd>
                 </>
@@ -365,7 +369,7 @@ function ObjectiveConsole() {
             <h2>This execution failed</h2>
             {ex.errorMessage && <p>{ex.errorMessage}</p>}
             <p className="cs-alert-sub">
-              {ex.refundedCents > 0 ? `${eur(ex.refundedCents, { decimals: true })} was refunded. ` : ""}Completed work and the event log are kept below.
+              {ex.refundedCents > 0 ? `${credits(ex.refundedCents)} was refunded. ` : ""}Completed work and the event log are kept below.
             </p>
           </div>
         </div>
@@ -591,7 +595,7 @@ function ApprovalRecord({ objective, execution, pending, blocked }: { objective:
                 <p className="cs-appr-s">{a.title}</p>
                 {a.decisionNote && <p className="cs-appr-note">“{a.decisionNote}”</p>}
               </div>
-              <span className="cs-appr-amt">{eur(a.costCents, { decimals: true })}</span>
+              <span className="cs-appr-amt">{credits(a.costCents)}</span>
             </li>
           ))}
         </ul>
@@ -614,7 +618,7 @@ function ApprovalRecord({ objective, execution, pending, blocked }: { objective:
             {["PLANNING", "PLANNED"].includes(execution.status) || (execution.status === "BLOCKED" && !execution.costCents)
               ? "The plan and its cost are reviewed here before the AI Team starts."
               : objective.autonomy === "AUTO_WITHIN_BUDGET"
-                ? `No approval was required: this objective may proceed within its ${eur(objective.budgetCents)} budget.`
+                ? `No approval was required: this objective may proceed within its ${credits(objective.budgetCents)} budget.`
                 : "No approval is recorded for this attempt."}
           </p>
         </div>

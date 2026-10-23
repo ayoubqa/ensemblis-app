@@ -83,7 +83,7 @@ describe("problem email text", () => {
     const blocked = attentionEmail({ ...base, headline: "The AI provider's quota is exhausted", detail: EMAIL_DETAIL.planBlocked });
     expect(blocked.text.split("\n").slice(2, 4)).toEqual(["The AI provider's quota is exhausted", '"Q3 pricing memo": Nothing has run and nothing was charged. Open the objective to retry or cancel.']);
     const failed = executionFailedEmail({ ...base, refundedCents: 120, reason: EMAIL_DETAIL.executionFailed });
-    expect(failed.text).toContain('Ensemblis couldn\'t complete "Q3 pricing memo": it stopped before a result was ready. We refunded €1.20 to your organization\'s balance.');
+    expect(failed.text).toContain('Ensemblis couldn\'t complete "Q3 pricing memo": it stopped before a result was ready. We refunded 120 credits to your organization\'s balance.');
     const rejected = attentionEmail({ ...base, headline: "A result failed verification", detail: EMAIL_DETAIL.verificationFailed });
     expect(rejected.text.split("\n")[3]).toBe('"Q3 pricing memo": The result did not pass verification. Open the objective to review it.');
     for (const m of [unverified, blocked, failed, rejected]) expect(`${m.subject} ${m.text} ${m.html}`).not.toMatch(/\b[A-Z][A-Z0-9]*_[A-Z0-9_]+\b|HTTP \d|Owner:|OpenAI|Tavily/);

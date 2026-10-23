@@ -8,12 +8,13 @@ import { checkoutLimiter } from "../lib/rateLimits";
 import { TRANSACTION_INCLUDE, loadPublicUser, toPublicTransaction } from "../lib/serializers";
 import { creditWallet, resolveWallet, spendableBalance } from "../lib/wallet";
 import { config } from "../config";
+import { formatCredits } from "./credits";
 import { createCheckoutSession } from "./stripe";
 
-// Usage & billing. The wallet is an EUR balance (1 credit = 1 cent);
+// Usage & billing. The wallet is a balance of Ensemblis credits (billing/credits.ts);
 // executions are charged their planned estimate when they start and refunded
 // automatically for work that fails or doesn't run (engine/billing.ts).
-// Wallet-aware billing (v3). 1 credit = 1 cent (EUR). Team members see the
+// Wallet-aware billing (v3). Team members see the
 // team wallet (the owner's balance) and its activity since they joined;
 // only the wallet's owner can add credits (demo top-up or Stripe).
 const router = Router();
@@ -23,7 +24,6 @@ const startOfMonthUTC = () => {
   const d = new Date();
   return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1));
 };
-const eur = (cents: number) => `€${(cents / 100).toFixed(2)}`;
 
 /** Net spend = charges minus refunds (top-ups/purchases excluded), as a positive number. */
 async function netSpend(where: Prisma.TransactionWhereInput, since?: Date): Promise<number> {
@@ -119,9 +119,9 @@ router.get(
 const topupSchema = z.object({
   amountCents: z
     .number({ invalid_type_error: "amountCents must be a number" })
-    .int("amountCents must be a whole number of cents")
-    .min(100, "Minimum top-up is €1")
-    .max(50000, "Maximum top-up is €500 per request"),
+    .int("amountCents must be a whole number of credits")
+    .min(100, "The minimum top-up is 100 credits")
+    .max(50000, "The maximum top-up is 50,000 credits per request"),
 });
 
 /** Who may add credits to the wallet `userId` spends from. Throws 403 otherwise. */
@@ -147,7 +147,8 @@ export async function demoTopUp(userId: string, amountCents: number): Promise<vo
       actorUserId: userId,
       type: "TOP_UP",
       amountCents,
-      description: `Demo credit top-up (${eur(amountCents)})`,
+      description: `Demo credits added: ${formatCredits(amountCents)} (no real money)`,
+      reason: "demo_top_up",
     });
     const agg = await tx.transaction.aggregate({ where: { userId, type: "TOP_UP" }, _sum: { amountCents: true } });
     const total = agg._sum.amountCents ?? 0;
@@ -156,8 +157,8 @@ export async function demoTopUp(userId: string, amountCents: number): Promise<vo
       throw new HttpError(
         403,
         left > 0
-          ? `Demo top-up limit: you can add at most ${eur(left)} more demo credits to this account.`
-          : `You've used this account's demo top-up allowance (${eur(config.topupMaxCents)}). No more demo credits can be added.`
+          ? `Demo top-up limit: you can add at most ${formatCredits(left)} more demo credits to this account.`
+          : `You've used this account's demo top-up allowance (${formatCredits(config.topupMaxCents)}). No more demo credits can be added.`
       );
     }
   });

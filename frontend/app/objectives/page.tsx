@@ -6,7 +6,7 @@ import { Fragment, Suspense, useCallback, useEffect, useRef, useState } from "re
 import { api, type LegacyTask, type Objective, type ObjectiveCounts, type ObjectiveGroup, type ObjectiveStatus } from "@/lib/api";
 import { EmptyState, Icon, OutcomeTag, PageHead, ProgressBar, RequireAuth, Skeleton, StatusTag, Tabs, Tag, VerificationTag, useToast, type IconName } from "@/components";
 import { ResultStateTag } from "@/components/Tags";
-import { eur, plural, relativeTime, shortDate } from "@/lib/format";
+import { credits, plural, relativeTime, shortDate } from "@/lib/format";
 import { useDebounced } from "@/lib/hooks";
 import { MOCK_TAG_LABEL, listedEndpointTag, listedResultState, resultScore } from "@/lib/openIssues";
 import { ROUTES } from "@/lib/routes";
@@ -276,7 +276,7 @@ function ObjectiveRow({ o }: { o: Objective }) {
   const working = !!ex && ["RUNNING", "VERIFYING"].includes(ex.status);
   const sub = ex?.currentStep
     ? `${ex.currentStep.agent} (${ex.currentStep.executiveTitle}): ${ex.currentStep.title}`
-    : ex?.outcomeSummary ?? `${o.criteria.length} success criteri${o.criteria.length === 1 ? "on" : "a"} · budget ${eur(o.budgetCents)}`;
+    : ex?.outcomeSummary ?? `${o.criteria.length} success criteri${o.criteria.length === 1 ? "on" : "a"} · budget ${credits(o.budgetCents)}`;
   // A completed result that isn't plainly verified says so; a partial one also keeps its verification verdict.
   const result = listedResultState(ex);
   const hasResult = !!o.outcomeStatus || !!ex?.verificationStatus || !!result;

@@ -44,13 +44,14 @@ describe("approvals", () => {
   });
 
   it("an approval that the wallet can't afford stays pending (402) until funds are added", async () => {
-    const { auth, user } = await createUser({ credits: 100 });
+    // 900 credits: enough to plan (the cheapest plan is 800) but not to start the 1,150-credit plan.
+    const { auth, user } = await createUser({ credits: 900 });
     await fillContext(auth);
     const { executionId } = await defineObjective(auth);
     await runWorker();
     const [a] = (await api().get("/api/approvals").set(auth).expect(200)).body.approvals;
     const r = await api().post(`/api/approvals/${a.id}/approve`).set(auth).send({}).expect(402);
-    expect(r.body.error).toMatch(/Insufficient/);
+    expect(r.body.error).toMatch(/Not enough credits: this needs 1,150 credits and your balance is 900 credits/);
     expect((await getExecution(auth, executionId)).status).toBe("WAITING_FOR_APPROVAL");
     expect((await api().get("/api/approvals").set(auth).expect(200)).body.approvals).toHaveLength(1);
     await prisma.user.update({ where: { id: user.id }, data: { credits: 5000 } });
@@ -60,7 +61,7 @@ describe("approvals", () => {
   });
 
   it("an auto-start the wallet can't afford becomes an exception, resolved by Retry after a top-up", async () => {
-    const { auth, user } = await createUser({ credits: 100 });
+    const { auth, user } = await createUser({ credits: 900 }); // can plan, can't start
     await fillContext(auth);
     const { executionId } = await defineObjective(auth, { autonomy: "AUTO_WITHIN_BUDGET" });
     await runWorker();
@@ -77,7 +78,7 @@ describe("approvals", () => {
   });
 
   it("concurrent approvals can't overdraw the wallet", async () => {
-    const { auth, user } = await createUser({ credits: 2400 }); // enough for two €11.50 executions, not three
+    const { auth, user } = await createUser({ credits: 2400 }); // enough for two 1,150-credit executions, not three
     await fillContext(auth);
     for (let i = 0; i < 3; i++) await defineObjective(auth);
     await runWorker();

@@ -13,10 +13,12 @@ import { config } from "../config";
 import { HttpError } from "../lib/http";
 import { assertDailyQuotaInTx } from "../lib/usageLimits";
 import { creditWallet, debitWallet, type WalletRef } from "../lib/wallet";
+import { formatCredits, LEDGER_REASONS } from "../billing/credits";
 
 type Tx = Prisma.TransactionClient;
 
-const eur = (cents: number) => `€${(cents / 100).toFixed(2)}`;
+/** Why an execution's credits come back (Transaction.reason). */
+export type RefundReason = "step_skipped" | "execution_failed" | "execution_cancelled" | "verification_unavailable";
 
 export async function orgWallet(tx: Tx, orgId: string, actorUserId: string): Promise<WalletRef> {
   const org = await tx.organization.findUniqueOrThrow({ where: { id: orgId }, select: { ownerId: true, teamId: true } });
@@ -50,6 +52,9 @@ export async function chargeExecution(
     amountCents: args.amountCents,
     description: `Execution: ${args.title}`.slice(0, 200),
     executionId: args.executionId,
+    reason: "execution_charge",
+    // One charge per execution, enforced by the database too (startInTx already flips the status only once).
+    idempotencyKey: `charge:${args.executionId}`,
   });
   await tx.execution.update({
     where: { id: args.executionId },
@@ -63,7 +68,7 @@ export async function chargeExecution(
  * The execution row is locked first (guarded update), so concurrent refunds
  * can't exceed the charge. Returns the amount refunded.
  */
-export async function refundExecution(tx: Tx, executionId: string, amountCents: number, reason: string): Promise<number> {
+export async function refundExecution(tx: Tx, executionId: string, amountCents: number, reason: RefundReason, detail?: string): Promise<number> {
   if (amountCents <= 0) return 0;
   const rows = await tx.$queryRaw<{ costCents: number; refundedCents: number; walletUserId: string | null; orgId: string }[]>`
     SELECT "costCents", "refundedCents", "walletUserId", "orgId" FROM "Execution" WHERE "id" = ${executionId} FOR UPDATE`;
@@ -78,9 +83,17 @@ export async function refundExecution(tx: Tx, executionId: string, amountCents: 
     if (!org) return 0;
     walletUserId = org.ownerId;
   }
-  await creditWallet(tx, { walletUserId, actorUserId: null, type: "REFUND", amountCents: amount, description: `Refund: ${reason}`.slice(0, 200), executionId });
+  await creditWallet(tx, {
+    walletUserId,
+    actorUserId: null,
+    type: "REFUND",
+    amountCents: amount,
+    description: (detail ? `Refund: ${detail}` : LEDGER_REASONS[reason]).slice(0, 200),
+    executionId,
+    reason,
+  });
   await tx.execution.update({ where: { id: executionId }, data: { refundedCents: { increment: amount } } });
   return amount;
 }
 
-export { eur };
+export { formatCredits };

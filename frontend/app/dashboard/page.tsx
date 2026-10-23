@@ -6,7 +6,7 @@ import { api, type Briefing } from "@/lib/api";
 import { EmptyState, Icon, Meter, OutcomeTag, RequireAuth, Skeleton, Tag, VerificationTag, useShell } from "@/components";
 import { ResultStateTag } from "@/components/Tags";
 import { ApprovalCard, ExceptionCard, ExecBadge } from "@/components/ops";
-import { eur, greeting, plural, relativeTime } from "@/lib/format";
+import { credits, greeting, plural, relativeTime } from "@/lib/format";
 import { usePolling } from "@/lib/hooks";
 import { MOCK_TAG_LABEL, listedEndpointTag, listedResultState, resultScore } from "@/lib/openIssues";
 import { LOOP } from "@/lib/data";
@@ -163,10 +163,10 @@ function ChiefOfStaff() {
               <em>{plural(b.value30d.criteriaMet, "success criterion", "success criteria")} met in 30 days</em>
             </Link>
             <Link href={ROUTES.usage} className="ws-kpi">
-              <span className="ws-kpi-l">Spend this month</span>
-              <b>{eur(b.usage.monthSpendCents)}</b>
+              <span className="ws-kpi-l">Credits used this month</span>
+              <b>{credits(b.usage.monthSpendCents)}</b>
               <em>
-                {plural(b.usage.executionsThisMonth, "execution")} · {eur(b.usage.balanceCents)} balance
+                {plural(b.usage.executionsThisMonth, "execution")} · {credits(b.usage.balanceCents)} balance
               </em>
             </Link>
           </section>
@@ -282,7 +282,7 @@ function ChiefOfStaff() {
                             <span className="ws-out-t">{r.objectiveTitle}</span>
                             {r.outcomeSummary && <span className="ws-out-s">{r.outcomeSummary}</span>}
                             <span className="ws-meta">
-                              {eur(r.costCents, { decimals: true })} · {relativeTime(r.completedAt)}
+                              {credits(r.costCents)} · {relativeTime(r.completedAt)}
                             </span>
                           </span>
                           <OutcomeTags r={r} />

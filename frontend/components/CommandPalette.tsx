@@ -74,7 +74,7 @@ export function CommandPalette({ open, onClose, onShortcuts }: CommandPalettePro
           P("reports", "Reports", ROUTES.reports, "report", "completed outcomes deliverables evidence earlier reports shared"),
           P("approvals", "Approvals", ROUTES.approvals, "shield", "approve plan budget authorize"),
           P("exceptions", "Exceptions", ROUTES.exceptions, "alert", "blocked attention problems missing information"),
-          P("usage", "Usage", ROUTES.usage, "wallet", "billing spend balance payments transactions budget refund"),
+          P("usage", "Usage", ROUTES.usage, "wallet", "credits billing spend balance payments transactions budget refund"),
           P("routines", "Recurring objectives", ROUTES.routines, "redo", "routines recurring schedule weekly monthly"),
           ...(isGuest
             ? []

@@ -12,6 +12,7 @@ import { limiter, taskRunLimiter } from "../lib/rateLimits";
 import { requireOrg, type OrgRequest } from "../org/organization";
 import { formatCompanyProfile, getCompanyContext } from "../context/service";
 import { cleanText } from "../research/text";
+import { formatCredits } from "../billing/credits";
 import { createObjective, MAX_BUDGET_CENTS, MAX_CONSTRAINTS_CHARS, MIN_BUDGET_CENTS, OBJECTIVE_KINDS, planDraft, replaceCriteria, suggestForStatement } from "../engine/objectives";
 import { newAttempt } from "../engine/lifecycle";
 import { FULL_EXECUTION_INCLUDE, STEP_LITE_SELECT, toExecutionSummary, toPublicExecution, toPublicObjective, type FullExecution } from "../engine/serialize";
@@ -57,7 +58,7 @@ const createSchema = z.object({
     .or(z.string().regex(/^\d{4}-\d{2}-\d{2}$/))
     .nullable()
     .optional(),
-  budgetCents: z.number().int().min(MIN_BUDGET_CENTS, `The minimum budget is €${MIN_BUDGET_CENTS / 100}`).max(MAX_BUDGET_CENTS, `The maximum budget is €${MAX_BUDGET_CENTS / 100}`).optional(),
+  budgetCents: z.number().int().min(MIN_BUDGET_CENTS, `The minimum budget is ${formatCredits(MIN_BUDGET_CENTS)}`).max(MAX_BUDGET_CENTS, `The maximum budget is ${formatCredits(MAX_BUDGET_CENTS)}`).optional(),
   contextNotes: z.string().max(8000).optional(),
   autonomy: z.enum(["REVIEW_PLAN", "AUTO_WITHIN_BUDGET"]).optional(),
   draft: z.boolean().optional(),

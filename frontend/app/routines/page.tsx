@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, type Autonomy, type Frequency, type Workflow } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
-import { eur, plural, relativeTime, shortDate } from "@/lib/format";
+import { credits, creditsNum, plural, relativeTime, shortDate } from "@/lib/format";
 import { FREQ_PER } from "@/lib/data";
 import { ROUTES } from "@/lib/routes";
 import { EmptyState, Icon, PageHead, RequireAuth, Skeleton, Tag, useToast } from "@/components";
@@ -20,8 +20,9 @@ export default function RoutinesPage() {
 
 const FREQS: Frequency[] = ["Weekly", "Monthly", "Quarterly"];
 const MAX_CRITERIA = 6;
-const MIN_BUDGET = 5;
-const MAX_BUDGET = 500;
+// Budget limits in credits (the server's MIN_BUDGET_CENTS / MAX_BUDGET_CENTS).
+const MIN_BUDGET = 500;
+const MAX_BUDGET = 50_000;
 
 function Routines() {
   const toast = useToast();
@@ -30,7 +31,7 @@ function Routines() {
   const [rows, setRows] = useState<Workflow[] | null>(null);
   const [failed, setFailed] = useState(false);
   const [creating, setCreating] = useState(false);
-  const [form, setForm] = useState({ name: "", basedOnText: "", frequency: "Weekly" as Frequency, criteria: "", budget: 20, autonomy: "AUTO_WITHIN_BUDGET" as Autonomy });
+  const [form, setForm] = useState({ name: "", basedOnText: "", frequency: "Weekly" as Frequency, criteria: "", budget: 2000, autonomy: "AUTO_WITHIN_BUDGET" as Autonomy });
   const [budgetText, setBudgetText] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const toggleRef = useRef<HTMLButtonElement>(null);
@@ -66,7 +67,7 @@ function Routines() {
         basedOnText: form.basedOnText.trim(),
         frequency: form.frequency,
         successCriteria: criteriaLines,
-        budgetCents: Math.round(form.budget * 100),
+        budgetCents: Math.round(form.budget),
         autonomy: form.autonomy,
       });
       setForm({ ...form, name: "", basedOnText: "", criteria: "" });
@@ -189,14 +190,15 @@ function Routines() {
                 <label className="l" htmlFor="r-budget">
                   Budget per objective
                 </label>
-                <div className="ws-money">
-                  <span aria-hidden="true">€</span>
+                <div className="ws-money is-credits">
+                  <span aria-hidden="true">credits</span>
                   <input
                     id="r-budget"
                     type="number"
                     inputMode="numeric"
                     min={MIN_BUDGET}
                     max={MAX_BUDGET}
+                    step={50}
                     className="f"
                     value={budgetText ?? String(form.budget)}
                     onChange={(e) => {
@@ -213,7 +215,7 @@ function Routines() {
                   />
                 </div>
                 <p className="hint" id="r-budget-hint">
-                  In euros, €{MIN_BUDGET}–€{MAX_BUDGET}, for each period&apos;s objective.
+                  In credits, {creditsNum(MIN_BUDGET)}–{creditsNum(MAX_BUDGET)}, for each period&apos;s objective.
                 </p>
               </div>
               <div className="ws-rspan">
@@ -299,7 +301,7 @@ function Routines() {
                     {w.budgetCents ? (
                       <div>
                         <dt>Budget</dt>
-                        <dd>{eur(w.budgetCents)} each</dd>
+                        <dd>{credits(w.budgetCents)} each</dd>
                       </div>
                     ) : null}
                     <div>

@@ -3,7 +3,7 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 import { api, type PublicConfig } from "./api";
 import { STARTING_CREDITS_CENTS } from "./data";
-import { eur } from "./format";
+import { credits } from "./format";
 
 /**
  * Public deployment settings (GET /api/config), fetched once on load.
@@ -98,8 +98,8 @@ export function useConfig(): ConfigContextValue {
 /** Contact address for legal pages (NEXT_PUBLIC_CONTACT_EMAIL, inlined at build time). */
 export const CONTACT_EMAIL = (process.env.NEXT_PUBLIC_CONTACT_EMAIL || "").trim();
 
-/** Inline "€100"-style amount of starting demo credits, from the server config. */
+/** Inline "3,000 credits"-style amount of starting credits, from the server config. */
 export function StartingCredits() {
   const { config } = useConfig();
-  return <>{eur(config.startingCreditsCents)}</>;
+  return <>{credits(config.startingCreditsCents)}</>;
 }

@@ -34,7 +34,8 @@ import { recordOutcome } from "./outcome";
 import { incompleteWork } from "./resultState";
 import { DEFAULT_CRITERIA, planObjective, type Plan, type PlanBlockedKind } from "./planner";
 import { titleFor } from "./objectives";
-import { eur, refundExecution } from "./billing";
+import { formatCredits, refundExecution } from "./billing";
+import { tokenCeilingReached } from "./budget";
 import { verifyExecution } from "./verification/service";
 import type { ModelAssessment } from "./verification/checks";
 import type { Prisma } from "@prisma/client";
@@ -168,7 +169,7 @@ async function planPhase(ex: Execution): Promise<void> {
       orgId: ex.orgId,
       type: "OBJECTIVE_PLANNED",
       actor: "chief_of_staff",
-      message: `Plan ready: ${plan.steps.length} steps across ${owners.join(", ")} · estimated ${eur(plan.estimatedCostCents)}`,
+      message: `Plan ready: ${plan.steps.length} steps across ${owners.join(", ")} · estimated ${formatCredits(plan.estimatedCostCents)}`,
       data: { steps: plan.steps.length, costCents: plan.estimatedCostCents, source: plan.source, notes: plan.notes },
     });
     if (proposed) {
@@ -316,8 +317,8 @@ async function afterPlan(executionId: string): Promise<void> {
       requestApproval(tx, {
         execution: base,
         kind,
-        title: kind === "PLAN" ? `Approve the plan for “${objective.title.slice(0, 90)}”` : `Approve ${eur(plan.estimatedCostCents)} for “${objective.title.slice(0, 80)}”`,
-        proposedAction: `Run ${plan.steps.length} read-only steps (${plan.steps.map((s) => getCapability(s.capability)?.name ?? s.capability).join(" → ")}), then verify the result. Estimated cost ${eur(plan.estimatedCostCents)}.`,
+        title: kind === "PLAN" ? `Approve the plan for “${objective.title.slice(0, 90)}”` : `Approve ${formatCredits(plan.estimatedCostCents)} for “${objective.title.slice(0, 80)}”`,
+        proposedAction: `Run ${plan.steps.length} read-only steps (${plan.steps.map((s) => getCapability(s.capability)?.name ?? s.capability).join(" → ")}), then verify the result. Estimated cost ${formatCredits(plan.estimatedCostCents)}.`,
         reason: decision.reasons.join(" "),
         costCents: plan.estimatedCostCents,
         risk: decision.risk,
@@ -326,7 +327,7 @@ async function afterPlan(executionId: string): Promise<void> {
       })
     );
     if (requested) log.info("execution.approval_requested", { executionId: ex.id, orgId: ex.orgId, objectiveId: ex.objectiveId, kind, estimatedCostCents: plan.estimatedCostCents });
-    if (requested) notifyAttention(ex.id, "A plan is waiting for your approval", `${plan.steps.length} steps, estimated ${eur(plan.estimatedCostCents)}.`);
+    if (requested) notifyAttention(ex.id, "A plan is waiting for your approval", `${plan.steps.length} steps, estimated ${formatCredits(plan.estimatedCostCents)}.`);
     return;
   }
 
@@ -349,11 +350,11 @@ async function startOrBlock(executionId: string, actorUserId: string, base: { id
             execution: base,
             kind: funds ? "INSUFFICIENT_FUNDS" : "POLICY_BLOCKED",
             severity: "MEDIUM",
-            title: funds ? "Not enough balance to start" : err instanceof DailyLimitError ? "Daily execution limit reached" : "This execution isn't allowed to start",
+            title: funds ? "Not enough credits to start" : err instanceof DailyLimitError ? "Daily execution limit reached" : "This execution isn't allowed to start",
             whatHappened: err.message,
             whyItMatters: "The plan is ready, but nothing has run and nothing was charged.",
-            recommendation: funds ? "Add funds in Usage, then retry." : "Retry later, or cancel this execution.",
-            neededFromUser: funds ? "Top up the organization's balance, then choose Retry." : "Choose Retry once the limit resets.",
+            recommendation: funds ? "Add credits in Usage, then retry." : "Retry later, or cancel this execution.",
+            neededFromUser: funds ? "Add credits to the organization's balance, then choose Retry." : "Choose Retry once the limit resets.",
             actions: ["retry", "cancel"],
           },
           ["PLANNED"]
@@ -410,6 +411,11 @@ async function advancePhase(ex: Execution): Promise<TickResult> {
 }
 
 async function runOneStep(ex: Execution, step: ExecutionStep, steps: ExecutionStep[]): Promise<TickResult> {
+  const ceiling = await tokenCeilingReached(ex.id);
+  if (ceiling) {
+    await failExecution(ex.id, ceiling);
+    return {};
+  }
   const attempt = step.attempts + 1;
   const claimed = await prisma.executionStep.updateMany({
     where: { id: step.id, status: "PENDING" },
@@ -618,6 +624,11 @@ async function verifyPhase(ex: Execution): Promise<TickResult> {
     return {};
   }
 
+  const ceiling = await tokenCeilingReached(ex.id);
+  if (ceiling) {
+    await failExecution(ex.id, ceiling);
+    return {};
+  }
   await emit(prisma, { executionId: ex.id, orgId: ex.orgId, type: "VERIFICATION_STARTED", actor: "chief_of_staff", message: "Verifying the result: evidence, success criteria, completeness, consistency" });
   const v = await verifyExecution(ex.id);
   const assessorError = v.assessorError ? redact(v.assessorError).slice(0, 300) : null;
@@ -777,14 +788,14 @@ async function finalize(ex: Execution, model: ModelAssessment | null, accepted: 
     if (!ok.count) return false;
     if (unverified) {
       // The verification fee pays for a model check that never ran.
-      const refunded = await refundExecution(tx, ex.id, VERIFICATION_COST_CENTS, "verification unavailable");
+      const refunded = await refundExecution(tx, ex.id, VERIFICATION_COST_CENTS, "verification_unavailable");
       if (refunded > 0) {
         await emit(tx, {
           executionId: ex.id,
           orgId: ex.orgId,
           type: "FUNDS_REFUNDED",
           actor: "system",
-          message: `${eur(refunded)} verification fee refunded — the result could not be verified`,
+          message: `${formatCredits(refunded)} verification fee refunded — the result could not be verified`,
           data: { amountCents: refunded, reason: "verification unavailable" },
         });
       }

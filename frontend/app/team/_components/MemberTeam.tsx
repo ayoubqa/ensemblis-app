@@ -6,7 +6,7 @@ import { Avatar, Icon, Modal, useToast } from "@/components";
 import { api, type TeamDetail } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { toastApiError } from "@/lib/errors";
-import { dateTime, dayLabel, eur, longDate, num, plural } from "@/lib/format";
+import { credits, dateTime, dayLabel, longDate, num, plural } from "@/lib/format";
 import { ROUTES } from "@/lib/routes";
 import { SectionHead } from "./teamShared";
 
@@ -53,8 +53,8 @@ export function MemberTeam({ team, setTeam }: { team: TeamDetail; setTeam: (t: T
             <Icon name="wallet" />
             Organization balance
           </span>
-          <span className="op-kpi-v">{eur(team.walletCents)}</span>
-          <span className="op-kpi-m">Managed by {team.owner.name}. Ask them to add funds when it runs low.</span>
+          <span className="op-kpi-v">{credits(team.walletCents)}</span>
+          <span className="op-kpi-m">Managed by {team.owner.name}. Ask them to add credits when it runs low.</span>
         </div>
         <div className="op-kpi">
           <span className="op-kpi-l">

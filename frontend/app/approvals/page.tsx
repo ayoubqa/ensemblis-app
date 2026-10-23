@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { api, type Approval, type RiskLevel } from "@/lib/api";
 import { EmptyState, Icon, PageHead, RequireAuth, SkeletonText, Tabs } from "@/components";
 import { ApprovalCard } from "@/components/ops";
-import { eur, num, plural } from "@/lib/format";
+import { credits, num, plural } from "@/lib/format";
 import { ROUTES } from "@/lib/routes";
 
 export default function ApprovalsPage() {
@@ -71,13 +71,13 @@ function ApprovalCenter() {
           <div className="op-attn-main">
             <div className="op-attn-t">{pending.length ? `${plural(pending.length, "decision")} waiting for you` : "Nothing is waiting for your approval"}</div>
             <div className="op-attn-d">
-              {pending.length ? "Each one shows the plan, its estimated cost, its risk and a recommendation." : "When a plan or a spend needs your sign-off, it appears here and in the header."}
+              {pending.length ? "Each one shows the plan, its estimate in credits, its risk and a recommendation." : "When a plan or a spend needs your sign-off, it appears here and in the header."}
             </div>
           </div>
           {pending.length > 0 && (
             <div className="op-attn-stats">
               <div className="op-attn-stat">
-                <b>{eur(estimate, { decimals: true })}</b>
+                <b>{credits(estimate)}</b>
                 <span>estimated in total</span>
               </div>
               {highest && (

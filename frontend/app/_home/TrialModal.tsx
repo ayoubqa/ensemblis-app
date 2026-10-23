@@ -9,7 +9,7 @@ import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { useConfig } from "@/lib/config";
 import { errorText } from "@/lib/errors";
-import { eur } from "@/lib/format";
+import { credits } from "@/lib/format";
 import { ROUTES } from "@/lib/routes";
 
 /**
@@ -57,7 +57,7 @@ export function TrialModal({ open, onClose }: { open: boolean; onClose: () => vo
           <li>
             <Icon name="building" />
             <span>
-              A temporary organization with <b>{eur(config.guestCreditsCents)}</b> of trial balance.
+              A temporary organization with <b>{credits(config.guestCreditsCents)}</b> of trial balance.
             </span>
           </li>
           <li>

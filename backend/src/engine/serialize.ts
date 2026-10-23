@@ -1,5 +1,6 @@
 // Public JSON shapes for objectives and executions (mirrored in
-// frontend/lib/api.ts). Dates are ISO strings, money integer EUR cents.
+// frontend/lib/api.ts). Dates are ISO strings; amounts are whole credits (the
+// "*Cents" fields; billing/credits.ts).
 // Never exposed: prompts, evidence `content` (only excerpts), document text.
 
 import type {
@@ -18,6 +19,7 @@ import type {
   Verification,
 } from "@prisma/client";
 import { getCapability, getExecutive } from "../org/registry";
+import { legacyEurToCredits, legacyEurToCreditsBeforeQuote } from "../billing/credits";
 import { redact } from "../lib/log";
 import { toPublicMemory } from "../memory/service";
 import { toPublicEvidence } from "./evidence";
@@ -318,13 +320,16 @@ export function toPublicResearch(raw: unknown): { providers: string[]; queries: 
   };
 }
 
+/** Events this server wrote with an amount in the former euro format; shown in credits (exact: same integer). */
+const MONEY_EVENTS = new Set(["FUNDS_CHARGED", "FUNDS_REFUNDED", "OBJECTIVE_PLANNED"]);
+
 export function toPublicEvent(e: ExecutionEvent) {
   return {
     id: e.id,
     type: e.type,
     actor: e.actor,
     actorTitle: e.actor === "user" ? "You" : e.actor === "system" ? "Ensemblis" : getExecutive(e.actor)?.title ?? e.actor,
-    message: e.message,
+    message: MONEY_EVENTS.has(e.type) ? legacyEurToCreditsBeforeQuote(e.message) : e.message,
     data: e.data,
     stepId: e.stepId,
     createdAt: e.createdAt.toISOString(),
@@ -339,12 +344,13 @@ export function toPublicApproval(a: Approval, objectiveTitle?: string) {
     executionId: a.executionId,
     kind: a.kind,
     status: a.status,
-    title: a.title,
-    proposedAction: a.proposedAction,
-    reason: a.reason,
+    // Approvals written before credits carry euro amounts in these server-written fields.
+    title: legacyEurToCreditsBeforeQuote(a.title),
+    proposedAction: legacyEurToCredits(a.proposedAction),
+    reason: legacyEurToCredits(a.reason),
     costCents: a.costCents,
     risk: a.risk,
-    recommendation: a.recommendation,
+    recommendation: legacyEurToCredits(a.recommendation),
     recommendedDecision: a.recommendedDecision as "APPROVE" | "REJECT",
     decidedAt: iso(a.decidedAt),
     decisionNote: a.decisionNote,
@@ -363,9 +369,9 @@ export function toPublicException(x: Exception, objectiveTitle?: string) {
     status: x.status,
     severity: x.severity,
     title: x.title,
-    whatHappened: x.whatHappened,
+    whatHappened: x.kind === "INSUFFICIENT_FUNDS" ? legacyEurToCredits(x.whatHappened) : x.whatHappened,
     whyItMatters: x.whyItMatters,
-    recommendation: x.recommendation,
+    recommendation: x.kind === "INSUFFICIENT_FUNDS" ? x.recommendation.replace("Add funds in Usage", "Add credits in Usage") : x.recommendation,
     neededFromUser: x.neededFromUser,
     questions: (x.questions as { question: string; whyItMatters: string }[]) ?? [],
     actions: x.actions as ("provide_info" | "proceed" | "retry" | "skip" | "accept" | "cancel")[],

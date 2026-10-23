@@ -7,7 +7,7 @@ import { api, type Autonomy, type ContextPayload, type ObjectiveKind, type Organ
 import { useAuth } from "@/lib/auth-context";
 import { useConfig } from "@/lib/config";
 import { EXAMPLE_OBJECTIVES } from "@/lib/data";
-import { eur, plural } from "@/lib/format";
+import { credits, creditsNum, plural } from "@/lib/format";
 import { ROUTES } from "@/lib/routes";
 import { storage } from "@/lib/utils";
 import { CharCount, Icon, RequireAuth, useToast, type IconName } from "@/components";
@@ -24,8 +24,9 @@ export default function NewObjectivePage() {
 
 /** Unsent drafts are kept per account (`<key>:<user id>`), so a shared browser never offers one person's objective to the next. */
 const DRAFT_KEY = "ensemblis_objective_draft";
-const MIN_BUDGET = 5;
-const MAX_BUDGET = 500;
+// Budget limits in credits (the server's MIN_BUDGET_CENTS / MAX_BUDGET_CENTS).
+const MIN_BUDGET = 500;
+const MAX_BUDGET = 50_000;
 const MAX_CRITERIA = 6;
 const MAX_CONSTRAINTS = 4000;
 
@@ -72,7 +73,7 @@ function DefineOutcome() {
   const [constraints, setConstraints] = useState("");
   const [deadline, setDeadline] = useState("");
   const [budget, setBudget] = useState<number | null>(null);
-  // What the budget field shows while it is being edited (clamped to €5–€500 on blur).
+  // What the budget field shows while it is being edited (clamped to 500–50,000 credits on blur).
   const [budgetText, setBudgetText] = useState<string | null>(null);
   const [autonomy, setAutonomy] = useState<Autonomy>("REVIEW_PLAN");
   const autonomyTouched = useRef(false);
@@ -187,9 +188,8 @@ function DefineOutcome() {
   };
 
   const commitBudget = (text: string) => {
-    const n = Math.round(Number(text));
-    const euros = Number.isFinite(n) && n > 0 ? Math.min(MAX_BUDGET, Math.max(MIN_BUDGET, n)) : MIN_BUDGET;
-    setBudget(euros * 100);
+    const n = Math.round(Number(text.replace(/[,\s]/g, "")));
+    setBudget(Number.isFinite(n) && n > 0 ? Math.min(MAX_BUDGET, Math.max(MIN_BUDGET, n)) : MIN_BUDGET);
     setBudgetText(null);
   };
 
@@ -255,7 +255,7 @@ function DefineOutcome() {
   };
 
   const auto = autonomy === "AUTO_WITHIN_BUDGET";
-  const autoHint = `Starts on its own when the estimate is within ${eur(budgetCents)}${org ? ` and your ${eur(org.approvalThresholdCents)} approval threshold` : ""}; otherwise it asks you.`;
+  const autoHint = `Starts on its own when the estimate is within ${credits(budgetCents)}${org ? ` and your ${credits(org.approvalThresholdCents)} approval threshold` : ""}; otherwise it asks you.`;
 
   const NEXT: { icon: IconName; title: string; body: string }[] = [
     { icon: "compass", title: "Plan", body: "The Chief of Staff frames your objective with your Company Context and writes a short plan — each step owned by an executive, with an estimated cost." },
@@ -263,7 +263,7 @@ function DefineOutcome() {
       icon: "check",
       title: "Your approval",
       body: auto
-        ? `You chose to start automatically: it begins once the estimate is within ${eur(budgetCents)}${org ? ` and your ${eur(org.approvalThresholdCents)} threshold` : ""}. Anything above waits for you.`
+        ? `You chose to start automatically: it begins once the estimate is within ${credits(budgetCents)}${org ? ` and your ${credits(org.approvalThresholdCents)} threshold` : ""}. Anything above waits for you.`
         : "You review the plan and its cost. Nothing is executed or charged before you approve.",
     },
     {
@@ -536,8 +536,8 @@ function DefineOutcome() {
                   <label className="l" htmlFor="budget">
                     Budget limit
                   </label>
-                  <div className="ws-money">
-                    <span aria-hidden="true">€</span>
+                  <div className="ws-money is-credits">
+                    <span aria-hidden="true">credits</span>
                     <input
                       id="budget"
                       type="number"
@@ -545,19 +545,19 @@ function DefineOutcome() {
                       className="f"
                       min={MIN_BUDGET}
                       max={MAX_BUDGET}
-                      step={1}
-                      value={budgetText ?? String(Math.round(budgetCents / 100))}
+                      step={50}
+                      value={budgetText ?? String(budgetCents)}
                       onChange={(e) => {
                         setBudgetText(e.target.value);
                         const n = Math.round(Number(e.target.value));
-                        if (e.target.value !== "" && n >= MIN_BUDGET && n <= MAX_BUDGET) setBudget(n * 100);
+                        if (e.target.value !== "" && n >= MIN_BUDGET && n <= MAX_BUDGET) setBudget(n);
                       }}
                       onBlur={(e) => commitBudget(e.target.value)}
                       aria-describedby="budget-hint"
                     />
                   </div>
                   <p className="hint" id="budget-hint">
-                    In euros, €{MIN_BUDGET}–€{MAX_BUDGET}. Executions estimated above this always need your approval.
+                    In credits, {creditsNum(MIN_BUDGET)}–{creditsNum(MAX_BUDGET)}. Executions estimated above this always need your approval. Credits are charged when an execution starts, at its plan&apos;s estimate.
                   </p>
                 </div>
               </div>

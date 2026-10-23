@@ -21,11 +21,12 @@ import { log, redact } from "../lib/log";
 import { onAttentionNeeded, onExecutionSettled } from "../lib/notify";
 import type { OrgContext } from "../org/organization";
 import { VERIFICATION_COST_CENTS, SYNTHESIS_CAPABILITY, getCapability } from "../org/registry";
-import { chargeExecution, eur, refundExecution } from "./billing";
+import { chargeExecution, formatCredits, refundExecution } from "./billing";
 import { emit } from "./events";
 import { isResearchBrief } from "./prompts";
 import { INSUFFICIENT_EVIDENCE } from "./verification/checks";
 import { enqueue } from "./queue";
+import { assertCanAffordPlanning } from "./budget";
 
 type Tx = Prisma.TransactionClient;
 
@@ -77,6 +78,7 @@ export async function createExecution(
 
 /** Starts another attempt for an objective whose latest execution has finished. */
 export async function newAttempt(org: OrgContext, objectiveId: string): Promise<string> {
+  await assertCanAffordPlanning(org);
   const objective = await prisma.objective.findFirst({
     where: { id: objectiveId, orgId: org.orgId },
     include: { executions: { orderBy: { attempt: "desc" }, take: 1, select: { status: true } } },
@@ -126,7 +128,7 @@ export async function startInTx(tx: Tx, executionId: string, actorUserId: string
       orgId: ex.orgId,
       type: "FUNDS_CHARGED",
       actor: "system",
-      message: `${eur(ex.estimatedCostCents)} charged to the organization's balance`,
+      message: `${formatCredits(ex.estimatedCostCents)} charged to the organization's balance`,
       data: { amountCents: ex.estimatedCostCents },
     });
   }
@@ -310,7 +312,7 @@ export async function resolveException(org: OrgContext, exceptionId: string, act
       if (skipped.count === 0) throw new HttpError(409, "This step is no longer failed.");
       if (!(await flip(tx, ex.id, ["BLOCKED"], "RUNNING"))) throw new HttpError(409, "This execution is no longer blocked.");
       await mirror(tx, ex.objectiveId, "RUNNING");
-      const refunded = await refundExecution(tx, ex.id, step.costCents, "skipped step");
+      const refunded = await refundExecution(tx, ex.id, step.costCents, "step_skipped", `skipped step “${step.title.slice(0, 120)}”`);
       await emit(tx, {
         ...base,
         stepId: step.id,
@@ -320,7 +322,7 @@ export async function resolveException(org: OrgContext, exceptionId: string, act
         data: { stepId: step.id, costCents: step.costCents, refundedCents: refunded },
       });
       if (refunded > 0) {
-        await emit(tx, { ...base, stepId: step.id, type: "FUNDS_REFUNDED", actor: "system", message: `${eur(refunded)} refunded for “${step.title.slice(0, 120)}”, which was skipped`, data: { amountCents: refunded } });
+        await emit(tx, { ...base, stepId: step.id, type: "FUNDS_REFUNDED", actor: "system", message: `${formatCredits(refunded)} refunded for “${step.title.slice(0, 120)}”, which was skipped`, data: { amountCents: refunded } });
       }
       await emit(tx, { ...base, type: "EXECUTION_RESUMED", actor: "user", message: "Execution resumed without the failed step" });
       await enqueueTick(ex.id, 0, tx);
@@ -453,9 +455,9 @@ export async function failExecution(executionId: string, rawMessage: string): Pr
     await tx.exception.updateMany({ where: { executionId, status: "OPEN" }, data: { status: "DISMISSED" } });
     await mirror(tx, ex.objectiveId, "FAILED");
     await emit(tx, { executionId, orgId: ex.orgId, type: "EXECUTION_FAILED", actor: "system", message: `Execution failed: ${message.slice(0, 300)}` });
-    const refunded = await refundExecution(tx, executionId, ex.costCents, "execution failed");
+    const refunded = await refundExecution(tx, executionId, ex.costCents, "execution_failed");
     if (refunded > 0) {
-      await emit(tx, { executionId, orgId: ex.orgId, type: "FUNDS_REFUNDED", actor: "system", message: `${eur(refunded)} refunded`, data: { amountCents: refunded } });
+      await emit(tx, { executionId, orgId: ex.orgId, type: "FUNDS_REFUNDED", actor: "system", message: `${formatCredits(refunded)} refunded`, data: { amountCents: refunded } });
     }
     meta = { orgId: ex.orgId, objectiveId: ex.objectiveId, costCents: ex.costCents, refundedCents: ex.refundedCents + refunded };
     return true;
@@ -490,9 +492,9 @@ export async function cancelExecution(executionId: string, opts: { userId: strin
     });
     await mirror(tx, ex.objectiveId, "CANCELLED");
     await emit(tx, { executionId, orgId: ex.orgId, type: "EXECUTION_CANCELLED", actor: opts.userId ? "user" : "system", message: `Execution cancelled: ${opts.reason}` });
-    const refunded = await refundExecution(tx, executionId, failedVerification ? ex.costCents : unrun, "cancelled execution");
+    const refunded = await refundExecution(tx, executionId, failedVerification ? ex.costCents : unrun, "execution_cancelled");
     if (refunded > 0) {
-      await emit(tx, { executionId, orgId: ex.orgId, type: "FUNDS_REFUNDED", actor: "system", message: `${eur(refunded)} refunded for work that didn't run`, data: { amountCents: refunded } });
+      await emit(tx, { executionId, orgId: ex.orgId, type: "FUNDS_REFUNDED", actor: "system", message: `${formatCredits(refunded)} refunded for work that didn't run`, data: { amountCents: refunded } });
     }
     return true;
   });

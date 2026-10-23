@@ -15,6 +15,7 @@ import { listOf, strList, text } from "../ai/lenient";
 import { clip, collapse } from "../research/text";
 import { createExecution, enqueueTick } from "./lifecycle";
 import { block } from "./prompts";
+import { assertCanAffordPlanning } from "./budget";
 
 export const MAX_BUDGET_CENTS = 50_000;
 export const MIN_BUDGET_CENTS = 500;
@@ -104,6 +105,7 @@ async function assertGuestCanStart(org: OrgContext) {
 
 export async function createObjective(org: OrgContext, input: CreateObjectiveInput): Promise<{ objectiveId: string; executionId: string | null }> {
   await assertGuestCanStart(org);
+  if (!input.draft) await assertCanAffordPlanning(org);
   const organization = await prisma.organization.findUniqueOrThrow({ where: { id: org.orgId } });
   const budgetCents = Math.min(MAX_BUDGET_CENTS, Math.max(MIN_BUDGET_CENTS, Math.round(input.budgetCents ?? organization.approvalThresholdCents)));
   const statement = input.statement.trim();
@@ -144,6 +146,7 @@ export async function createObjective(org: OrgContext, input: CreateObjectiveInp
 /** Hands a DRAFT objective to the Chief of Staff. */
 export async function planDraft(org: OrgContext, objectiveId: string): Promise<string> {
   await assertGuestCanStart(org);
+  await assertCanAffordPlanning(org);
   const objective = await prisma.objective.findFirst({ where: { id: objectiveId, orgId: org.orgId }, include: { _count: { select: { executions: true } } } });
   if (!objective) throw new HttpError(404, "Objective not found");
   if (objective.status !== "DRAFT" || objective._count.executions > 0) throw new HttpError(409, "This objective is already planned.");

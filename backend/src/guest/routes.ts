@@ -3,6 +3,7 @@
 // hash — the raw IP is never stored) and per day across the server.
 
 import { createHash, randomBytes } from "crypto";
+import { startingGrant } from "../lib/wallet";
 import { Router } from "express";
 import bcrypt from "bcryptjs";
 import { z } from "zod";
@@ -57,6 +58,7 @@ export async function startGuestTrial(ip: string | undefined): Promise<string> {
         name: "Guest",
         accountType: "COMPANY",
         credits: config.guest.creditsCents,
+        ...startingGrant(config.guest.creditsCents, "guest_trial_grant"),
         termsAcceptedAt: new Date(),
         isGuest: true,
         signupIpHash: ipHash,

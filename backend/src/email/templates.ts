@@ -3,6 +3,7 @@
 // an HTML and a plain-text version. All dynamic values are HTML-escaped.
 
 import { config } from "../config";
+import { formatCredits } from "../billing/credits";
 
 const C = {
   bg: "#F4F6FB",
@@ -25,7 +26,6 @@ export function escapeHtml(s: string): string {
     .replace(/'/g, "&#39;");
 }
 
-const eur = (cents: number) => `€${(cents / 100).toFixed(2)}`;
 
 // What a mail client would turn into a link: URLs (scheme://…, protocol-relative //… or \\…, also to a
 // bracketed IP address, www.…; trailing punctuation is the sentence's), mailto: and e-mail addresses (on
@@ -238,7 +238,7 @@ export function taskFailedEmail(args: { name: string; taskId: string; title: str
   const title = clipPlain(plainTitle, 120);
   const refund =
     args.refundedCents > 0
-      ? `We refunded the full ${eur(args.refundedCents)} to the wallet that paid for it.`
+      ? `We refunded all ${formatCredits(args.refundedCents)} to the balance that paid for it.`
       : "You were not charged for it.";
   const subject = `Your task couldn't be completed: ${clipPlain(plainTitle, 60)}`;
   const html = layout({
@@ -355,7 +355,7 @@ export function executionFailedEmail(args: { name: string; objectiveId: string; 
   const url = objectiveUrl(args.objectiveId);
   const plainTitle = withoutLinks(args.title);
   const title = clipPlain(plainTitle, 120);
-  const refund = args.refundedCents > 0 ? `We refunded ${eur(args.refundedCents)} to your organization's balance.` : "You were not charged for it.";
+  const refund = args.refundedCents > 0 ? `We refunded ${formatCredits(args.refundedCents)} to your organization's balance.` : "You were not charged for it.";
   const subject = `Execution stopped: ${clipPlain(plainTitle, 60)}`;
   const html = layout({
     preheader: refund,

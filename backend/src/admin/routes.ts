@@ -3,6 +3,8 @@
 // (see lib/serializers.ts: an unverified address could belong to anyone who
 // signed up with it). Everyone else gets 403 — there is no demo console.
 // GET /api/admin/overview -> AdminOverview
+// GET /api/admin/economics?days=30&margin=0.75 -> internal unit economics (billing/economics.ts)
+// GET /api/admin/executions/:id/economics -> one execution's credits, variable cost and margin
 
 import { Router } from "express";
 import type { NextFunction, Response } from "express";
@@ -14,6 +16,9 @@ import { globalRunsToday, startOfTodayUTC } from "../lib/usageLimits";
 import { aiProviderLabel } from "../ai/llmProvider";
 import { queueStats } from "../engine/queue";
 import { effectiveSearchProvider, searchProviderLabel } from "../research/search";
+import { reconcileWallets } from "../lib/ledger";
+import { economicsSummary, executionEconomics } from "../billing/economics";
+import { HttpError } from "../lib/http";
 
 const router = Router();
 
@@ -119,6 +124,7 @@ export async function adminOverview(now = new Date()) {
     prisma.task.count({ where: { isTest: false } }),
     queueStats(),
   ]);
+  const ledger = await reconcileWallets(prisma, 5);
 
   const [failures, recentUsers] = await Promise.all([
     prisma.execution.findMany({
@@ -167,6 +173,8 @@ export async function adminOverview(now = new Date()) {
     search: { providerLabel: searchProviderLabel(), callsToday: searchToday, callsThisMonth: searchMonth, dailyBudget: config.search.dailyBudget },
     email: { enabled: config.email.enabled, sentToday: emailsToday },
     money: { purchasesCents: purchases._sum.amountCents ?? 0, purchasesCount: purchases._count._all, demoTopupsCents: topups._sum.amountCents ?? 0 },
+    // Every wallet's balance must equal the sum of its ledger rows (lib/ledger.ts).
+    ledger: { walletsChecked: ledger.checked, mismatches: ledger.mismatchCount, sample: ledger.mismatches.map((m) => ({ walletUserId: m.walletUserId, balance: m.balance, ledgerSum: m.ledgerSum })) },
     recentFailures: failures.map((f) => ({
       executionId: f.id,
       objectiveId: f.objectiveId,
@@ -177,6 +185,34 @@ export async function adminOverview(now = new Date()) {
     recentUsers: recentUsers.map((u) => ({ id: u.id, name: u.name, email: u.email, isGuest: u.isGuest, verified: !!u.emailVerifiedAt, createdAt: u.createdAt.toISOString() })),
   };
 }
+
+function numberParam(raw: unknown, fallback: number, min: number, max: number): number {
+  if (raw === undefined || raw === "") return fallback;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < min || n > max) throw new HttpError(400, `Expected a number between ${min} and ${max}`);
+  return n;
+}
+
+router.get(
+  "/economics",
+  ah<AuthedRequest>(async (req, res) => {
+    const days = Math.round(numberParam(req.query.days, 30, 1, 365));
+    const margin = numberParam(req.query.margin, 0.75, 0, 0.95);
+    res.set("Cache-Control", "no-store");
+    res.json(await economicsSummary(days, margin));
+  })
+);
+
+router.get(
+  "/executions/:id/economics",
+  ah<AuthedRequest>(async (req, res) => {
+    const margin = numberParam(req.query.margin, 0.75, 0, 0.95);
+    const e = await executionEconomics(String(req.params.id).slice(0, 64), margin);
+    if (!e) throw new HttpError(404, "Execution not found");
+    res.set("Cache-Control", "no-store");
+    res.json(e);
+  })
+);
 
 router.get(
   "/overview",

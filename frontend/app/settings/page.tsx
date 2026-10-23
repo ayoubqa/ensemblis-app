@@ -9,7 +9,7 @@ import { api, setToken, type Autonomy, type Organization, type User } from "@/li
 import { useAuth } from "@/lib/auth-context";
 import { CONTACT_EMAIL, useConfig } from "@/lib/config";
 import { toastApiError } from "@/lib/errors";
-import { eur, longDate } from "@/lib/format";
+import { credits, longDate } from "@/lib/format";
 import { ROUTES } from "@/lib/routes";
 import S from "./settings.module.css";
 
@@ -408,7 +408,7 @@ function AccountCard({ user }: { user: User }) {
             Balance
             {teamWallet && <span className="op-meta"> · organization balance</span>}
           </span>
-          <b>{eur(user.credits)}</b>
+          <b>{credits(user.credits)}</b>
         </div>
         <div className="op-kv">
           <span>Plan</span>
@@ -519,7 +519,7 @@ function OrganizationCard() {
   const [failed, setFailed] = useState(false);
   const [name, setName] = useState("");
   const [autonomy, setAutonomy] = useState<Autonomy>("REVIEW_PLAN");
-  const [threshold, setThreshold] = useState(20);
+  const [threshold, setThreshold] = useState(2000); // credits
   const [saving, setSaving] = useState(false);
 
   const load = () => {
@@ -530,7 +530,7 @@ function OrganizationCard() {
         setOrg(o);
         setName(o.name);
         setAutonomy(o.defaultAutonomy);
-        setThreshold(Math.round(o.approvalThresholdCents / 100));
+        setThreshold(o.approvalThresholdCents);
       })
       .catch(() => setFailed(true));
   };
@@ -555,7 +555,7 @@ function OrganizationCard() {
     );
   }
   const owner = org.role === "OWNER";
-  const thresholdCents = Math.max(0, Math.min(50_000, Math.round(threshold * 100)));
+  const thresholdCents = Math.max(0, Math.min(50_000, Math.round(threshold)));
   const dirty = name.trim() !== org.name || autonomy !== org.defaultAutonomy || thresholdCents !== org.approvalThresholdCents;
 
   const save = async (e: React.FormEvent) => {
@@ -589,13 +589,13 @@ function OrganizationCard() {
             Approval threshold
           </label>
           <div className="op-money">
+            <input id="org-threshold" className="f" type="number" min={0} max={50_000} step={50} value={threshold} aria-describedby="org-threshold-hint" onChange={(e) => setThreshold(Number(e.target.value || 0))} />
             <span className="muted" aria-hidden="true">
-              €
+              credits
             </span>
-            <input id="org-threshold" className="f" type="number" min={0} max={500} step={1} value={threshold} aria-describedby="org-threshold-hint" onChange={(e) => setThreshold(Number(e.target.value || 0))} />
           </div>
           <p className="hint" id="org-threshold-hint">
-            In euros. Any execution estimated above this needs explicit approval, whatever the objective&apos;s autonomy. €0 means every execution asks.
+            In credits. Any execution estimated above this needs explicit approval, whatever the objective&apos;s autonomy. 0 means every execution asks.
           </p>
         </div>
       </fieldset>
@@ -671,8 +671,8 @@ function GuestSettings({ user }: { user: User }) {
             <CardHead id="h-trial" title="Free trial" />
             <div>
               <div className="op-kv">
-                <span>Trial balance left</span>
-                <b>{eur(user.credits)}</b>
+                <span>Trial credits left</span>
+                <b>{credits(user.credits)}</b>
               </div>
               <div className="op-kv">
                 <span>Started</span>

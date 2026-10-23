@@ -12,6 +12,7 @@ import type { Request, Response } from "express";
 import Stripe from "stripe";
 import { prisma } from "../db";
 import { config } from "../config";
+import { formatCredits } from "./credits";
 import { HttpError } from "../lib/http";
 import { creditWallet, resolveWallet } from "../lib/wallet";
 
@@ -66,7 +67,7 @@ export async function createCheckoutSession(userId: string, packId: string): Pro
               unit_amount: pack.priceCents,
               product_data: {
                 name: `Ensemblis credits — ${pack.label}`,
-                description: `${eur(pack.credits)} of task credits for your Ensemblis wallet`,
+                description: `${formatCredits(pack.credits)} for your Ensemblis balance`,
               },
             },
           },
@@ -127,7 +128,9 @@ export async function fulfillCheckoutSession(session: Stripe.Checkout.Session): 
       actorUserId: payment.userId,
       type: "PURCHASE",
       amountCents: payment.credits,
-      description: `Purchased ${pack?.label ?? payment.packId} credit pack (${eur(payment.amountCents)})`,
+      description: `Purchased the ${pack?.label ?? payment.packId} credit pack: ${formatCredits(payment.credits)} for ${eur(payment.amountCents)}`,
+      reason: "stripe_purchase",
+      idempotencyKey: `stripe:${session.id}`,
     });
     return "credited" as const;
   });

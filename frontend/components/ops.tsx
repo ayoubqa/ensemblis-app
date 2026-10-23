@@ -8,7 +8,7 @@ import Link from "next/link";
 import { useId, useRef, useState, type ReactNode } from "react";
 import { api, type Approval, type Evidence, type ExceptionAction, type ExceptionItem, type ExecutionEvent, type ExecutiveKey, type TaskSource } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
-import { eur, relativeTime } from "@/lib/format";
+import { credits, relativeTime } from "@/lib/format";
 import { ROUTES } from "@/lib/routes";
 import { EVIDENCE_KIND_LABEL, type LabelledSource } from "./report/shared";
 import { Icon, type IconName } from "./Icon";
@@ -208,7 +208,7 @@ export function ApprovalCard({ approval, onDone, focusAfter, showObjective = fal
         <div>
           <dt>Cost</dt>
           <dd>
-            <b className="cs-dc-amt">{eur(approval.costCents, { decimals: true })}</b>
+            <b className="cs-dc-amt">{credits(approval.costCents)}</b>
             <span className="cs-dc-sub">Charged only if you approve. Refunded for work that fails or isn&apos;t executed.</span>
           </dd>
         </div>
@@ -229,7 +229,7 @@ export function ApprovalCard({ approval, onDone, focusAfter, showObjective = fal
           <div className="cs-dc-btns">
             <button type="button" className="btn p" onClick={() => decide("approve")} aria-busy={busy === "approve"} disabled={!!busy}>
               <Icon name="check" />
-              Approve{approval.costCents ? ` · ${eur(approval.costCents, { decimals: true })}` : ""}
+              Approve{approval.costCents ? ` · ${credits(approval.costCents)}` : ""}
             </button>
             <button type="button" className="btn" onClick={() => decide("reject")} aria-busy={busy === "reject"} disabled={!!busy}>
               Reject
@@ -468,6 +468,3 @@ export function EventFeed({
   );
 }
 
-export function Money({ cents }: { cents: number }) {
-  return <span style={{ fontVariantNumeric: "tabular-nums" }}>{eur(cents, { decimals: true })}</span>;
-}

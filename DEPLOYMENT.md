@@ -96,6 +96,25 @@ defaults shown — none needs setting for a normal deploy):
 | `VERIFY_RETRY_DELAY_MS` | `60000` | When the AI verifier can't run (key, quota, timeout, unusable reply) the result is **not verified** (`UNVERIFIED`): it is checked again once after this pause, then handed to a person as "The result could not be verified" (accept / retry / cancel). Accepting keeps it `UNVERIFIED`, the outcome `UNKNOWN`, and refunds the verification fee. |
 | `TAVILY_BASE_URL` | `https://api.tavily.com` | **Tests only** (points search at a local stub). Never set it in production: results that used it carry a "Custom search endpoint" notice and the API logs a production warning at boot. |
 
+Credits and cost accounting (API only; defaults shown — none needs setting for a normal deploy):
+
+| Variable | Default | What it does |
+|---|---|---|
+| `CREDITS_PER_EUR` | `100` | Internal value of a credit (1 credit = €0.01 at the default) for accounting and pricing. Balances are stored as whole credits and are **not** rewritten when it changes; every existing balance was issued at 100 per €1, so changing it revalues them internally (the API logs a warning). Leave it at 100 unless you deliberately re-denominate. |
+| `MAX_TOKENS_PER_EXECUTION` | `600000` | Runaway guard: an execution whose model calls have used this many tokens stops before its next step (or verification) and fails, which refunds its credits. `0` turns it off. A normal execution uses well under 100,000. |
+| `PROVIDER_PRICING` | unset | JSON price table for **internal** cost accounting (owner dashboard, `/api/admin/economics`): per-million-token prices per model, per-call prices per paid tool, and exchange rates to EUR — e.g. `{"models":{"openai/gpt-oss-120b":{"inputPerMTok":…,"outputPerMTok":…,"currency":"USD"}},"tools":{"search:tavily":{"perCall":…,"currency":"USD"}},"fx":{"USD":…}}`. Take the numbers from the providers' current price pages. Unset or invalid: usage is still recorded, but costs stay unpriced (never guessed). |
+
+**Credits.** Customers see balances, budgets, estimates, charges and refunds in
+credits. No balance is converted: the stored integer was already one cent of
+credit value, so at 100 credits per €1 a €30.00 balance is shown as 3,000
+credits. The migration `20261023120100_ledger_opening_balances` records, once
+per wallet, any balance that earlier releases never wrote to the ledger (the
+starting credits) as an "opening balance" row, so every balance equals the sum
+of its ledger rows; the owner dashboard and an hourly check (`ledger.mismatch`
+in the logs) report any wallet that doesn't. Planning now needs at least the
+cheapest plan's credits (800); below that, defining an objective returns 402
+before any model call.
+
 Model-layer behaviour to know: HTTP 500 and connection errors from the AI
 provider are now retried like 502/503/504; an exhausted quota (OpenAI
 `insufficient_quota`, a long `Retry-After`, Anthropic credit errors) is *not*
@@ -381,6 +400,27 @@ forward promptly. The other v1 columns are nullable additions the old build
 ignores. The follow-up migration `20261015120000_backfill_confirmed_outcome` is
 data only (it copies earlier human confirmations into `confirmedOutcomeStatus`,
 idempotently) and needs nothing on rollback.
+
+**Rolling back past the credits release** (`20261023120000_credit_ledger`):
+it added two `TransactionType` values, `GRANT` (starting credits) and
+`ADJUSTMENT` (opening balances). An older build's Prisma client throws when it
+reads those rows (Usage, billing summary), so move them aside first. They are
+ledger rows only: balances live in `"User"."credits"` and are unaffected.
+
+```sql
+-- before the rollback
+CREATE TABLE IF NOT EXISTS "_rollback_credits_tx" AS SELECT * FROM "Transaction" WHERE type IN ('GRANT', 'ADJUSTMENT');
+DELETE FROM "Transaction" WHERE type IN ('GRANT', 'ADJUSTMENT');
+
+-- after rolling forward again
+INSERT INTO "Transaction" SELECT * FROM "_rollback_credits_tx" ON CONFLICT DO NOTHING;
+DROP TABLE "_rollback_credits_tx";
+-- then run the statement in prisma/migrations/20261023120100_ledger_opening_balances/migration.sql
+-- once more (idempotent): it records the starting credits of accounts created while rolled back.
+```
+
+The other credits columns (`reason`, `balanceAfter`, `idempotencyKey`, the
+`UsageEvent` cost fields) are nullable additions an older build ignores.
 
 ## 8. If the migration step fails at boot
 

@@ -2,9 +2,9 @@
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { Avatar, Icon, LineChart, Skeleton, SkeletonText, useToast, type IconName } from "@/components";
-import { api, ApiError, type AdminOverview } from "@/lib/api";
+import { api, ApiError, type AdminEconomics, type AdminOverview } from "@/lib/api";
 import { errorText } from "@/lib/errors";
-import { eur, num, pct, plural, relativeTime, dateTime } from "@/lib/format";
+import { credits, eur, num, pct, plural, relativeTime, dateTime } from "@/lib/format";
 import { usePolling } from "@/lib/hooks";
 import { compact, dayLabelUTC, sumDays, usageTone } from "./adminFormat";
 import { DailyBars } from "./DailyBars";
@@ -188,8 +188,20 @@ function Body({ d }: { d: AdminOverview }) {
           {d.email.enabled ? "Notifications, verification and password resets" : "Set up email on the backend to send them"}
         </Tile>
         <Tile icon="eur" label="Purchases" value={eur(d.money.purchasesCents)}>
-          {plural(d.money.purchasesCount, "Stripe payment")} · {eur(d.money.demoTopupsCents)} demo top-ups
+          {plural(d.money.purchasesCount, "Stripe payment")} · {credits(d.money.demoTopupsCents)} of demo top-ups
         </Tile>
+        {d.ledger && (
+          <Tile
+            icon="shield"
+            label="Credit ledger"
+            value={d.ledger.mismatches ? num(d.ledger.mismatches) : "OK"}
+            flag={d.ledger.mismatches ? { tone: "bad", text: "Mismatch" } : undefined}
+          >
+            {d.ledger.mismatches
+              ? `${plural(d.ledger.mismatches, "balance")} differ from the ledger — see the backend log (ledger.mismatch)`
+              : `${plural(d.ledger.walletsChecked, "balance")} match the ledger`}
+          </Tile>
+        )}
         <Tile icon="file" label="Earlier reports" value={num(ex.legacyTasks)}>
           Read-only reports from before objectives
         </Tile>
@@ -240,6 +252,8 @@ function Body({ d }: { d: AdminOverview }) {
           </div>
         </div>
       </div>
+
+      <Economics />
 
       <h2 className="sr-only">Recent activity</h2>
       <div className="op-lanes">
@@ -318,6 +332,81 @@ function Body({ d }: { d: AdminOverview }) {
 
 
 /** KPI tile: label, big value (optionally "/ limit"), muted context line, optional usage meter or flag. */
+/** Millionths of EUR: "€0.0123" below €1, "€12.34" above. */
+function eurMicros(m: number | null): string {
+  if (m == null) return "—";
+  const e = m / 1_000_000;
+  return `€${e.toLocaleString("en-US", { minimumFractionDigits: e < 1 ? 4 : 2, maximumFractionDigits: e < 1 ? 4 : 2 })}`;
+}
+
+/** Internal unit economics, last 30 days (GET /api/admin/economics). Loaded apart so the dashboard never waits on it. */
+function Economics() {
+  const [e, setE] = useState<AdminEconomics | null>(null);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    api.adminEconomics(30).then(setE, () => setFailed(true));
+  }, []);
+  if (failed) return null;
+  const vc = e?.variableCost;
+  const gaps = vc ? [vc.unpricedEvents && `${num(vc.unpricedEvents)} unpriced`, vc.failedEvents && `${num(vc.failedEvents)} failed (cost unknown)`, vc.unconvertibleEvents && `${num(vc.unconvertibleEvents)} without an exchange rate`].filter(Boolean) : [];
+  return (
+    <section className="op-panel op-econ" aria-labelledby="h-econ">
+      <div className="op-chart-h" style={{ padding: "16px 18px 4px", margin: 0 }}>
+        <h3 id="h-econ">Unit economics · last 30 days</h3>
+        <span className="op-meta">internal — never shown to customers</span>
+      </div>
+      {!e ? (
+        <div style={{ padding: "8px 18px 18px" }}>
+          <SkeletonText lines={2} />
+        </div>
+      ) : (
+        <>
+          <dl className="op-econ-grid">
+            <div>
+              <dt>Completed executions</dt>
+              <dd>
+                {num(e.executions.completed)} <small>of {num(e.executions.total)}</small>
+              </dd>
+            </div>
+            <div>
+              <dt>Credits used (net)</dt>
+              <dd>
+                {credits(e.credits.net)} <small>list value {eur(Math.round(e.creditValueEurCents))}</small>
+              </dd>
+            </div>
+            <div>
+              <dt>Variable AI and tool cost</dt>
+              <dd>
+                {eurMicros(e.variableCost.eurMicros)} {!e.variableCost.complete && <small>lower bound</small>}
+              </dd>
+            </div>
+            <div>
+              <dt>Cost per completed execution</dt>
+              <dd>{eurMicros(e.costPerCompletedExecutionEurMicros)}</dd>
+            </div>
+            <div>
+              <dt>Contribution at list value</dt>
+              <dd>{e.contributionEurCents == null ? "—" : eur(Math.round(e.contributionEurCents))}</dd>
+            </div>
+            <div>
+              <dt>Gross margin at list value</dt>
+              <dd>{e.grossMarginPct == null ? "—" : pct(e.grossMarginPct)}</dd>
+            </div>
+          </dl>
+          <p className="op-meta op-econ-note">
+            {e.pricing.problem
+              ? e.pricing.problem
+              : e.pricing.configuredModels.length
+                ? `Priced from PROVIDER_PRICING (${plural(e.pricing.configuredModels.length, "model")}${e.pricing.configuredTools.length ? `, ${plural(e.pricing.configuredTools.length, "tool")}` : ""}).`
+                : "No prices configured (PROVIDER_PRICING): usage is recorded but not priced, so cost and margin stay blank."}
+            {gaps.length > 0 && ` Not in the cost: ${gaps.join(", ")}.`} {e.creditValueNote} Excluded: {e.excludedCosts.join(", ")}.
+          </p>
+        </>
+      )}
+    </section>
+  );
+}
+
 function Tile({
   icon,
   label,

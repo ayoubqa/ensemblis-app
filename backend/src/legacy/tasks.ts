@@ -45,6 +45,7 @@ export async function failAndRefund(taskId: string, message: string): Promise<bo
         amountCents: task.costCents,
         description: `Refund: ${task.title}`,
         taskId,
+        reason: "legacy_task_refund",
       });
     }
     return true;
@@ -92,6 +93,7 @@ export async function failRevision(revisionId: string, message: string): Promise
           amountCents: rev.costCents,
           description: `Refund: Follow-up: ${rev.task.title}`,
           taskId: rev.taskId,
+          reason: "legacy_task_refund",
         });
         return;
       }
