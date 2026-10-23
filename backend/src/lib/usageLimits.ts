@@ -54,7 +54,7 @@ export async function globalRunsToday(since = startOfTodayUTC()): Promise<number
 function globalLimitError(): DailyLimitError {
   return new DailyLimitError(
     "global",
-    `This demo has reached its daily limit of AI tasks across all users. Please come back tomorrow. Limits reset at midnight UTC (in ${resetsIn()}).`
+    `This server has reached its daily limit of AI executions across all users. Please come back tomorrow. Limits reset at midnight UTC (in ${resetsIn()}).`
   );
 }
 
@@ -114,4 +114,54 @@ export function withRunQuota<T>(userId: string, fn: () => Promise<T>): Promise<T
     await assertDailyTaskQuota(userId);
     return fn();
   });
+}
+
+/**
+ * Database-level version of the daily caps for code that runs in several
+ * processes (API + worker): takes a transaction-scoped advisory lock so two
+ * concurrent starts can't both pass the count, then checks the caps.
+ * Call inside the transaction that records the charge.
+ */
+export async function assertDailyQuotaInTx(tx: Prisma.TransactionClient, userId: string): Promise<void> {
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${RUN_QUOTA_LOCK}))`;
+  const since = startOfTodayUTC();
+  const [charges, testRuns, userCount] = await Promise.all([
+    tx.transaction.count({ where: { type: "TASK_CHARGE", createdAt: { gte: since } } }),
+    tx.task.count({ where: { isTest: true, createdAt: { gte: since } } }),
+    tx.transaction.count({ where: userChargesWhere(userId, since) }),
+  ]);
+  if (charges + testRuns >= config.maxTasksPerDayGlobal) throw globalLimitError();
+  if (userCount >= config.maxTasksPerUserPerDay) {
+    throw new DailyLimitError(
+      "user",
+      `You've reached today's limit of ${config.maxTasksPerUserPerDay} execution${config.maxTasksPerUserPerDay === 1 ? "" : "s"} per account. Limits reset at midnight UTC (in ${resetsIn()}).`
+    );
+  }
+}
+
+const PLAN_QUOTA_LOCK = "daily-plan-quota";
+
+/**
+ * Planning caps, checked wherever the Chief of Staff starts (or restarts) planning: per
+ * organization per UTC day (lower for guest trials), server-wide new executions per day, and
+ * concurrent planning per organization. Serialised with an advisory lock, like the run quota.
+ */
+export async function assertPlanningQuotaInTx(tx: Prisma.TransactionClient, orgId: string): Promise<void> {
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${PLAN_QUOTA_LOCK}))`;
+  const since = startOfTodayUTC();
+  const p = config.planning;
+  const [org, orgPlans, planningNow, globalNew] = await Promise.all([
+    tx.organization.findUnique({ where: { id: orgId }, select: { owner: { select: { isGuest: true } } } }),
+    tx.executionEvent.count({ where: { orgId, type: "PLANNING_STARTED", createdAt: { gte: since } } }),
+    tx.execution.count({ where: { orgId, status: "PLANNING" } }),
+    tx.execution.count({ where: { createdAt: { gte: since } } }),
+  ]);
+  if (globalNew >= p.globalPerDay) throw globalLimitError();
+  if (planningNow >= p.concurrentPerOrg) {
+    throw new HttpError(429, `The Chief of Staff is already planning ${planningNow} objectives for your organization. Wait for one of those plans before starting another.`);
+  }
+  const cap = org?.owner.isGuest ? p.perGuestPerDay : p.perOrgPerDay;
+  if (orgPlans >= cap) {
+    throw new DailyLimitError("user", `Your organization has reached today's limit of ${cap} plans. Limits reset at midnight UTC (in ${resetsIn()}).`);
+  }
 }

@@ -1,21 +1,18 @@
 "use client";
 
-import Link from "next/link";
-import { useCallback, useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
-import { Avatar, EmptyState, Icon, LineChart, Skeleton, SkeletonText, useToast, type IconName } from "@/components";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { Avatar, Icon, LineChart, Skeleton, SkeletonText, useToast, type IconName } from "@/components";
 import { api, ApiError, type AdminOverview } from "@/lib/api";
 import { errorText } from "@/lib/errors";
 import { eur, num, pct, plural, relativeTime, dateTime } from "@/lib/format";
 import { usePolling } from "@/lib/hooks";
-import { ROUTES } from "@/lib/routes";
 import { compact, dayLabelUTC, sumDays, usageTone } from "./adminFormat";
 import { DailyBars } from "./DailyBars";
-import { GalleryManager } from "./GalleryManager";
 
 const REFRESH_MS = 60_000;
 
-/** The real owner dashboard (ADMIN_EMAILS only). Reads GET /api/admin/overview. */
-export function OwnerDashboard({ onPreviewDemo }: { onPreviewDemo: () => void }) {
+/** The operations console (ADMIN_EMAILS only). Reads GET /api/admin/overview — real counts only. */
+export function OwnerDashboard() {
   const toast = useToast();
   const [data, setData] = useState<AdminOverview | null>(null);
   const [error, setError] = useState<unknown>(null);
@@ -32,10 +29,10 @@ export function OwnerDashboard({ onPreviewDemo }: { onPreviewDemo: () => void })
         const d = await api.adminOverview();
         setData(d);
         setError(null);
-        if (manual) toast("Dashboard refreshed", { icon: "check" });
+        if (manual) toast("Console refreshed", { icon: "check" });
       } catch (e) {
         setError(e);
-        if (manual) toast.error(errorText(e, "Couldn't refresh the dashboard"));
+        if (manual) toast.error(errorText(e, "Couldn't refresh the console"));
       } finally {
         inflight.current = false;
         setRefreshing(false);
@@ -51,35 +48,33 @@ export function OwnerDashboard({ onPreviewDemo }: { onPreviewDemo: () => void })
     const t = setInterval(() => setTick((n) => n + 1), 15_000);
     return () => clearInterval(t);
   }, []);
-  useEffect(() => {
-    document.title = "Owner dashboard · Ensemblis";
-  }, []);
 
   const forbidden = error instanceof ApiError && (error.status === 403 || error.status === 401);
 
   return (
-    <div className="wrap" style={{ paddingBottom: 48 }}>
-      <div className="pagehead row between wrapflex" style={{ alignItems: "flex-end", gap: 14 }}>
-        <div>
-          <span className="tag ok">
-            <span className="pulse" aria-hidden="true" />
-            Owner dashboard · live data
-          </span>
-          <h1 style={{ marginTop: 12 }}>How Ensemblis is doing</h1>
-          <p>
+    <div className="wrap op-page">
+      <div className="pagehead sh-ph">
+        <div className="sh-ph-main">
+          <div className="eyebrow">Operations console</div>
+          <div className="sh-ph-tag">
+            <span className="tag ok">
+              <span className="op-live" style={{ color: "var(--ok)" }}>
+                Live data
+              </span>
+            </span>
+          </div>
+          <h1>How this deployment is performing</h1>
+          <p className="sh-ph-desc">
             {data ? (
               <>
                 Updated <span title={dateTime(data.generatedAt)}>{relativeTime(data.generatedAt)}</span> · refreshes every minute. Days are counted in UTC.
               </>
             ) : (
-              "Usage, limits, money and quality for this deployment, at a glance."
+              "Executions, queue health, verification, AI usage and money for this deployment."
             )}
           </p>
         </div>
-        <div className="row wrapflex">
-          <button type="button" className="btn ghost sm" onClick={onPreviewDemo} title="See the illustrative console that other visitors get">
-            Preview demo console
-          </button>
+        <div className="sh-ph-actions">
           <button type="button" className="btn" onClick={() => load(true)} aria-busy={refreshing} disabled={refreshing}>
             <Icon name="redo" />
             Refresh
@@ -92,10 +87,10 @@ export function OwnerDashboard({ onPreviewDemo }: { onPreviewDemo: () => void })
           <Icon name={forbidden ? "lock" : "alert"} />
           <div className="sp">
             {forbidden
-              ? "The server didn't recognise this account as an owner. Check that your email is listed in ADMIN_EMAILS on the backend, then sign in again."
+              ? "The server didn't recognize this account as an operator. Your email must be listed in ADMIN_EMAILS on the backend and verified."
               : data
                 ? `Couldn't refresh (${errorText(error)}). Showing data from ${relativeTime(data.generatedAt)}.`
-                : errorText(error, "Couldn't load the dashboard.")}
+                : errorText(error, "Couldn't load the console.")}
           </div>
           {!forbidden && (
             <button type="button" className="btn sm" onClick={() => load(true)} disabled={refreshing}>
@@ -105,59 +100,80 @@ export function OwnerDashboard({ onPreviewDemo }: { onPreviewDemo: () => void })
         </div>
       )}
 
-      {!data ? error != null ? null : <DashboardSkeleton /> : <Body d={data} reload={() => load()} />}
+      {!data ? error != null ? null : <DashboardSkeleton /> : <Body d={data} />}
     </div>
   );
 }
 
 // ------------------------------------------------------------------ body
-function Body({ d, reload }: { d: AdminOverview; reload: () => Promise<void> }) {
+function Body({ d }: { d: AdminOverview }) {
   const users = d.users;
-  const tasks = d.tasks;
+  const ex = d.executions;
   const ai = d.ai;
   const search = d.search;
+  const q = d.queue;
   const signups14 = sumDays(users.signupsLast14d);
   const tokensToday = (ai.tokensInToday || 0) + (ai.tokensOutToday || 0);
-  const settled = tasks.completed + tasks.failed;
-  const successRate = settled ? Math.round((tasks.completed / settled) * 1000) / 10 : null;
+  const settled = ex.completed + ex.failed;
+  const successRate = settled ? Math.round((ex.completed / settled) * 1000) / 10 : null;
   const signupDays = users.signupsLast14d ?? [];
   const tokenDays = ai.tokensLast14d ?? [];
-  const topAgents = d.topAgents ?? [];
   const failures = d.recentFailures ?? [];
   const recentUsers = d.recentUsers ?? [];
-  const maxRuns = Math.max(1, ...topAgents.map((a) => a.runs));
+  const verified = ex.verification.pass + ex.verification.warnings + ex.verification.failedAccepted;
+  const queueStale = q.oldestQueuedSeconds > 120;
 
   return (
     <>
-      {/* KPI tiles */}
       <h2 className="sr-only">Today at a glance</h2>
-      <div className="grid g4 keep2">
+      <div className="op-tiles">
         <Tile icon="user" label="Users" value={num(users.total)} delta={signups14 ? `+${num(signups14)} in 14 days` : undefined}>
-          {num(users.guests)} guests · {num(users.developers)} developers
+          {num(users.organizations)} organizations · {num(users.guests)} guests
         </Tile>
         <Tile
           icon="zap"
-          label="Tasks today"
-          value={num(tasks.runsToday)}
-          of={tasks.dailyCapGlobal > 0 ? num(tasks.dailyCapGlobal) : undefined}
-          meter={{ used: tasks.runsToday, limit: tasks.dailyCapGlobal, label: "Tasks today against the global daily cap" }}
+          label="Executions today"
+          value={num(ex.runsToday)}
+          of={ex.dailyCapGlobal > 0 ? num(ex.dailyCapGlobal) : undefined}
+          meter={{ used: ex.runsToday, limit: ex.dailyCapGlobal, label: "Executions today against the global daily cap" }}
         >
-          {tasks.running > 0 ? (
+          {ex.inFlight > 0 ? (
             <span className="row" style={{ gap: 6, display: "inline-flex" }}>
               <i className="pulse" aria-hidden="true" />
-              {num(tasks.running)} running now
+              {num(ex.inFlight)} in flight · {num(ex.waiting)} waiting
             </span>
-          ) : tasks.dailyCapGlobal > 0 ? (
-            "against the global daily cap"
           ) : (
-            "No global daily cap set"
+            `${num(ex.waiting)} waiting on people`
           )}
         </Tile>
-        <Tile icon="spark" label="AI calls today" value={num(ai.callsToday)} flag={ai.failuresToday > 0 ? { tone: "bad", text: `${num(ai.failuresToday)} failed` } : undefined}>
-          {ai.providerLabel || "AI provider"}
+        <Tile
+          icon="layers"
+          label="Execution queue"
+          value={num(q.queued)}
+          flag={q.deadLast24h > 0 ? { tone: "bad", text: `${num(q.deadLast24h)} dead (24h)` } : queueStale ? { tone: "warn", text: "Backlog" } : undefined}
+        >
+          {num(q.running)} in progress · oldest queued {q.queued ? `${num(q.oldestQueuedSeconds)}s` : "—"}
         </Tile>
-        <Tile icon="layers" label="AI tokens today" value={compact(tokensToday)}>
-          {compact(ai.tokensInToday)} in · {compact(ai.tokensOutToday)} out
+        <Tile
+          icon="alert"
+          label="Needs people"
+          value={num(ex.pendingApprovals + ex.openExceptions)}
+        >
+          {plural(ex.pendingApprovals, "pending approval")} · {plural(ex.openExceptions, "open exception")}
+        </Tile>
+        <Tile
+          icon="check"
+          label="Execution success"
+          value={pct(successRate)}
+          flag={successRate !== null && successRate < 80 && settled >= 5 ? { tone: "warn", text: "Below 80%" } : undefined}
+        >
+          {num(ex.completed)} completed · {num(ex.failed)} failed · {num(ex.cancelled)} cancelled
+        </Tile>
+        <Tile icon="shield" label="Verification" value={verified ? pct(Math.round((ex.verification.pass / verified) * 1000) / 10) : "—"}>
+          {num(ex.verification.pass)} pass · {num(ex.verification.warnings)} with warnings · {num(ex.verification.failedAccepted)} failed & accepted
+        </Tile>
+        <Tile icon="chart" label="AI calls today" value={num(ai.callsToday)} flag={ai.failuresToday > 0 ? { tone: "bad", text: `${num(ai.failuresToday)} failed` } : undefined}>
+          {ai.providerLabel || "AI provider"} · {compact(tokensToday)} tokens
         </Tile>
         <Tile
           icon="globe"
@@ -169,30 +185,27 @@ function Body({ d, reload }: { d: AdminOverview; reload: () => Promise<void> }) 
           {num(search.callsThisMonth)} this month · {search.providerLabel || "Off"}
         </Tile>
         <Tile icon="mail" label="Emails today" value={d.email.enabled ? num(d.email.sentToday) : "—"} flag={d.email.enabled ? undefined : { tone: "gray", text: "Email off" }}>
-          {d.email.enabled ? "Task-done notices and password resets" : "Set up email on the backend to send them"}
+          {d.email.enabled ? "Notifications, verification and password resets" : "Set up email on the backend to send them"}
         </Tile>
         <Tile icon="eur" label="Purchases" value={eur(d.money.purchasesCents)}>
           {plural(d.money.purchasesCount, "Stripe payment")} · {eur(d.money.demoTopupsCents)} demo top-ups
         </Tile>
-        <Tile
-          icon="check"
-          label="Task success"
-          value={pct(successRate)}
-          flag={successRate !== null && successRate < 80 && settled >= 5 ? { tone: "warn", text: "Below 80%" } : undefined}
-        >
-          {num(tasks.completed)} completed · {num(tasks.failed)} failed · {num(tasks.total)} total
+        <Tile icon="file" label="Earlier reports" value={num(ex.legacyTasks)}>
+          Read-only reports from before objectives
+        </Tile>
+        <Tile icon="flag" label="All executions" value={num(ex.total)}>
+          since this deployment started
         </Tile>
       </div>
 
-      {/* 14-day charts */}
       <h2 className="sr-only">Last 14 days</h2>
-      <div className="grid g3" style={{ marginTop: 16, alignItems: "stretch" }}>
-        <div className="card">
-          <div className="row between" style={{ gap: 8 }}>
-            <h3 style={{ margin: 0 }}>Sign-ups</h3>
-            <span className="tiny muted">{num(signups14)} in 14 days</span>
+      <div className="op-charts">
+        <div className="op-panel op-chart">
+          <div className="op-chart-h">
+            <h3>Sign-ups</h3>
+            <span className="op-meta">{num(signups14)} in 14 days</span>
           </div>
-          <div style={{ marginTop: 12 }}>
+          <div>
             <LineChart
               values={signupDays.map((x) => x.count)}
               xLabels={signupDays.map((x) => dayLabelUTC(x.day))}
@@ -202,21 +215,21 @@ function Body({ d, reload }: { d: AdminOverview; reload: () => Promise<void> }) 
             />
           </div>
         </div>
-        <div className="card">
-          <div className="row between" style={{ gap: 8 }}>
-            <h3 style={{ margin: 0 }}>Tasks</h3>
-            <span className="tiny muted">last 14 days</span>
+        <div className="op-panel op-chart">
+          <div className="op-chart-h">
+            <h3>Executions</h3>
+            <span className="op-meta">last 14 days</span>
           </div>
-          <div style={{ marginTop: 12 }}>
-            <DailyBars completed={tasks.completedLast14d ?? []} failed={tasks.failedLast14d ?? []} height={140} label="Completed and failed tasks per day, last 14 days" />
+          <div>
+            <DailyBars completed={ex.completedLast14d ?? []} failed={ex.failedLast14d ?? []} height={140} label="Completed and failed executions per day, last 14 days" />
           </div>
         </div>
-        <div className="card">
-          <div className="row between" style={{ gap: 8 }}>
-            <h3 style={{ margin: 0 }}>AI tokens</h3>
-            <span className="tiny muted">{compact(sumDays(tokenDays))} in 14 days</span>
+        <div className="op-panel op-chart">
+          <div className="op-chart-h">
+            <h3>AI tokens</h3>
+            <span className="op-meta">{compact(sumDays(tokenDays))} in 14 days</span>
           </div>
-          <div style={{ marginTop: 12 }}>
+          <div>
             <LineChart
               values={tokenDays.map((x) => x.count)}
               xLabels={tokenDays.map((x) => dayLabelUTC(x.day))}
@@ -228,169 +241,81 @@ function Body({ d, reload }: { d: AdminOverview; reload: () => Promise<void> }) 
         </div>
       </div>
 
-      {/* Agents + failures */}
-      <div className="grid g2" style={{ marginTop: 16, alignItems: "start" }}>
-        <section className="card tight" aria-labelledby="h-top-agents" style={{ minWidth: 0 }}>
-          <div className="row between">
-            <h3 id="h-top-agents" style={{ margin: 0 }}>
-              Top agents
-            </h3>
-            <span className="tiny muted">by runs</span>
-          </div>
-          {topAgents.length === 0 ? (
-            <p className="small muted" style={{ marginTop: 10 }}>
-              No agent has run a real task yet.
-            </p>
-          ) : (
-            <div className="tw" style={{ marginTop: 10, border: 0 }}>
-              {/* Half-width card: let this 3-column table shrink (the global 560px minimum would hide "Achieved"). */}
-              <table style={{ minWidth: 0 }}>
-                <thead>
-                  <tr>
-                    <th>Agent</th>
-                    <th style={{ textAlign: "right" }}>Runs</th>
-                    <th style={{ textAlign: "right" }}>Achieved</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {topAgents.slice(0, 8).map((a) => (
-                    <tr key={a.agentId}>
-                      <td style={{ whiteSpace: "normal" }}>
-                        <div className="row" style={{ gap: 10 }}>
-                          <Avatar name={a.name} size="sm" />
-                          <div style={{ minWidth: 0, flex: 1 }}>
-                            <Link href={ROUTES.agent(a.agentId)} style={{ fontWeight: 600, color: "inherit" }}>
-                              {a.name}
-                            </Link>
-                            <div style={{ marginTop: 5, height: 5, maxWidth: 220, background: "var(--line)", borderRadius: 5, overflow: "hidden" }} aria-hidden="true">
-                              <i style={{ display: "block", height: "100%", width: `${(a.runs / maxRuns) * 100}%`, background: "var(--accent)", borderRadius: 5 }} />
-                            </div>
-                          </div>
-                        </div>
-                      </td>
-                      <td style={{ textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{num(a.runs)}</td>
-                      <td style={{ textAlign: "right", fontVariantNumeric: "tabular-nums" }} title={a.achievedRate === null ? "No ratings yet" : undefined}>
-                        {pct(a.achievedRate)}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </section>
-
-        <section className="card tight" aria-labelledby="h-failures" style={{ minWidth: 0 }}>
-          <div className="row between">
-            <h3 id="h-failures" style={{ margin: 0 }}>
-              Recent failures
-            </h3>
+      <h2 className="sr-only">Recent activity</h2>
+      <div className="op-lanes">
+        <section className="op-panel" aria-labelledby="h-failures" style={{ minWidth: 0 }}>
+          <div className="op-chart-h" style={{ padding: "16px 18px 4px", margin: 0 }}>
+            <h3 id="h-failures">Recent failed executions</h3>
             {failures.length > 0 && <span className="tag bad">{num(failures.length)}</span>}
           </div>
           {failures.length === 0 ? (
-            <p className="small muted row" style={{ marginTop: 10, gap: 8 }}>
+            <p className="op-quiet" style={{ paddingTop: 10 }}>
               <Icon name="check" style={{ color: "var(--ok)" }} />
-              No failed tasks recently.
+              No failed executions recently.
             </p>
           ) : (
-            <div style={{ marginTop: 4 }}>
+            <ul className="op-list" style={{ marginTop: 4 }}>
               {failures.slice(0, 8).map((f) => (
-                <div key={f.taskId + f.at} className="lane" style={{ alignItems: "flex-start", padding: "10px 4px" }}>
+                <li key={f.executionId} className="op-lane">
                   <span style={{ color: "var(--bad)", flex: "none", marginTop: 2 }}>
                     <Icon name="alert" label="Failed" />
                   </span>
-                  <div className="sp" style={{ minWidth: 0 }}>
-                    <b className="small" style={{ display: "block", overflowWrap: "anywhere" }}>
-                      {f.title}
-                    </b>
-                    <div className="tiny muted" style={clamp2} title={f.error}>
+                  <div className="op-lane-b">
+                    <b>{f.title}</b>
+                    <div className="op-meta op-clamp2" title={f.error}>
                       {f.error || "No error message recorded"}
                     </div>
                   </div>
-                  <span className="tiny muted" style={{ flex: "none", whiteSpace: "nowrap" }} title={dateTime(f.at)}>
+                  <span className="op-meta op-lane-t" title={dateTime(f.at)}>
                     {relativeTime(f.at)}
                   </span>
-                </div>
+                </li>
               ))}
-            </div>
+            </ul>
+          )}
+        </section>
+
+        <section className="op-panel" aria-labelledby="h-users" style={{ minWidth: 0 }}>
+          <div className="op-chart-h" style={{ padding: "16px 18px 4px", margin: 0 }}>
+            <h3 id="h-users">Recent users</h3>
+            <span className="op-meta">newest first</span>
+          </div>
+          {recentUsers.length === 0 ? (
+            <p className="op-quiet" style={{ paddingTop: 10 }}>
+              No users yet.
+            </p>
+          ) : (
+            <ul className="op-list" style={{ marginTop: 4 }}>
+              {recentUsers.slice(0, 10).map((u) => (
+                <li key={u.id} className="op-lane" style={{ alignItems: "center" }}>
+                  <Avatar name={u.isGuest ? "Guest" : u.name} size="xs" round />
+                  <div className="op-lane-b">
+                    <b>{u.isGuest ? "Guest" : u.name}</b>
+                    {!u.isGuest && (
+                      <div className="op-meta" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={u.email}>
+                        {u.email}
+                      </div>
+                    )}
+                  </div>
+                  {u.isGuest ? <span className="tag warn">Guest</span> : u.verified ? <span className="tag ok">Verified</span> : <span className="tag gray">Unverified</span>}
+                  <span className="op-meta op-lane-t" title={dateTime(u.createdAt)}>
+                    {relativeTime(u.createdAt)}
+                  </span>
+                </li>
+              ))}
+            </ul>
           )}
         </section>
       </div>
 
-      {/* Recent users */}
-      <section aria-labelledby="h-users" style={{ marginTop: 16 }}>
-        <div className="row between" style={{ marginBottom: 10 }}>
-          <h3 id="h-users" style={{ margin: 0 }}>
-            Recent users
-          </h3>
-          <span className="tiny muted">newest first</span>
-        </div>
-        {recentUsers.length === 0 ? (
-          <EmptyState icon="user" title="No users yet">
-            New accounts and guest trials will appear here.
-          </EmptyState>
-        ) : (
-          <div className="tw">
-            <table style={{ minWidth: 620 }}>
-              <thead>
-                <tr>
-                  <th>Name</th>
-                  <th>Email</th>
-                  <th>Type</th>
-                  <th>Joined</th>
-                  <th style={{ textAlign: "right" }}>Tasks</th>
-                </tr>
-              </thead>
-              <tbody>
-                {recentUsers.slice(0, 12).map((u) => (
-                  <tr key={u.id}>
-                    <td>
-                      <div className="row" style={{ gap: 8 }}>
-                        <Avatar name={u.isGuest ? "Guest" : u.name} size="xs" round />
-                        <b className="small">{u.isGuest ? "Guest" : u.name}</b>
-                      </div>
-                    </td>
-                    <td className="small" style={{ maxWidth: 240, overflow: "hidden", textOverflow: "ellipsis" }} title={u.email}>
-                      {u.isGuest ? <span className="muted">—</span> : u.email}
-                    </td>
-                    <td>
-                      {u.isGuest ? (
-                        <span className="tag warn">Guest</span>
-                      ) : (
-                        <span className={u.accountType === "DEVELOPER" ? "tag" : "tag gray"}>{u.accountType === "DEVELOPER" ? "Developer" : "Company"}</span>
-                      )}
-                    </td>
-                    <td className="small" title={dateTime(u.createdAt)}>
-                      {relativeTime(u.createdAt)}
-                    </td>
-                    <td style={{ textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{num(u.tasks)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </section>
-
-      <GalleryManager shareable={d.shareableReports ?? []} gallery={d.gallery ?? []} onChanged={reload} />
-
-      <p className="tiny muted" style={{ marginTop: 22 }}>
+      <p className="op-note" style={{ marginTop: 22 }}>
         Counts come straight from this deployment&apos;s database. “Today” and the 14-day charts use UTC days. Money: Stripe purchases are real payments;
-        demo top-ups are free credits.
+        demo top-ups are free balance.
       </p>
     </>
   );
 }
 
-const clamp2: CSSProperties = {
-  display: "-webkit-box",
-  WebkitLineClamp: 2,
-  WebkitBoxOrient: "vertical",
-  overflow: "hidden",
-  overflowWrap: "anywhere",
-};
-
-const TONE_COLOR = { ok: "var(--accent)", warn: "var(--warn)", bad: "var(--bad)" } as const;
 
 /** KPI tile: label, big value (optionally "/ limit"), muted context line, optional usage meter or flag. */
 function Tile({
@@ -418,25 +343,23 @@ function Tile({
   const shownFlag =
     flag ?? (tone === "bad" ? { tone: "bad" as const, text: "Limit reached" } : tone === "warn" ? { tone: "warn" as const, text: "Near limit" } : undefined);
   return (
-    <div className="card tight" style={{ display: "flex", flexDirection: "column", gap: 4, minWidth: 0 }}>
-      <div className="row between wrapflex" style={{ gap: 4 }}>
-        <div className="tiny muted row" style={{ gap: 6, fontWeight: 600 }}>
-          <Icon name={icon} size={14} />
+    <div className="op-panel op-tile">
+      <div className="op-tile-h">
+        <span className="op-kpi-l">
+          <Icon name={icon} />
           {label}
-        </div>
+        </span>
         {shownFlag && (
-          <span className={`tag ${shownFlag.tone}`} style={{ padding: "1px 7px", fontSize: 11 }}>
+          <span className={`tag ${shownFlag.tone}`}>
             {shownFlag.tone !== "gray" && <Icon name="alert" />}
             {shownFlag.text}
           </span>
         )}
       </div>
-      <div style={{ fontSize: 26, fontWeight: 600, letterSpacing: "-.02em", lineHeight: 1.15, fontVariantNumeric: "tabular-nums" }}>
+      <div className="op-tile-v">
         {value}
-        {of && <small style={{ fontSize: 15, fontWeight: 500, color: "var(--muted)" }}> / {of}</small>}
-        {delta && (
-          <small style={{ fontSize: 12, fontWeight: 600, color: "var(--ok)", marginLeft: 8, letterSpacing: 0 }}>{delta}</small>
-        )}
+        {of && <small> / {of}</small>}
+        {delta && <span className="op-delta">{delta}</span>}
       </div>
       {hasLimit && (
         <div
@@ -447,39 +370,38 @@ function Tile({
           aria-valuemax={meter!.limit}
           aria-valuenow={meter!.used}
           aria-valuetext={`${num(meter!.used)} of ${num(meter!.limit)}`}
-          style={{ margin: "4px 0 2px" }}
         >
-          <i style={{ width: `${Math.max(ratio > 0 ? 3 : 0, ratio * 100)}%`, background: TONE_COLOR[tone], transition: "width .4s ease" }} />
+          <i className={tone === "ok" ? undefined : `is-${tone}`} style={{ width: `${Math.max(ratio > 0 ? 3 : 0, ratio * 100)}%`, transition: "width .4s ease" }} />
         </div>
       )}
-      {children && <div className="tiny muted" style={{ minWidth: 0, overflowWrap: "anywhere" }}>{children}</div>}
+      {children && <div className="op-tile-m">{children}</div>}
     </div>
   );
 }
 
 function DashboardSkeleton() {
   return (
-    <div aria-busy="true" aria-label="Loading the owner dashboard">
-      <div className="grid g4 keep2">
+    <div aria-busy="true" aria-label="Loading the operations console">
+      <div className="op-tiles">
         {Array.from({ length: 8 }).map((_, i) => (
-          <div key={i} className="card tight">
+          <div key={i} className="op-panel op-tile">
             <Skeleton width="45%" height={10} />
             <Skeleton width="55%" height={26} style={{ marginTop: 10 }} />
             <Skeleton width="80%" height={10} style={{ marginTop: 10 }} />
           </div>
         ))}
       </div>
-      <div className="grid g3" style={{ marginTop: 16 }}>
+      <div className="op-charts">
         {[0, 1, 2].map((i) => (
-          <div key={i} className="card">
+          <div key={i} className="op-panel op-chart">
             <Skeleton width="40%" height={14} />
             <Skeleton height={120} style={{ marginTop: 14 }} />
           </div>
         ))}
       </div>
-      <div className="grid g2" style={{ marginTop: 16 }}>
+      <div className="op-lanes">
         {[0, 1].map((i) => (
-          <div key={i} className="card tight">
+          <div key={i} className="op-panel op-pad">
             <SkeletonText lines={5} />
           </div>
         ))}

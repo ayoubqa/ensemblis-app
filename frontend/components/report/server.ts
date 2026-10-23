@@ -1,8 +1,10 @@
 // Server-only helpers for `generateMetadata` on public report pages
-// (/r/[token], /examples/[slug]). Never throws: a slow or missing backend just
+// (/r/[token]). Never throws: a slow or missing backend just
 // means generic metadata. Client code uses `api.*` instead.
 import type { Metadata } from "next";
 import { plainSummary } from "./shared";
+
+const OG_IMAGE = { url: "/brand/og-image.png", width: 1200, height: 630, alt: "Ensemblis — the AI operating layer for business" };
 
 const API = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000").replace(/\/+$/, "");
 
@@ -33,8 +35,9 @@ export function reportMetadata(opts: {
   return {
     title: opts.title,
     description,
-    openGraph: { title: ogTitle, description, type: "article", siteName: "Ensemblis" },
-    twitter: { card: "summary", title: ogTitle, description },
+    // Next merges metadata shallowly: repeat the brand image and locale, or previews lose them.
+    openGraph: { title: ogTitle, description, type: "article", siteName: "Ensemblis", locale: "en_US", images: [OG_IMAGE] },
+    twitter: { card: "summary_large_image", title: ogTitle, description, images: [OG_IMAGE.url] },
     ...(opts.noindex ? { robots: { index: false, follow: false } } : {}),
   };
 }

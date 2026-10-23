@@ -1,119 +1,176 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import Link from "next/link";
+import { useCallback, useEffect, useState } from "react";
 import { useParams } from "next/navigation";
-import { api, ApiError, type Task, type TaskStatus } from "@/lib/api";
+import { api, ApiError, type LegacyTask } from "@/lib/api";
 import { EmptyState, Icon, PageSkeleton, RequireAuth, useToast } from "@/components";
-import { useAuth } from "@/lib/auth-context";
-import { confetti } from "@/lib/confetti";
-import { usePolling } from "@/lib/hooks";
+import { ExportMenu, LEGACY_NOTE, ReportView, copyText, reportTitle } from "@/components/report";
+import { eur, longDate } from "@/lib/format";
 import { ROUTES } from "@/lib/routes";
-import { RunView } from "./_components/RunView";
-import { ResultView } from "./_components/ResultView";
-import { FailedView } from "./_components/FailedView";
-import { hasPendingRevision, isLive } from "./_components/shared";
 
-export default function TaskPage() {
+const EARLIER = ROUTES.legacyReports;
+
+export default function LegacyReportPage() {
   return (
     <RequireAuth>
-      <TaskLive />
+      <LegacyReport />
     </RequireAuth>
   );
 }
 
-/** One live page per task: run view → result view (or failed view), driven by polling. */
-function TaskLive() {
+/** Read-only view of an earlier report, produced before objectives existed (v1–v3). */
+function LegacyReport() {
   const { id } = useParams<{ id: string }>();
   const toast = useToast();
-  const { refresh } = useAuth();
-  const [task, setTask] = useState<Task | null>(null);
-  const [error, setError] = useState<ApiError | null>(null);
-  const prevStatus = useRef<TaskStatus | null>(null);
-  const celebrated = useRef(false);
+  const [task, setTask] = useState<LegacyTask | null>(null);
+  const [error, setError] = useState<ApiError | Error | null>(null);
+  const [busy, setBusy] = useState(false);
 
-  const accept = useCallback(
-    (t: Task) => {
-      const prev = prevStatus.current;
-      const wasLive = prev === "RUNNING" || prev === "PLANNING";
-      if (wasLive && t.status === "COMPLETED" && !celebrated.current) {
-        celebrated.current = true;
-        confetti();
-        toast("Your work is ready");
-        window.scrollTo({ top: 0, behavior: "smooth" });
-      }
-      if (wasLive && (t.status === "FAILED" || t.status === "REFUNDED")) {
-        toast.error("A step failed. You've been refunded automatically.");
-        refresh(); // pick up the refunded balance in the header
-      }
-      prevStatus.current = t.status;
+  const load = useCallback(async () => {
+    try {
+      const { task: t } = await api.getLegacyReport(id);
       setTask(t);
-    },
-    [toast, refresh]
-  );
+      setError(null);
+    } catch (e) {
+      setError(e as Error);
+    }
+  }, [id]);
+  useEffect(() => {
+    load();
+  }, [load]);
 
-  // Keep polling while the team works, and while a follow-up revision is being written.
-  const live = !task || isLive(task) || hasPendingRevision(task);
-  usePolling(
-    async () => {
-      try {
-        const { task: t } = await api.getTask(id);
-        setError(null);
-        accept(t);
-        return isLive(t) || hasPendingRevision(t);
-      } catch (e) {
-        const ae = e instanceof ApiError ? e : new ApiError("Something went wrong", 500);
-        setError(ae);
-        return !(ae.status === 404 || ae.status === 403 || ae.status === 400);
-      }
-    },
-    2000,
-    { enabled: live && !(error && (error.status === 404 || error.status === 403 || error.status === 400)) }
-  );
-
-  // Tab title shows live progress, e.g. "(2/4) Market sizing · Ensemblis".
   useEffect(() => {
     if (!task) return;
-    const done = task.steps.filter((s) => s.status === "COMPLETED").length;
-    const prefix = isLive(task)
-      ? `(${done}/${task.steps.length}) `
-      : hasPendingRevision(task)
-        ? "Refining · "
-        : task.status === "COMPLETED"
-          ? "✓ "
-          : "";
     const before = document.title;
-    document.title = `${prefix}${task.title} · Ensemblis`;
+    document.title = `${task.title} · Earlier report · Ensemblis`;
     return () => {
       document.title = before;
     };
   }, [task]);
 
-  if (!task) {
-    if (error && (error.status === 404 || error.status === 403 || error.status === 400)) {
-      return (
-        <div className="narrow" style={{ padding: "56px 0" }}>
-          <EmptyState icon="list" title="Task not found" action={{ label: "Go to My work", href: ROUTES.tasks }}>
-            This task doesn&apos;t exist or belongs to another account.
-          </EmptyState>
-        </div>
-      );
-    }
+  if (error) {
+    const missing = error instanceof ApiError && [400, 403, 404].includes(error.status);
     return (
-      <>
-        {error && (
-          <div className="wrap" style={{ paddingTop: 20 }}>
-            <div className="notice" role="alert">
-              <Icon name="alert" />
-              <span>{error.message} Retrying automatically…</span>
-            </div>
-          </div>
-        )}
-        <PageSkeleton />
-      </>
+      <div className="narrow" style={{ paddingBlock: 56 }}>
+        <EmptyState
+          icon="file"
+          titleAs="h1"
+          title={missing ? "Report not found" : "Couldn't load this report"}
+          action={
+            missing ? (
+              { label: "Back to earlier reports", href: EARLIER }
+            ) : (
+              <button type="button" className="btn p" onClick={() => void load()}>
+                Try again
+              </button>
+            )
+          }
+        >
+          {missing ? "It may belong to another organization, or the link is incomplete." : error.message}
+        </EmptyState>
+      </div>
     );
   }
+  if (!task) return <PageSkeleton cards={2} />;
 
-  if (task.status === "COMPLETED") return <ResultView task={task} onTask={accept} />;
-  if (task.status === "FAILED" || task.status === "REFUNDED") return <FailedView task={task} onTask={accept} />;
-  return <RunView task={task} stale={!!error} />;
+  const latest = [...(task.revisions ?? [])].filter((r) => r.status === "COMPLETED" && r.result).sort((a, b) => b.version - a.version)[0];
+  const markdown = latest?.result ?? task.result ?? "";
+  const title = reportTitle(markdown) || task.title;
+  const shareUrl = task.shareToken && typeof window !== "undefined" ? `${window.location.origin}${ROUTES.sharedReport(task.shareToken)}` : null;
+  const done = task.status === "COMPLETED" && !!markdown.trim();
+
+  const toggleShare = async () => {
+    setBusy(true);
+    try {
+      const { task: t } = await api.shareLegacyReport(task.id, !task.shareToken);
+      setTask((cur) => (cur ? { ...cur, shareToken: t.shareToken } : cur));
+      if (t.shareToken) {
+        const ok = await copyText(`${window.location.origin}${ROUTES.sharedReport(t.shareToken)}`);
+        toast(ok ? "Public link created and copied" : "Public link created — open Public page to copy it");
+      } else toast("Public link turned off");
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="wrap cs-legacy">
+      <header className="cs-legacy-head">
+        <div className="cs-crumbs">
+          <Link href={EARLIER}>
+            <Icon name="back" size={14} />
+            Earlier reports
+          </Link>
+          <span aria-hidden="true">/</span>
+          <span className="cs-crumb-here">Earlier report</span>
+        </div>
+        <h1>{title}</h1>
+        <div className="cs-legacy-tags">
+          <span className="tag gray">
+            <Icon name="lock" />
+            Read-only
+          </span>
+          {task.category && <span className="tag gray">{task.category}</span>}
+          {latest && latest.version > 1 && <span className="tag gray">Version {latest.version}</span>}
+          {task.sources.length > 0 && (
+            <span className="tag gray">
+              {task.sources.length} {task.sources.length === 1 ? "source" : "sources"}
+            </span>
+          )}
+        </div>
+        <p className="cs-legacy-meta">
+          {task.createdBy.name} · {longDate(task.completedAt ?? task.createdAt)}
+          {task.costCents > 0 && ` · ${eur(task.costCents, { decimals: true })}`}
+        </p>
+      </header>
+
+      <div className="cs-legacy-note" role="note">
+        <Icon name="info" size={16} />
+        <span>
+          This earlier report was produced before objectives existed, so it has no success criteria, approval or verification. To build on it,{" "}
+          <Link href={ROUTES.newObjective} className="cs-inline-link">
+            define an outcome
+          </Link>
+          .
+        </span>
+      </div>
+
+      {!done ? (
+        <EmptyState icon="alert" title="No report was produced">
+          {task.errorMessage ?? "This report wasn't completed. Any charge for it was refunded."}
+        </EmptyState>
+      ) : (
+        <>
+          <div className="cs-legacy-bar">
+            <div className="cs-legacy-acts">
+              {shareUrl && (
+                <a className="btn sm" href={shareUrl} target="_blank" rel="noopener noreferrer">
+                  <Icon name="ext" /> Public page
+                </a>
+              )}
+              <button type="button" className={task.shareToken ? "btn sm" : "btn p sm"} onClick={toggleShare} aria-busy={busy} disabled={busy}>
+                <Icon name="share" />
+                {task.shareToken ? "Stop sharing" : "Share"}
+              </button>
+            </div>
+            <ExportMenu
+              title={title}
+              markdown={markdown}
+              sources={task.sources}
+              meta={{ date: task.completedAt, version: latest?.version ?? 1, label: "Earlier report", note: LEGACY_NOTE }}
+            />
+          </div>
+          <ReportView
+            markdown={markdown}
+            sources={task.sources}
+            disclaimer={LEGACY_NOTE}
+            sourcesNote="The sources gathered when this report was made. Open them to check a claim before you rely on it."
+          />
+        </>
+      )}
+    </div>
+  );
 }

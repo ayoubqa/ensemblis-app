@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useState, type FormEvent } from "react";
-import { Icon, RequireAuth, Skeleton, SkeletonText, confetti, useToast } from "@/components";
+import { Icon, RequireAuth, Skeleton, SkeletonText, useToast } from "@/components";
 import { api, type TeamDetail } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { errorText, toastApiError } from "@/lib/errors";
@@ -29,29 +29,32 @@ function TeamGate() {
 
 function GuestTeam() {
   return (
-    <div className="narrow" style={{ padding: "40px 24px 56px" }}>
-      <div className="card" style={{ padding: "clamp(22px,4vw,36px)" }}>
-        <span className="tag warn">
-          <Icon name="user" />
-          Guest session
-        </span>
-        <h1 className="serif" style={{ fontSize: "clamp(26px,3.6vw,36px)", lineHeight: 1.1, margin: "12px 0 8px" }}>
-          Create a free account to work as a team.
-        </h1>
-        <p className="muted" style={{ maxWidth: "56ch" }}>
-          Teams share one credit wallet and one task history. Save your guest work to a free account first — everything you&apos;ve done so far
-          comes with you.
-        </p>
-        <TeamExplainer compact />
-        <div className="row wrapflex">
-          <Link className="btn p" href={`${ROUTES.signup}?claim=1&next=${encodeURIComponent(ROUTES.team)}`}>
-            <Icon name="check" />
-            Save your work
-          </Link>
-          <Link className="btn" href={ROUTES.tasks}>
-            Back to my work
-          </Link>
+    <div className="wrap op-page op-narrow">
+      <div className="pagehead sh-ph">
+        <div className="sh-ph-main">
+          <div className="eyebrow">Organization members</div>
+          <div className="sh-ph-tag">
+            <span className="tag warn">
+              <Icon name="user" />
+              Guest session
+            </span>
+          </div>
+          <h1>Create an account to invite your colleagues.</h1>
+          <p className="sh-ph-desc">
+            Members share your Company Context, objectives, AI Team and balance. Save your trial work to an account first — everything you&apos;ve done so
+            far comes with you.
+          </p>
         </div>
+      </div>
+      <TeamExplainer compact />
+      <div className="op-inline" style={{ marginTop: 18 }}>
+        <Link className="btn p" href={`${ROUTES.signup}?claim=1&next=${encodeURIComponent(ROUTES.members)}`}>
+          <Icon name="check" />
+          Save your work
+        </Link>
+        <Link className="btn" href={ROUTES.objectives}>
+          Back to my work
+        </Link>
       </div>
     </div>
   );
@@ -68,7 +71,7 @@ function TeamView() {
       const r = await api.getTeam();
       setTeam(r.team);
     } catch (e) {
-      setError(errorText(e, "Couldn't load your team."));
+      setError(errorText(e, "Couldn't load your organization members."));
     }
   }, []);
   useEffect(() => {
@@ -86,7 +89,7 @@ function TeamView() {
 
   if (error && team === undefined)
     return (
-      <div className="wrap" style={{ paddingTop: 32 }}>
+      <div className="wrap op-page" style={{ paddingTop: 32 }}>
         <div className="notice" role="alert" style={{ background: "var(--bad-soft)", color: "var(--bad)" }}>
           <Icon name="alert" />
           <span className="sp">{error}</span>
@@ -100,7 +103,7 @@ function TeamView() {
 
   if (team === undefined)
     return (
-      <div className="wrap" aria-busy="true" aria-label="Loading your team">
+      <div className="wrap op-page" aria-busy="true" aria-label="Loading organization members">
         <div className="pagehead">
           <Skeleton width={90} height={22} />
           <Skeleton width="min(380px, 70%)" height={38} style={{ marginTop: 14 }} />
@@ -143,11 +146,10 @@ function CreateTeam({ onCreated }: { onCreated: (t: TeamDetail) => void }) {
       const r = await api.createTeam(name.trim());
       setUser(r.user);
       onCreated(r.team);
-      confetti();
       toast(`${r.team.name} is ready — invite your colleagues next`, { icon: "check" });
     } catch (e2) {
-      setErr(errorText(e2, "Couldn't create the team"));
-      toastApiError(toast, e2, "Couldn't create the team");
+      setErr(errorText(e2, "Couldn't set up members"));
+      toastApiError(toast, e2, "Couldn't set up members");
     } finally {
       setBusy(false);
     }
@@ -156,24 +158,23 @@ function CreateTeam({ onCreated }: { onCreated: (t: TeamDetail) => void }) {
   if (!user) return null;
 
   return (
-    <div className="narrow" style={{ paddingBottom: 56 }}>
-      <div className="pagehead">
-        <span className="tag gray">
-          <Icon name="share" />
-          Teams
-        </span>
-        <h1 style={{ marginTop: 12 }}>Work together, from one wallet.</h1>
-        <p>
-          Create a team and invite colleagues with a link. Everyone can run tasks; they&apos;re all paid from your balance and everyone sees the
-          team&apos;s history.
-        </p>
+    <div className="wrap op-page op-narrow">
+      <div className="pagehead sh-ph">
+        <div className="sh-ph-main">
+          <div className="eyebrow">Organization members</div>
+          <h1>Bring your colleagues into the organization.</h1>
+          <p className="sh-ph-desc">
+            Invite colleagues with a link. Everyone defines objectives with the same Company Context and AI Team; executions are paid from your balance and
+            follow your approval policy.
+          </p>
+        </div>
       </div>
 
       <TeamExplainer />
 
-      <form className="card" onSubmit={submit} noValidate>
+      <form className="op-panel op-pad" onSubmit={submit} noValidate>
         <label className="l" htmlFor="team-name">
-          Team name
+          Organization name
         </label>
         <input
           id="team-name"
@@ -199,11 +200,11 @@ function CreateTeam({ onCreated }: { onCreated: (t: TeamDetail) => void }) {
             You can rename it later.
           </div>
         )}
-        <div className="notice" style={{ marginTop: 14, background: "var(--accent-soft)", color: "var(--accent)" }}>
-          <Icon name="wallet" />
+        <div className="notice" style={{ marginTop: 14, background: "var(--accent-soft)", color: "var(--ink)" }}>
+          <Icon name="wallet" style={{ color: "var(--accent)" }} />
           <span>
-            You&apos;ll be the owner. Your balance ({eur(user.credits)}) becomes the team wallet: members&apos; tasks are paid from it, and only you
-            can add credits.
+            You&apos;ll be the owner. Your balance ({eur(user.credits)}) becomes the organization balance: members&apos; executions are paid from
+            it, and only you can add funds.
           </span>
         </div>
         {err && (
@@ -213,7 +214,7 @@ function CreateTeam({ onCreated }: { onCreated: (t: TeamDetail) => void }) {
         )}
         <button type="submit" className="btn p" style={{ marginTop: 16 }} disabled={busy} aria-busy={busy}>
           <Icon name="plus" />
-          Create team
+          Start inviting
         </button>
       </form>
     </div>

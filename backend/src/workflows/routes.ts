@@ -8,18 +8,19 @@ import { config } from "../config";
 import { taskRunLimiter } from "../lib/rateLimits";
 import { nextRunFrom, runWorkflow } from "./schedule";
 
+// Recurring objectives (stored as Workflow rows). Each run creates a real
+// objective for the Chief of Staff — see schedule.ts.
 const router = Router();
 router.use(requireAuth);
 
 // Guests (trial accounts) can't set up recurring work.
-const registeredOnly = requireRegistered("set up recurring workflows");
+const registeredOnly = requireRegistered("set up recurring objectives");
 
 const frequency = z.enum(["Weekly", "Monthly", "Quarterly"]);
-const depth = z.enum(["focused", "standard", "deep"]);
 
 async function ownWorkflow(userId: string, id: string) {
   const workflow = await prisma.workflow.findFirst({ where: { id, userId } });
-  if (!workflow) throw new HttpError(404, "Workflow not found");
+  if (!workflow) throw new HttpError(404, "Recurring objective not found");
   return workflow;
 }
 
@@ -34,16 +35,21 @@ router.get(
   })
 );
 
+const criteria = z.array(z.string().trim().min(3).max(300)).max(6);
+const budget = z.number().int().min(500).max(50_000);
+const autonomy = z.enum(["REVIEW_PLAN", "AUTO_WITHIN_BUDGET"]);
+
 const createSchema = z.object({
   name: z.string().trim().min(1, "Name is required").max(120),
   basedOnText: z
     .string()
     .trim()
-    .min(3, "Describe the recurring task")
+    .min(10, "Describe the outcome this routine should deliver")
     .max(config.maxDescriptionLength, `Description is too long (max ${config.maxDescriptionLength} characters)`),
   frequency: frequency.default("Monthly"),
-  depth: depth.default("standard"),
-  agentId: z.string().min(1).optional(),
+  successCriteria: criteria.default([]),
+  budgetCents: budget.optional(),
+  autonomy: autonomy.optional(),
 });
 
 router.post(
@@ -51,12 +57,8 @@ router.post(
   registeredOnly,
   ah<AuthedRequest>(async (req, res) => {
     const body = parse(createSchema, req.body);
-    if (body.agentId) {
-      const agent = await prisma.agent.findFirst({ where: { id: body.agentId, isLive: true } });
-      if (!agent) throw new HttpError(404, "Agent not found");
-    }
     const workflow = await prisma.workflow.create({
-      data: { ...body, userId: req.userId!, isActive: true, nextRun: nextRunFrom(new Date(), body.frequency) },
+      data: { ...body, depth: "standard", userId: req.userId!, isActive: true, nextRun: nextRunFrom(new Date(), body.frequency) },
     });
     res.status(201).json({ workflow: toPublicWorkflow(workflow) });
   })
@@ -66,8 +68,10 @@ const updateSchema = z
   .object({
     name: z.string().trim().min(1).max(120),
     frequency,
-    depth,
     isActive: z.boolean(),
+    successCriteria: criteria,
+    budgetCents: budget.nullable(),
+    autonomy: autonomy.nullable(),
   })
   .partial()
   .strict();
@@ -102,7 +106,7 @@ router.delete(
   })
 );
 
-// Run a workflow's task now (also used by the scheduler, see schedule.ts).
+// Run now: creates this period's objective (the scheduler does the same, see schedule.ts).
 router.post(
   "/:id/run",
   registeredOnly,

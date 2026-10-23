@@ -5,17 +5,6 @@ export function cx(...parts: Array<string | false | null | undefined | 0>): stri
   return parts.filter(Boolean).join(" ");
 }
 
-/** Deterministic pseudo-random series (prototype `seeded`) for illustrative charts. */
-export function seeded(seed: number, n: number, base: number, vr: number): number[] {
-  let x = seed * 9301 + 49297;
-  const o: number[] = [];
-  for (let i = 0; i < n; i++) {
-    x = (x * 9301 + 49297) % 233280;
-    o.push(base + (x / 233280 - 0.5) * vr + i * vr * 0.04);
-  }
-  return o;
-}
-
 /** Stable hue (0–360) from any string — for avatars without a stored hue. */
 export function hueFrom(s: string): number {
   let h = 0;

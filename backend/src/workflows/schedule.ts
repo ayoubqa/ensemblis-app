@@ -1,14 +1,16 @@
-// Workflow (recurring task) scheduling: next-run calculation, running a
-// workflow now, and a lightweight in-process scheduler that runs due workflows.
+// Recurring objectives ("routines", stored as Workflow rows): each run creates
+// a real Objective that the Chief of Staff plans, the AI Team executes and the
+// verifier checks — the same path as an objective a person defines. Nothing is
+// charged at creation: approvals and budgets apply exactly as usual.
+//
+// The scheduler runs inside the worker (engine maintenance). A run is claimed
+// with a compare-and-set on nextRun, so two workers never start it twice.
 
 import type { Workflow } from "@prisma/client";
 import { prisma } from "../db";
-import { HttpError } from "../lib/http";
-import { createTaskForUser, sweepOrphanedTasks } from "../tasks/service";
-import { sweepOrphanedRevisions } from "../tasks/revisions";
-import { DailyLimitError, startOfTodayUTC } from "../lib/usageLimits";
-import { cleanupExpiredGuests } from "../guest/cleanup";
-import { cleanupOrphanAttachments } from "../attachments/cleanup";
+import { log } from "../lib/log";
+import { resolveOrg } from "../org/organization";
+import { createObjective } from "../engine/objectives";
 
 export type Frequency = "Weekly" | "Monthly" | "Quarterly";
 
@@ -20,120 +22,57 @@ export function nextRunFrom(from: Date, frequency: string): Date {
   return d;
 }
 
-const asDepth = (d: string) => (d === "focused" || d === "deep" ? d : "standard") as "focused" | "standard" | "deep";
-
-/** Creates a real task from the workflow (same path as POST /api/tasks). */
-export async function runWorkflow(workflow: Workflow) {
-  let agentId = workflow.agentId ?? undefined;
-  if (agentId) {
-    const live = await prisma.agent.findFirst({ where: { id: agentId, isLive: true }, select: { id: true } });
-    if (!live) agentId = undefined; // agent was unpublished: let routing pick a new lead
-  }
-  const result = await createTaskForUser(workflow.userId, {
-    description: workflow.basedOnText,
-    title: workflow.name,
-    depth: asDepth(workflow.depth),
-    agentId,
+/** Creates (and hands to the Chief of Staff) this run's objective. */
+export async function runWorkflow(workflow: Workflow): Promise<{ objectiveId: string; executionId: string | null }> {
+  const org = await resolveOrg(workflow.userId);
+  const date = new Date().toISOString().slice(0, 10);
+  const created = await createObjective(org, {
+    statement: workflow.basedOnText,
+    title: `${workflow.name} — ${date}`.slice(0, 140),
+    successCriteria: workflow.successCriteria.map((description) => ({ description })),
+    budgetCents: workflow.budgetCents ?? undefined,
+    autonomy: workflow.autonomy ?? undefined,
+    workflowId: workflow.id,
   });
   const now = new Date();
   await prisma.workflow.update({
     where: { id: workflow.id },
-    data: { lastRun: now, runCount: { increment: 1 }, nextRun: nextRunFrom(now, workflow.frequency) },
+    data: { lastRun: now, runCount: { increment: 1 }, nextRun: nextRunFrom(now, workflow.frequency), lastObjectiveId: created.objectiveId },
   });
-  return result;
+  return created;
 }
 
 let ticking = false;
 
-/** One scheduler pass: run every active workflow whose nextRun has passed. */
-export async function schedulerTick() {
-  if (ticking) return;
+/** One scheduler pass: run every active recurring objective whose nextRun has passed. */
+export async function schedulerTick(now = new Date()): Promise<number> {
+  if (ticking) return 0;
   ticking = true;
+  let started = 0;
   try {
-    const now = new Date();
-    // Legacy rows created before nextRun was always set.
     const unscheduled = await prisma.workflow.findMany({ where: { isActive: true, nextRun: null } });
     for (const w of unscheduled) {
       await prisma.workflow.update({ where: { id: w.id }, data: { nextRun: nextRunFrom(w.lastRun ?? w.createdAt, w.frequency) } });
     }
-
-    const due = await prisma.workflow.findMany({
-      where: { isActive: true, nextRun: { lte: now } },
-      orderBy: { nextRun: "asc" },
-      take: 25,
-    });
+    const due = await prisma.workflow.findMany({ where: { isActive: true, nextRun: { lte: now } }, orderBy: { nextRun: "asc" }, take: 25 });
     for (const w of due) {
-      // Claim this run atomically before charging anyone: during a deploy the
-      // old and the new server both run this scheduler for a moment, and only
-      // the one whose compare-and-set succeeds may start (and charge) the run.
       const claimedNext = nextRunFrom(now, w.frequency);
-      const claimed = await prisma.workflow.updateMany({
-        where: { id: w.id, isActive: true, nextRun: w.nextRun },
-        data: { nextRun: claimedNext },
-      });
-      if (claimed.count === 0) continue; // another tick/instance took it, or it was paused/edited
-      // Un-claims the run: the skipped run is not lost, it is retried at `retryAt`.
-      const release = (retryAt: Date | null) =>
-        prisma.workflow
-          .updateMany({ where: { id: w.id, nextRun: claimedNext }, data: { nextRun: retryAt } })
-          .catch(() => undefined);
+      const claimed = await prisma.workflow.updateMany({ where: { id: w.id, isActive: true, nextRun: w.nextRun }, data: { nextRun: claimedNext } });
+      if (claimed.count === 0) continue;
       try {
-        const { task } = await runWorkflow(w);
-        console.log(`Scheduler: ran workflow "${w.name}" (${w.id}) -> task ${task.id}`);
+        const r = await runWorkflow(w);
+        started++;
+        log.info("scheduler.run", { workflowId: w.id, objectiveId: r.objectiveId });
       } catch (err) {
-        if (err instanceof DailyLimitError) {
-          // Daily cap reached: skip quietly. A global cap stops this whole pass
-          // (nextRun restored: it runs once the cap resets). A user's own cap
-          // retries after midnight UTC — never at its old due time, which would
-          // keep it at the head of the queue (take: 25) and starve every other
-          // user's workflows all day.
-          await release(err.scope === "global" ? w.nextRun : new Date(startOfTodayUTC(now).getTime() + 24 * 3600_000));
-          console.log(`Scheduler: skipped workflow ${w.id} — daily ${err.scope} task limit reached`);
-          if (err.scope === "global") break;
-          continue;
-        }
-        if (err instanceof HttpError && err.status === 402) {
-          // Not enough credits: retry in an hour (so it runs soon after a
-          // top-up), not at its old due time — 25 unaffordable workflows would
-          // otherwise block the scheduler for everyone until their owner tops up.
-          await release(new Date(now.getTime() + 60 * 60_000));
-          continue;
-        }
-        console.error(`Scheduler: workflow ${w.id} failed to start:`, err);
-        // Avoid retrying a broken workflow every minute.
+        // Not runnable right now (e.g. guest allowance, account gone): try again in a day, not every minute.
         await prisma.workflow
-          .update({ where: { id: w.id }, data: { nextRun: nextRunFrom(now, w.frequency) } })
+          .updateMany({ where: { id: w.id, nextRun: claimedNext }, data: { nextRun: new Date(now.getTime() + 24 * 3600_000) } })
           .catch(() => undefined);
+        log.warn("scheduler.run_failed", { workflowId: w.id, error: err });
       }
     }
   } finally {
     ticking = false;
   }
+  return started;
 }
-
-let maintaining = false;
-
-/** Housekeeping on every tick (cheap when idle): expired guest trials, orphan attachments. */
-export async function maintenanceTick() {
-  if (maintaining) return;
-  maintaining = true;
-  try {
-    await cleanupExpiredGuests().catch((err) => console.error("Guest cleanup failed:", err));
-    await cleanupOrphanAttachments().catch((err) => console.error("Attachment cleanup failed:", err));
-    // Runs stuck RUNNING with no live run behind them: fail + refund (money is never held indefinitely).
-    await sweepOrphanedTasks().catch((err) => console.error("Orphaned task sweep failed:", err));
-    await sweepOrphanedRevisions().catch((err) => console.error("Orphaned follow-up sweep failed:", err));
-  } finally {
-    maintaining = false;
-  }
-}
-
-export function startScheduler(intervalMs = 60_000) {
-  const tick = async () => {
-    await schedulerTick().catch((err) => console.error("Scheduler tick failed:", err));
-    await maintenanceTick().catch((err) => console.error("Maintenance tick failed:", err));
-  };
-  setTimeout(tick, 5_000); // shortly after boot
-  return setInterval(tick, intervalMs);
-}
-

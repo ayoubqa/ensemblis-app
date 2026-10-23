@@ -13,7 +13,7 @@ export interface ModalProps {
   open: boolean;
   onClose: () => void;
   children: ReactNode;
-  /** Rendered as the prototype's serif <h3> and used as the accessible name. */
+  /** Rendered as the dialog's <h3> heading and used as the accessible name. */
   title?: ReactNode;
   /** Accessible name when there is no visible title. */
   ariaLabel?: string;
@@ -23,6 +23,8 @@ export interface ModalProps {
   showClose?: boolean;
   /** Pin to the top of the viewport (command palette). */
   top?: boolean;
+  /** Bottom sheet on small screens (`.scrim.sheet`): slides up from the bottom edge, full width. */
+  sheet?: boolean;
   /** Extra class on the .modal panel (e.g. "flush" removes padding). */
   className?: string;
   /** Element to focus first; defaults to [autofocus] or the first focusable. */
@@ -36,7 +38,7 @@ export interface ModalProps {
  * focus, closes on Esc and scrim click, locks page scroll, and restores focus
  * to the trigger on close.
  */
-export function Modal({ open, onClose, children, title, ariaLabel, wide, showClose, top, className, initialFocus, dismissible = true }: ModalProps) {
+export function Modal({ open, onClose, children, title, ariaLabel, wide, showClose, top, sheet, className, initialFocus, dismissible = true }: ModalProps) {
   const [mounted, setMounted] = useState(false);
   const panel = useRef<HTMLDivElement>(null);
   const downOnScrim = useRef(false);
@@ -99,7 +101,7 @@ export function Modal({ open, onClose, children, title, ariaLabel, wide, showClo
 
   return createPortal(
     <div
-      className={top ? "scrim top no-print" : "scrim no-print"}
+      className={["scrim", top && "top", sheet && "sheet", "no-print"].filter(Boolean).join(" ")}
       onMouseDown={(e) => {
         downOnScrim.current = e.target === e.currentTarget;
       }}
@@ -110,7 +112,7 @@ export function Modal({ open, onClose, children, title, ariaLabel, wide, showClo
     >
       <div
         ref={panel}
-        className={["modal", wide && "wide", className].filter(Boolean).join(" ")}
+        className={["modal", wide && "wide", sheet && "sheet", className].filter(Boolean).join(" ")}
         role="dialog"
         aria-modal="true"
         aria-labelledby={title ? titleId : undefined}

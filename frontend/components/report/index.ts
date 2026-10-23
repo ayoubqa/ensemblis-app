@@ -7,7 +7,9 @@ export { SourcesPanel, type SourcesPanelProps } from "./SourcesPanel";
 export { ExportMenu, type ExportMenuProps } from "./ExportMenu";
 export {
   AI_NOTE,
+  EVIDENCE_KIND_LABEL,
   KIND_LABEL,
+  LEGACY_NOTE,
   buildMarkdownFile,
   copyText,
   depthLabel,
@@ -20,6 +22,8 @@ export {
   sortSources,
   sourceDomain,
   sourceInitial,
+  sourceLabel,
   type ExportInput,
+  type LabelledSource,
   type ExportMeta,
 } from "./shared";

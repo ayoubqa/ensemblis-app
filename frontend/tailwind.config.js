@@ -29,8 +29,9 @@ module.exports = {
         "bad-soft": "var(--bad-soft)",
       },
       fontFamily: {
-        sans: ["Manrope", "system-ui", "-apple-system", "Segoe UI", "Roboto", "sans-serif"],
-        serif: ["Sora", "Manrope", "system-ui", "sans-serif"],
+        // Inter (next/font, app/fonts.ts) — one family for UI and display type.
+        sans: ["var(--font-sans)"],
+        serif: ["var(--display)"],
       },
       boxShadow: {
         card: "var(--shadow)",

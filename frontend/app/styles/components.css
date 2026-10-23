@@ -1,0 +1,391 @@
+/* =====================================================================
+   Ensemblis brand component layer
+   ---------------------------------------------------------------------
+   Loaded after app/globals.css (the legacy prototype stylesheet) and
+   tokens.css. Restyles the shared class names every page already uses —
+   buttons, cards, tags, fields, tabs, tables, page heads, modal, toast,
+   header, footer — in the official brand language, so pages inherit the
+   brand without markup changes. Area-specific styles live in their own
+   partials (marketing.css, shell.css, workspace.css, console.css,
+   operations.css, auth.css). Colours come only from tokens.css.
+   ===================================================================== */
+
+html {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+body {
+  font-family: var(--sans);
+  font-size: 15px;
+  line-height: 1.55;
+  font-feature-settings: "cv11", "ss01";
+  letter-spacing: -0.006em;
+  background: var(--bg);
+  color: var(--ink);
+}
+h1,
+h2,
+h3,
+h4 {
+  font-family: var(--display);
+  color: var(--ink-strong, var(--ink));
+}
+:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+::selection {
+  background: color-mix(in srgb, var(--ens-blue) 35%, transparent);
+  color: inherit;
+}
+.wrap {
+  max-width: 1200px;
+}
+.serif {
+  font-family: var(--display);
+  font-weight: 650;
+  letter-spacing: var(--tracking-heading);
+}
+.mono {
+  font-family: var(--mono);
+}
+
+/* ---------- eyebrow / headings ---------- */
+.eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 650;
+  letter-spacing: var(--tracking-eyebrow);
+  text-transform: uppercase;
+  color: var(--accent);
+  margin-bottom: 10px;
+}
+.pagehead {
+  padding: 40px 0 22px;
+}
+.pagehead h1 {
+  font-family: var(--display);
+  font-weight: 700;
+  font-size: clamp(30px, 3.8vw, 42px);
+  letter-spacing: var(--tracking-heading);
+  line-height: 1.08;
+}
+.pagehead p {
+  color: var(--muted);
+  margin-top: 10px;
+  max-width: 66ch;
+  font-size: 16px;
+}
+.sect h2,
+.newh {
+  font-family: var(--display);
+  font-weight: 700;
+  letter-spacing: var(--tracking-heading);
+}
+.sh {
+  font-size: 11.5px;
+  font-weight: 650;
+  letter-spacing: 0.12em;
+  color: var(--subtle, var(--muted));
+}
+
+/* ---------- logo / wordmark ---------- */
+.logo,
+.lockup {
+  display: inline-flex;
+  align-items: center;
+  gap: 11px;
+  color: var(--ink-strong, var(--ink));
+  font-family: var(--display);
+}
+.logo .wm,
+.wm {
+  font-family: var(--display);
+  font-weight: 650;
+  font-size: 15px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  line-height: 1;
+}
+.lockup .wm {
+  font-size: inherit;
+}
+
+/* ---------- buttons ---------- */
+.btn {
+  min-height: 40px;
+  padding: 9px 16px;
+  border-radius: 10px;
+  font-weight: 600;
+  font-size: 14px;
+  letter-spacing: -0.005em;
+  border: 1px solid var(--line2);
+  background: color-mix(in srgb, var(--surface) 70%, transparent);
+  color: var(--ink);
+  transition: background var(--dur) var(--ease), border-color var(--dur) var(--ease), box-shadow var(--dur) var(--ease), transform 0.12s;
+}
+.btn:hover {
+  border-color: var(--accent-line);
+  background: var(--surface);
+}
+.btn.p {
+  background: var(--accent-fill);
+  border-color: var(--accent-fill);
+  color: var(--accent-ink);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.18) inset, 0 8px 24px color-mix(in srgb, var(--ens-blue) 28%, transparent);
+}
+.btn.p:hover {
+  background: var(--ens-blue);
+  border-color: var(--ens-blue);
+  filter: none;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.2) inset, 0 10px 30px color-mix(in srgb, var(--ens-blue) 38%, transparent);
+}
+.btn.lg {
+  min-height: 48px;
+  padding: 12px 22px;
+  font-size: 15px;
+  border-radius: 12px;
+}
+.btn.sm {
+  min-height: 32px;
+  padding: 6px 12px;
+  font-size: 13px;
+  border-radius: 9px;
+}
+.btn.ghost {
+  background: transparent;
+  border-color: transparent;
+}
+.btn.ghost:hover {
+  background: color-mix(in srgb, var(--ink) 6%, transparent);
+  border-color: transparent;
+}
+.btn.bad {
+  color: var(--bad);
+  border-color: color-mix(in srgb, var(--bad) 45%, var(--line2));
+}
+.btn.bad:hover {
+  background: var(--bad-soft);
+  border-color: var(--bad);
+}
+.btn:focus-visible,
+.chip:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+.ibtn {
+  border-radius: 10px;
+}
+.ibtn:hover {
+  background: color-mix(in srgb, var(--ink) 7%, transparent);
+}
+
+/* ---------- chips / tags ---------- */
+.chip {
+  border-color: var(--line2);
+  background: transparent;
+  font-weight: 500;
+}
+button.chip:hover {
+  border-color: var(--accent-line);
+  color: var(--ink);
+}
+.chip.on {
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-color: var(--accent-line);
+}
+.tag {
+  border-radius: 999px;
+  padding: 3px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0;
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.tag.gray {
+  background: transparent;
+  color: var(--muted);
+  box-shadow: inset 0 0 0 1px var(--line2);
+}
+
+/* ---------- cards / surfaces ---------- */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 22px;
+}
+.card.flat {
+  background: var(--surface2);
+}
+.card h3 {
+  font-size: 16px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+.dk .card,
+:root[data-theme="dark"] .card {
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.025) inset;
+}
+.stat,
+.kpi {
+  border-radius: 14px;
+  border-color: var(--line);
+  background: var(--surface);
+}
+.stat b,
+.kpi b {
+  font-family: var(--display);
+  font-weight: 700;
+  letter-spacing: -0.025em;
+}
+.hr {
+  border-top-color: var(--line);
+}
+
+/* ---------- form fields ---------- */
+label.l {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+  margin-bottom: 7px;
+}
+input.f,
+textarea.f,
+select.f {
+  border-radius: 10px;
+  border: 1px solid var(--field-line);
+  background: var(--surface2);
+  padding: 11px 13px;
+  transition: border-color var(--dur) var(--ease), box-shadow var(--dur) var(--ease), background var(--dur) var(--ease);
+}
+input.f:hover,
+textarea.f:hover,
+select.f:hover {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--field-line));
+}
+input.f:focus,
+textarea.f:focus,
+select.f:focus {
+  border-color: var(--accent);
+  background: var(--surface);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ens-blue) 22%, transparent);
+}
+.hint {
+  color: var(--muted);
+}
+
+/* ---------- tabs ---------- */
+.tabs {
+  border-bottom-color: var(--line);
+  gap: 4px;
+}
+.tabs button,
+.tabs a {
+  font-weight: 550;
+  color: var(--muted);
+  border-bottom-width: 2px;
+  transition: color var(--dur) var(--ease), border-color var(--dur) var(--ease);
+}
+.tabs button:hover,
+.tabs a:hover {
+  color: var(--ink);
+}
+.tabs button.on,
+.tabs button[aria-selected="true"] {
+  color: var(--ink-strong, var(--ink));
+  border-color: var(--accent);
+  font-weight: 650;
+}
+
+/* ---------- tables ---------- */
+.tw {
+  border-radius: 14px;
+  border-color: var(--line);
+}
+th {
+  font-size: 11.5px;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--subtle, var(--muted));
+  background: var(--surface2);
+}
+td {
+  border-bottom-color: var(--line);
+}
+
+/* ---------- progress ---------- */
+.progress,
+.meter {
+  background: color-mix(in srgb, var(--ink) 9%, transparent);
+}
+.progress i,
+.meter i {
+  background: var(--ens-gradient);
+}
+
+/* ---------- modal / toast / menus ---------- */
+.scrim {
+  background: rgba(3, 8, 16, 0.62);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+}
+.modal {
+  border-radius: 18px;
+  border-color: var(--line2);
+  box-shadow: var(--shadow);
+}
+.modal h3 {
+  font-family: var(--display);
+  font-weight: 700;
+  font-size: 22px;
+  letter-spacing: var(--tracking-heading);
+}
+.toast {
+  background: var(--ens-navy);
+  color: var(--ens-slate-50);
+  border: 1px solid #233552;
+  border-radius: 12px;
+}
+.menu {
+  border-radius: 14px;
+  border-color: var(--line2);
+  box-shadow: var(--shadow);
+}
+
+/* ---------- empty state ---------- */
+.empty .ico {
+  border-radius: 14px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent-line);
+}
+.empty h2,
+.empty h3 {
+  font-weight: 650;
+  letter-spacing: -0.015em;
+}
+
+/* ---------- skeleton ---------- */
+.sk {
+  background: linear-gradient(90deg, color-mix(in srgb, var(--ink) 7%, transparent) 25%, color-mix(in srgb, var(--ink) 12%, transparent) 50%, color-mix(in srgb, var(--ink) 7%, transparent) 75%);
+  background-size: 200% 100%;
+}
+
+/* ---------- live pulse ---------- */
+.pulse {
+  background: var(--ens-blue-bright);
+}
+
+/* ---------- skip link ---------- */
+.skip {
+  background: var(--accent-fill);
+  color: var(--accent-ink);
+}
