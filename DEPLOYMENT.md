@@ -10,7 +10,7 @@ What changes at deploy time:
 | | v3 (now) | v4 |
 |---|---|---|
 | Schema changes | `prisma db push` at every boot | `prisma migrate deploy` at boot (`dist/ops/migrate.js`); never `db push` |
-| Execution | in the API process | durable Postgres job queue + **`ensemblis-worker`** (separate Render service) |
+| Execution | in the API process | durable Postgres job queue; the worker runs **inside the API process** (`EMBEDDED_WORKER=true`, free plan) or as a separate paid **`ensemblis-worker`** service (§1) |
 | AI | Groq `openai/gpt-oss-120b` | same provider and keys |
 | Admin (`/admin`) | `ADMIN_EMAILS` match | `ADMIN_EMAILS` match **and a verified email** |
 
@@ -21,37 +21,41 @@ tokens survive unchanged, and the schema ends with zero drift.
 
 ---
 
-## 1. Decide the worker plan (and check the database plan)
+## 1. The worker plan (and check the database plan)
 
-Render background workers are **not available on the free plan**: `render.yaml`
-declares `ensemblis-worker` with `plan: starter` (paid). The first Blueprint
-sync after merging creates it — and bills it, or fails if the workspace has no
-payment method. Decide before merging:
+Render background workers are **not available on the free plan**, so
+`render.yaml` defines **no** separate worker: `ensemblis-api` (free) runs the
+worker inside its own process (`EMBEDDED_WORKER="true"`), and the Blueprint
+sync creates nothing billable.
 
-- **Recommended:** keep `ensemblis-worker` (paid). The API can sleep or
-  redeploy without pausing executions.
+- **What this means:** executions pause while a free instance sleeps (about 15
+  minutes without traffic) and recovery resumes them when it wakes; recurring
+  objectives and the hourly guest cleanup also run only while it is awake; the
+  database can idle. Workable for a demo or a small controlled rollout, not
+  for real customers.
+- **To get an always-on worker** (paid): change **`render.yaml`** in a merge (a
+  dashboard edit is overwritten by the next Blueprint sync): add a
+  `type: worker` service named `ensemblis-worker` (`plan: starter`, build
+  `npm ci --include=dev && npm run build`, start `npm run start:worker`) with
+  the same environment as `ensemblis-api`, and set `EMBEDDED_WORKER` back to
+  `"false"`.
   - An always-on worker polls the database every second, so a Neon database
     **never scales to zero** (≈730 compute-hours a month). On Neon's Free plan
     that can exhaust the monthly compute allowance and suspend the database —
-    move Neon to a paid plan when you enable the worker.
-- **Free plan only:** change **`render.yaml`** in the merge (a dashboard edit
-  is overwritten by the next Blueprint sync): delete the `ensemblis-worker`
-  service block and set `EMBEDDED_WORKER` to `"true"` on `ensemblis-api`.
-  Executions then run inside the API process and pause while a free instance
-  sleeps (recovery resumes them when it wakes); the database can idle. Workable
-  for a demo, not for real customers.
+    move Neon to a paid plan first.
 
 ## 2. Environment checklist (names only — never commit values)
 
 `ensemblis-api` keeps every service-level variable v3 had — `JWT_SECRET` and
 `IP_HASH_SALT` keep their existing generated values, so nobody is logged out.
-`ensemblis-worker` is new; settings both services read are listed on each
-service in `render.yaml` and must stay identical (`AI_PROVIDER`, `OPENAI_*`,
-`MAX_CONCURRENT_LLM`, `LLM_TIMEOUT_MS`, `MAX_TASKS_PER_*`,
+With the embedded worker there is a single service, so every variable is set
+once, on `ensemblis-api`. If you later add a standalone `ensemblis-worker`
+(§1), the settings both services read must stay identical (`AI_PROVIDER`,
+`OPENAI_*`, `MAX_CONCURRENT_LLM`, `LLM_TIMEOUT_MS`, `MAX_TASKS_PER_*`,
 `SEARCH_DAILY_BUDGET`, `GUEST_MAX_TASKS`, `GUEST_RETENTION_DAYS`).
 
-Entered in the dashboard (`sync: false`) — Render asks for the worker's when
-the Blueprint sync creates it:
+Entered in the dashboard (`sync: false`) on `ensemblis-api`. The Worker column
+applies only if you add a standalone worker:
 
 | Variable | API | Worker | Notes |
 |---|---|---|---|
@@ -69,7 +73,7 @@ the Blueprint sync creates it:
 Set by `render.yaml`: `NODE_VERSION=22`, `NODE_ENV=production`,
 `AI_PROVIDER=openai`, `OPENAI_BASE_URL`, `OPENAI_MODEL`, `OPENAI_FAST_MODEL`,
 `OPENAI_REASONING_EFFORT=low`, `OPENAI_MAX_TOKENS`, `MAX_CONCURRENT_LLM`,
-`EMBEDDED_WORKER=false` (API), `WORKER_CONCURRENCY` (worker), cost caps and
+`EMBEDDED_WORKER=true` (the API runs the worker; `WORKER_CONCURRENCY` defaults to 2), cost caps and
 guest-trial settings. v3-only variables left on the API (`FOLLOWUP_COST_CENTS`,
 `CLARIFY_ENABLED`, `MAX_ATTACHMENTS`, `MAX_ATTACHMENT_CHARS`,
 `DEV_TEST_RUNS_PER_DAY`) are ignored and can be deleted.
@@ -153,8 +157,10 @@ reset their database (the scripts refuse names without `smoke`/`test`).
    - `ensemblis-api` builds and starts with `npm run start:render` =
      `node dist/ops/migrate.js && node dist/index.js`. The first boot baselines
      the existing schema and applies the additive migration, then serves.
-   - `ensemblis-worker` is created from the Blueprint. Fill in its `sync: false`
-     variables (§2) when Render asks, then make sure it is **running**. It logs
+   - No separate worker service is created: after the migration the API process
+     starts the worker itself (log line `worker.started`). With a standalone
+     `ensemblis-worker` (§1), fill in its `sync: false` variables (§2) when
+     Render asks and make sure it is **running**; it logs
      `worker.waiting_for_migrations` until the API has migrated, then starts
      (it gives up and restarts after 10 minutes if the API's migration fails).
    - Check `https://<api>/health` → `{"ok":true,"db":"ok","queue":{…}}`.
@@ -328,7 +334,9 @@ at boot). It was tested against a v4-migrated database: logins, balances,
 reports, share links, sign-ups, teams and guest cleanup all work.
 
 1. Vercel: *Deployments* → the last v3 production deployment → **Instant Rollback**.
-2. Render `ensemblis-worker`: **Suspend** it (it only processes v4 executions).
+2. Render `ensemblis-worker`, if you added a standalone one: **Suspend** it (it
+   only processes v4 executions). With the embedded worker there is nothing to
+   suspend: step 3 replaces the API process, and v3 runs no worker.
 3. Render `ensemblis-api`: *Settings* → *Build & Deploy* → **Branch** =
    `v3-rollback-safe` → *Manual Deploy* → *Deploy latest commit*.
    (If the service is Blueprint-managed and the setting is locked, change the
@@ -336,8 +344,9 @@ reports, share links, sign-ups, teams and guest cleanup all work.
    redeploy commit `a1684bb`.)
 4. Check `/health` and log in with an existing account.
 
-To roll forward again, set the branch back to `main` and resume the worker;
-`migrate.js` sees the migrations already applied and starts immediately.
+To roll forward again, set the branch back to `main` (and resume the standalone
+worker, if you have one); `migrate.js` sees the migrations already applied and
+starts immediately.
 
 v4 data created before a rollback (objectives, executions, company context)
 stays in its tables, invisible to v3, and reappears after rolling forward.

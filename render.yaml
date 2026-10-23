@@ -1,4 +1,4 @@
-# Render Blueprint for the Ensemblis backend: the API and the execution worker.
+# Render Blueprint for the Ensemblis backend: the API, which also runs the execution worker.
 # Render dashboard -> New -> Blueprint -> pick this repo. You'll be asked for
 # the values marked `sync: false`. The database is NOT here: use a managed
 # Postgres (e.g. Neon: https://neon.tech) and paste its connection string.
@@ -6,25 +6,26 @@
 # The frontend is deployed separately (e.g. Vercel) with
 # NEXT_PUBLIC_API_URL = the API service's https://....onrender.com URL.
 #
-# Topology (v4):
+# Topology (v4, free plan):
 #   ensemblis-api     web service. On every start it applies pending Prisma
 #                     migrations (`prisma migrate deploy` via dist/ops/migrate.js;
 #                     a database created by the old `prisma db push` is baselined
-#                     first — no data is touched) and then serves the API.
-#   ensemblis-worker  background worker. Claims jobs from the Postgres queue and
-#                     runs executions, recovery and recurring objectives. It waits
-#                     for the API to finish migrating before it starts.
+#                     first — no data is touched) and then serves the API. It also
+#                     runs the execution worker in-process (EMBEDDED_WORKER="true"):
+#                     claims jobs from the Postgres queue and runs executions,
+#                     recovery and recurring objectives.
 #
-# COST: background workers need a paid Render plan (`plan: starter` below), and an
-# always-on worker keeps the database awake 24/7 (check your Neon plan's compute
-# allowance). To run on the free plan instead, change THIS FILE (a dashboard edit
-# is overwritten by the next Blueprint sync): delete the ensemblis-worker service
-# and set EMBEDDED_WORKER to "true" on ensemblis-api. Executions then run inside the
-# API and pause while the free instance sleeps.
+# TRADE-OFF: Render has no free background workers, so this file defines no separate
+# worker service. Executions pause while the free API instance sleeps and resume when
+# it wakes; recurring objectives and the guest cleanup also run only while it is
+# awake. To get a standalone always-on worker instead (paid, and it keeps the database
+# awake 24/7 — check your Neon plan's compute allowance), change THIS FILE (a dashboard
+# edit is overwritten by the next Blueprint sync): add a `type: worker` service
+# (`plan: starter`, `npm run start:worker`) with the same environment as ensemblis-api,
+# and set EMBEDDED_WORKER back to "false". See DEPLOYMENT.md section 1.
 #
 # The API keeps the same service-level variables v3 had (JWT_SECRET and
-# IP_HASH_SALT keep their existing generated values). Settings both services use
-# are listed on each service: keep the copies identical.
+# IP_HASH_SALT keep their existing generated values).
 
 services:
   - type: web
@@ -53,9 +54,10 @@ services:
         generateValue: true
       - key: IP_HASH_SALT
         generateValue: true
-      # The separate ensemblis-worker runs executions. "true" only without that service (see COST above).
+      # No separate worker service: this process runs executions (see TRADE-OFF above).
+      # Set "false" only if you add a standalone ensemblis-worker.
       - key: EMBEDDED_WORKER
-        value: "false"
+        value: "true"
 
       # --- entered by you in the Render dashboard ---
       - key: DATABASE_URL # direct (non-pooled) connection string, with ?sslmode=require
@@ -87,7 +89,7 @@ services:
       - key: TURNSTILE_SECRET_KEY
         sync: false
 
-      # --- AI provider: Groq via its OpenAI-compatible API (same on the worker) ---
+      # --- AI provider: Groq via its OpenAI-compatible API ---
       - key: AI_PROVIDER
         value: openai
       - key: OPENAI_BASE_URL
@@ -107,7 +109,7 @@ services:
       - key: LLM_TIMEOUT_MS
         value: "120000"
 
-      # --- cost & abuse protection (same on the worker) ---
+      # --- cost & abuse protection ---
       - key: STARTING_CREDITS_CENTS
         value: "3000"
       - key: DEMO_TOPUP_ENABLED
@@ -123,7 +125,7 @@ services:
       - key: SEARCH_DAILY_BUDGET
         value: "30"
 
-      # --- guest trial ("try without an account") (same on the worker) ---
+      # --- guest trial ("try without an account") ---
       - key: GUEST_TRIAL_ENABLED
         value: "true"
       - key: GUEST_CREDITS_CENTS # covers one execution (plans are capped at 7 steps ≈ €23 incl. verification)
@@ -134,65 +136,5 @@ services:
         value: "2"
       - key: GUEST_TRIALS_PER_DAY
         value: "30"
-      - key: GUEST_RETENTION_DAYS
-        value: "7"
-
-  - type: worker
-    name: ensemblis-worker
-    runtime: node
-    plan: starter # paid: Render has no free background workers
-    region: frankfurt
-    rootDir: backend
-    buildCommand: npm ci --include=dev && npm run build
-    # The API applies migrations; the worker waits until they are recorded, then starts.
-    startCommand: npm run start:worker
-    autoDeploy: true
-    envVars:
-      - key: NODE_VERSION
-        value: "22"
-      - key: NODE_ENV
-        value: production
-      - key: WORKER_CONCURRENCY
-        value: "2"
-
-      # --- entered by you: the same values as on ensemblis-api ---
-      - key: DATABASE_URL
-        sync: false
-      - key: APP_URL
-        sync: false
-      - key: OPENAI_API_KEY
-        sync: false
-      - key: TAVILY_API_KEY
-        sync: false
-      - key: RESEND_API_KEY
-        sync: false
-      - key: EMAIL_FROM
-        sync: false
-
-      # --- keep identical to ensemblis-api ---
-      - key: AI_PROVIDER
-        value: openai
-      - key: OPENAI_BASE_URL
-        value: https://api.groq.com/openai/v1
-      - key: OPENAI_MODEL
-        value: openai/gpt-oss-120b
-      - key: OPENAI_REASONING_EFFORT
-        value: low
-      - key: OPENAI_MAX_TOKENS
-        value: "8192"
-      - key: OPENAI_FAST_MODEL
-        value: openai/gpt-oss-20b
-      - key: MAX_CONCURRENT_LLM
-        value: "1"
-      - key: LLM_TIMEOUT_MS
-        value: "120000"
-      - key: MAX_TASKS_PER_USER_PER_DAY
-        value: "5"
-      - key: MAX_TASKS_PER_DAY_GLOBAL
-        value: "150"
-      - key: SEARCH_DAILY_BUDGET
-        value: "30"
-      - key: GUEST_MAX_TASKS
-        value: "1"
       - key: GUEST_RETENTION_DAYS
         value: "7"
