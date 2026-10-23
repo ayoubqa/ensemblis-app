@@ -951,6 +951,8 @@ export interface AdminValidation {
 
 export interface AdminOverview {
   generatedAt: string;
+  /** Security posture flags (never the secrets themselves). */
+  security?: { inviteCode: "off" | "weak" | "strong" };
   users: { total: number; guests: number; organizations: number; signupsLast14d: DayCount[] };
   executions: {
     total: number;

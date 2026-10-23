@@ -102,7 +102,7 @@ Credits and cost accounting (API only; defaults shown — none needs setting for
 | Variable | Default | What it does |
 |---|---|---|
 | `CREDITS_PER_EUR` | `100` | Internal value of a credit (1 credit = €0.01 at the default) for accounting and pricing. Balances are stored as whole credits and are **not** rewritten when it changes; every existing balance was issued at 100 per €1, so changing it revalues them internally (the API logs a warning). Leave it at 100 unless you deliberately re-denominate. |
-| `MAX_TOKENS_PER_EXECUTION` | `600000` | Runaway guard: an execution whose model calls have used this many tokens stops before its next step (or verification) and fails, which refunds its credits. `0` turns it off. A normal execution uses well under 100,000. |
+| `MAX_TOKENS_PER_EXECUTION` | `600000` (`render.yaml`: `400000`) | Runaway guard: an execution whose model calls have used this many tokens stops before its next step (or verification) and fails, which refunds its credits. `0` turns it off. The largest legitimate run (7 steps, a revision, two verification rounds at `OPENAI_MAX_TOKENS=8192`) is estimated at under ~300,000 tokens; that estimate is not yet measured on real traffic, so check the token figures on the owner dashboard after launch before lowering it further. |
 | `PROVIDER_PRICING` | set in `render.yaml` (checked 2026-10-23) | JSON price table for **internal** cost accounting (owner dashboard, `/api/admin/economics`): per-million-token prices per model, per-call prices per paid tool, exchange rates to EUR, plus `asOf` (the date the prices were checked; older than 90 days is flagged on the dashboard) and `sources`. Optional `fixedMonthlyEur` (e.g. `{"render":0,"neon":19}`, allocated pro rata) and `paymentFees` (`{"percent":1.5,"fixedEurCents":25}` per completed purchase) — left out, they are reported as *not configured*, never as zero. Change it in `render.yaml` (a dashboard edit is overwritten by the next Blueprint sync); take numbers only from the providers' own price pages. Unset or invalid: usage is still recorded, but costs stay unpriced (never guessed). None of the resulting figures is net profit: credit value is list price (demo credits are not revenue), and taxes and labour are never included. |
 
 Premium model route (optional; same values on the API and a standalone worker). `render.yaml`
@@ -363,6 +363,21 @@ production database from a local checkout:
 cd backend && DATABASE_URL="<production URL>" npm run ops:verify-email -- you@example.com
 ```
 
+
+**Sign-up invite code.** With `SIGNUP_INVITE_CODE` set, only people who have the
+code can create accounts (and the guest trial is off), so the code is what stands
+between the internet and your model spend. Use a long random value, never a word
+and a year. The owner dashboard shows a red notice, and the API logs a boot
+warning, while the configured code is short or guessable; neither ever prints it.
+To rotate it:
+
+1. On your own machine: `openssl rand -base64 24 | tr -d '/+=' ` (about 32 characters).
+2. Render → ensemblis-api → Environment → `SIGNUP_INVITE_CODE` → paste → Save (the
+   service restarts). Existing accounts are not affected.
+3. Share sign-up links as `https://<frontend>/signup#invite=<code>`: the part after
+   `#` is never sent to a server, so the code stays out of request logs, and the
+   sign-up page fills it in and removes it from the address bar. Send links over a
+   private channel; anyone with the link can sign up.
 
 **Owner dashboard: economics and market validation.** Two internal panels (never
 shown to customers; `GET /api/admin/economics` and `GET /api/admin/validation`):

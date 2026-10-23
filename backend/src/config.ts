@@ -276,6 +276,16 @@ export function productionConfigProblems(role: "api" | "worker" = "api"): string
 }
 
 /** Non-fatal production warnings, logged on boot. */
+/**
+ * How hard the sign-up invite code is to guess: "off" (open sign-up), "weak" (under 20 characters,
+ * or a word plus a few digits, or few distinct characters) or "strong". Never returns the code.
+ */
+export function inviteCodeStrength(code: string): "off" | "weak" | "strong" {
+  if (!code) return "off";
+  if (code.length < 20 || /^[A-Za-z]+[-_ ]?\d{0,4}$/.test(code) || new Set(code.toLowerCase()).size < 10) return "weak";
+  return "strong";
+}
+
 export function productionConfigWarnings(role: "api" | "worker" = "api"): string[] {
   if (!mockAIForbidden()) return [];
   const warnings: string[] = [];
@@ -308,6 +318,13 @@ export function productionConfigWarnings(role: "api" | "worker" = "api"): string
     warnings.push(
       `TAVILY_BASE_URL is set (${host}): web search goes there instead of the public Tavily API, and the UI labels it a custom search endpoint. ` +
         `It is meant for tests${process.env.E2E_STUB === "1" ? " (E2E_STUB=1: this is a stub stack)" : ""}; unset it in production.`
+    );
+  }
+  if (inviteCodeStrength(config.signupInviteCode) === "weak") {
+    // Never include the code itself: boot logs are not a secret store.
+    warnings.push(
+      "SIGNUP_INVITE_CODE is short or guessable (for example a word and a year): anyone who guesses it can create accounts and spend starting credits. " +
+        "Replace it with a long random value (e.g. `openssl rand -base64 24`), and share sign-up links as /signup#invite=<code> so the code stays out of server logs."
     );
   }
   if (config.creditsPerEur !== 100) {

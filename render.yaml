@@ -148,6 +148,13 @@ services:
         value: "4000"
       - key: SEARCH_DAILY_BUDGET
         value: "30"
+      # Runaway guard per execution (the code default is 600000). The largest legitimate run — 7 steps,
+      # a revision, two verification rounds, at OPENAI_MAX_TOKENS=8192 — stays under ~300k tokens, so
+      # 400k never cuts real work short. A runaway then costs at most ~$0.10–0.25 on gpt-oss-120b
+      # (~$4.50–12 on gpt-5.5, where PREMIUM_DAILY_BUDGET_EUR caps the day anyway). A stopped
+      # execution fails and is refunded in full.
+      - key: MAX_TOKENS_PER_EXECUTION
+        value: "400000"
 
       # --- guest trial ("try without an account") ---
       - key: GUEST_TRIAL_ENABLED
