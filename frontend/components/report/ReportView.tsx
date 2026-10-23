@@ -63,6 +63,8 @@ export function reportTitle(md: string | null | undefined): string | null {
 export interface ReportViewProps {
   markdown: string;
   sources?: TaskSource[] | null;
+  /** The domains the report may link to (the API's linkDomains); other links show as text. Default: the sources' domains. */
+  linkDomains?: string[] | null;
   /** Unique per page when several reports could render (default "r"). */
   idPrefix?: string;
   /** Replaces the AI disclaimer line; pass `false` to hide it. */
@@ -92,6 +94,7 @@ export interface ReportViewProps {
 export function ReportView({
   markdown,
   sources,
+  linkDomains,
   idPrefix = "r",
   disclaimer,
   tocExtra = [],
@@ -189,7 +192,7 @@ export function ReportView({
     );
 
   return (
-    <CiteProvider sources={list} jump={jumpToSource} prefix={idPrefix} targetId={external ? sourceTargetId : undefined}>
+    <CiteProvider sources={list} linkDomains={linkDomains} jump={jumpToSource} prefix={idPrefix} targetId={external ? sourceTargetId : undefined}>
       <div className={["report", "cs-rv", className].filter(Boolean).join(" ")} style={toc.length ? undefined : { gridTemplateColumns: "minmax(0,1fr)" }}>
         {toc.length > 0 && (
           <aside className="toc" aria-label="Report contents">

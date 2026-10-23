@@ -1,12 +1,17 @@
 // Starts the stack the Playwright E2E suite drives: a fresh database, the API
 // with the embedded worker OFF, and a separate worker process — the same
-// topology as production (render.yaml). AI is the deterministic mock provider
-// with simulated latency; web search is off (evidence comes from the
-// company context and documents the test enters).
+// topology as production (render.yaml). AI is the deterministic MOCK provider
+// with simulated latency (or, with PROD_LIKE=1, the real OpenAI-compatible
+// provider code against a local Groq-format STUB). Web search is ON but goes
+// to a local search STUB (scripts/search-stub.mjs, Tavily wire format, fixed
+// fixtures): research briefs run through the real search/evidence code paths
+// without network access. Nothing this stack produces is real research.
 //
 //   node scripts/e2e-stack.mjs        (run from backend/, after `npm run build`)
 //
-// Env: E2E_DATABASE_URL, E2E_API_PORT (4100), E2E_WEB_ORIGIN (http://localhost:3100)
+// Env: E2E_DATABASE_URL, E2E_API_PORT (4100), E2E_WEB_ORIGIN (http://localhost:3100),
+//      SEARCH_STUB_MODE (ok | 401 | 500 | empty; default ok),
+//      VERIFY_RETRY_DELAY_MS (default here 1000: the "could not be verified" path re-checks quickly)
 
 import { spawn, spawnSync } from "node:child_process";
 import { createRequire } from "node:module";
@@ -28,6 +33,11 @@ if (prodLike) {
   console.log(`[e2e-stack] production-like: NODE_ENV=production, AI_PROVIDER=openai → ${stubUrl}`);
 }
 
+// Web search: a local Tavily-format stub (never the real API, never a real key).
+const { startSearchStub } = await import("./search-stub.mjs");
+const search = await startSearchStub(0);
+console.log(`[e2e-stack] web search → search stub ${search.url} (mode ${search.mode}; fixed fixtures, not live results)`);
+
 const env = {
   ...process.env,
   NODE_ENV: "development",
@@ -38,7 +48,17 @@ const env = {
   JWT_SECRET: "e2e-secret-not-for-production-0123456789",
   AI_PROVIDER: "mock",
   MOCK_AI_DELAY_MS: process.env.MOCK_AI_DELAY_MS || "1600",
-  SEARCH_PROVIDER: "off",
+  SEARCH_PROVIDER: "tavily",
+  TAVILY_API_KEY: "stub-key",
+  // Not the public Tavily API: the product labels it a custom search endpoint (/api/config searchCustomEndpoint)
+  // and, with PROD_LIKE=1, logs a boot warning — a warning only, so this stack still starts.
+  TAVILY_BASE_URL: search.url,
+  SEARCH_DAILY_BUDGET: "100000",
+  // Marks this as a stub stack (the search and, with PROD_LIKE, the model are local stubs). Keep it in
+  // both modes: with PROD_LIKE the model endpoint is labelled a test stub (config.ts modelEndpoint), and
+  // every execution records it (endpoints.model "stub", endpoints.search "custom").
+  E2E_STUB: "1",
+  VERIFY_RETRY_DELAY_MS: process.env.VERIFY_RETRY_DELAY_MS || "1000",
   EMBEDDED_WORKER: "false",
   WORKER_POLL_MS: "250",
   DISABLE_SCHEDULER: "true",
@@ -69,6 +89,7 @@ const children = [
 ];
 const stop = () => {
   for (const c of children) c.kill("SIGTERM");
+  void search.close();
   setTimeout(() => process.exit(0), 3000).unref();
 };
 process.on("SIGTERM", stop);

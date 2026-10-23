@@ -1,6 +1,7 @@
 // /api/dashboard — the Chief of Staff briefing; /api/dashboard/attention — header badges.
 
 import { Router } from "express";
+import type { Prisma } from "@prisma/client";
 import { prisma } from "../db";
 import { requireAuth } from "../auth/middleware";
 import { ah } from "../lib/http";
@@ -8,7 +9,8 @@ import { requireOrg, type OrgRequest } from "../org/organization";
 import { getExecutive } from "../org/registry";
 import { contextCompleteness, getCompanyContext } from "../context/service";
 import { spendableBalance } from "../lib/wallet";
-import { toPublicApproval, toPublicEvent, toPublicException } from "../engine/serialize";
+import { deriveResultState } from "../engine/resultState";
+import { confirmedOutcomeOf, endpointsOf, STEP_LITE_SELECT, toPublicApproval, toPublicEvent, toPublicException, usedMockAIOf } from "../engine/serialize";
 
 const router = Router();
 router.use(requireAuth, requireOrg);
@@ -17,6 +19,50 @@ const startOfMonthUTC = () => {
   const d = new Date();
   return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1));
 };
+
+/** What Home's recent outcomes read of a completed execution. */
+const RECENT_OUTCOME_SELECT = {
+  id: true,
+  objectiveId: true,
+  status: true,
+  completedAt: true,
+  costCents: true,
+  refundedCents: true,
+  outcomeStatus: true,
+  confirmedOutcomeStatus: true,
+  outcomeConfirmedAt: true,
+  outcomeSummary: true,
+  verificationStatus: true,
+  verificationScore: true,
+  plan: true,
+  steps: { select: STEP_LITE_SELECT },
+  verifications: { select: { modelProvider: true } },
+  objective: { select: { title: true, kind: true } },
+} as const;
+
+export type RecentOutcomeRow = Prisma.ExecutionGetPayload<{ select: typeof RECENT_OUTCOME_SELECT }>;
+
+/** One of Home's recent outcomes (frontend Briefing.recentOutcomes), labelled as the lists label it. */
+export function toRecentOutcome(r: RecentOutcomeRow) {
+  const confirmed = confirmedOutcomeOf(r);
+  return {
+    executionId: r.id,
+    objectiveId: r.objectiveId,
+    objectiveTitle: r.objective.title,
+    completedAt: r.completedAt?.toISOString() ?? null,
+    costCents: r.costCents - r.refundedCents,
+    // A person's confirmation wins; outcomeStatus alone is the AI-measured value.
+    outcomeStatus: confirmed ?? r.outcomeStatus,
+    outcomeConfirmed: confirmed !== null,
+    outcomeSummary: r.outcomeSummary,
+    verificationStatus: r.verificationStatus,
+    verificationScore: r.verificationScore,
+    // A partial result is not a plain verified one, and mock output is labelled.
+    resultState: deriveResultState({ status: r.status, verificationStatus: r.verificationStatus, steps: r.steps, objectiveKind: r.objective.kind }).state,
+    usedMockAI: usedMockAIOf(r),
+    endpoints: endpointsOf(r),
+  };
+}
 
 async function netExecutionSpend(orgId: string, since?: Date) {
   const agg = await prisma.transaction.aggregate({
@@ -62,7 +108,7 @@ router.get(
         where: { orgId, status: "COMPLETED" },
         orderBy: { completedAt: "desc" },
         take: 5,
-        select: { id: true, objectiveId: true, completedAt: true, costCents: true, refundedCents: true, outcomeStatus: true, outcomeSummary: true, verificationStatus: true, verificationScore: true, objective: { select: { title: true } } },
+        select: RECENT_OUTCOME_SELECT,
       }),
       getCompanyContext(orgId),
       spendableBalance(org.userId),
@@ -107,17 +153,7 @@ router.get(
         monthSpendCents: monthSpend,
         executionsThisMonth: execMonth,
       },
-      recentOutcomes: recent.map((r) => ({
-        executionId: r.id,
-        objectiveId: r.objectiveId,
-        objectiveTitle: r.objective.title,
-        completedAt: r.completedAt?.toISOString() ?? null,
-        costCents: r.costCents - r.refundedCents,
-        outcomeStatus: r.outcomeStatus,
-        outcomeSummary: r.outcomeSummary,
-        verificationStatus: r.verificationStatus,
-        verificationScore: r.verificationScore,
-      })),
+      recentOutcomes: recent.map(toRecentOutcome),
       context: contextCompleteness(ctx),
       value30d: {
         criteriaMet: v.get("criteria_met") ?? 0,

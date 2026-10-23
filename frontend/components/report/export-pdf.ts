@@ -1,6 +1,6 @@
 // PDF export. Loaded lazily by <ExportMenu> (dynamic import on click), and it
 // in turn lazy-loads pdfmake + its bundled Roboto fonts.
-import { leadingTitle, markdownToBlocks, withoutLeadingTitle, type Block, type Inline } from "./markdown";
+import { leadingTitle, linkAllowed, linkAllowlist, markdownToBlocks, reduceLinkText, withoutLeadingTitle, type Block, type Inline, type LinkScope } from "./markdown";
 import { AI_NOTE, metaLine, prettyDate, safeHref, sortSources, sourceDomain, sourceLabel, type ExportInput } from "./shared";
 import { BRAND, loadBrandMark } from "./brand";
 
@@ -49,11 +49,15 @@ export interface PdfOptions {
 }
 
 /** Build the pdfmake document definition (pure; unit-testable in Node). */
-export function buildPdfDefinition(input: ExportInput, opts: PdfOptions = {}): Node {
+export function buildPdfDefinition(input: ExportInput & LinkScope, opts: PdfOptions = {}): Node {
   const sources = sortSources(input.sources);
   const valid = new Set(sources.map((s) => s.n));
-  const parsed = markdownToBlocks(input.markdown || "", { isCite: (n) => valid.has(n) });
-  const title = pdfSafe((input.title || leadingTitle(parsed) || "Report").trim());
+  // Links to domains the report may not link to (see linkAllowed) are printed as plain text.
+  const allowed = linkAllowlist(input.linkDomains, sources);
+  const isLinkAllowed = (url: string) => linkAllowed(url, allowed);
+  const parsed = markdownToBlocks(input.markdown || "", { isCite: (n) => valid.has(n), isLinkAllowed });
+  // The title (and the footer) are printed outside the markdown: their link-shaped text is reduced as the body's is.
+  const title = pdfSafe(reduceLinkText((input.title || leadingTitle(parsed) || "Report").trim(), isLinkAllowed));
   const blocks = withoutLeadingTitle(parsed);
 
   const runs = (list: Inline[], base: Node = {}): Node[] | string =>
@@ -201,13 +205,14 @@ export function buildPdfDefinition(input: ExportInput, opts: PdfOptions = {}): N
     content.push({ text: `${sources.length} numbered source${sources.length === 1 ? "" : "s"}, cited in the text as [n].`, color: MUTED, fontSize: 9, margin: [0, 0, 0, 10] });
     for (const s of sources) {
       const url = safeHref(s.url);
-      const where = [sourceDomain(s), sourceLabel(s), s.publishedAt ? prettyDate(s.publishedAt) : null].filter(Boolean).join(" · ");
-      const stack: Content[] = [{ text: pdfSafe(s.title || "Untitled source"), bold: true, fontSize: 9.5, color: INK }];
+      // A source's title and snippet are its page's own text: their link-shaped text is reduced as the body's is.
+      const where = reduceLinkText([sourceDomain(s), sourceLabel(s), s.publishedAt ? prettyDate(s.publishedAt) : null].filter(Boolean).join(" · "), isLinkAllowed);
+      const stack: Content[] = [{ text: pdfSafe(reduceLinkText(s.title || "Untitled source", isLinkAllowed)), bold: true, fontSize: 9.5, color: INK }];
       if (where) stack.push({ text: pdfSafe(where), color: MUTED, fontSize: 8.5, margin: [0, 1, 0, 0] });
       if (url) stack.push({ text: url.length > 95 ? `${url.slice(0, 94)}…` : url, link: url, color: ACCENT, fontSize: 8.5, margin: [0, 1, 0, 0] });
       if (s.snippet) {
         const snip = s.snippet.length > 320 ? `${s.snippet.slice(0, 319)}…` : s.snippet;
-        stack.push({ text: pdfSafe(snip), color: MUTED, fontSize: 8.5, italics: true, margin: [0, 2, 0, 0] });
+        stack.push({ text: pdfSafe(reduceLinkText(snip, isLinkAllowed)), color: MUTED, fontSize: 8.5, italics: true, margin: [0, 2, 0, 0] });
       }
       content.push({
         columns: [
@@ -221,7 +226,7 @@ export function buildPdfDefinition(input: ExportInput, opts: PdfOptions = {}): N
     }
   }
 
-  const footerLabel = pdfSafe(opts.footerLabel ?? `Ensemblis · ${title.length > 70 ? `${title.slice(0, 69)}…` : title}`);
+  const footerLabel = pdfSafe(reduceLinkText(opts.footerLabel ?? `Ensemblis · ${title.length > 70 ? `${title.slice(0, 69)}…` : title}`, isLinkAllowed));
 
   return {
     pageSize: "A4",
@@ -260,7 +265,7 @@ interface PdfMakeLike {
 }
 
 /** Render the report to a PDF Blob (browser only). */
-export async function exportPdf(input: ExportInput, opts?: PdfOptions): Promise<Blob> {
+export async function exportPdf(input: ExportInput & LinkScope, opts?: PdfOptions): Promise<Blob> {
   const [pm, vf] = await Promise.all([import("pdfmake/build/pdfmake"), import("pdfmake/build/vfs_fonts")]);
   const pmAny = pm as unknown as { default?: PdfMakeLike } & PdfMakeLike;
   const pdfMake: PdfMakeLike = pmAny.default ?? pmAny;

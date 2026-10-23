@@ -2,8 +2,10 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
-import { api, ApiError, type PublicReport } from "@/lib/api";
-import { CriterionTag, EmptyState, Icon, Mark, OutcomeTag, Skeleton, SkeletonText, VerificationTag, outcomeLabel, type IconName } from "@/components";
+import { api, ApiError, type OutcomeMeasurement, type PublicReport, type ResultState } from "@/lib/api";
+import { CriterionTag, EmptyState, Icon, Mark, OutcomeTag, Skeleton, SkeletonText, VerificationTag, type IconName } from "@/components";
+import { AI_ASSESSED, outcomeLabel, outcomeTagLabel, resultReportLabel, verificationLabel } from "@/components/Tags";
+import { CUSTOM_SEARCH_NOTE, MOCK_EXPORT_NOTE, MODEL_ENDPOINT_DETAIL, endpointNote, modelEndpointOf, modelEndpointTag, usedCustomSearch } from "@/lib/openIssues";
 import { EXEC_LABEL, ExecBadge } from "@/components/ops";
 import { AI_NOTE, ExportMenu, LEGACY_NOTE, ReportView, reportTitle } from "@/components/report";
 import { longDate } from "@/lib/format";
@@ -18,6 +20,26 @@ const CHECK_TEXT: Record<string, { text: string; icon: IconName }> = {
   warn: { text: "Warning", icon: "alert" },
   fail: { text: "Failed", icon: "x" },
   not_assessed: { text: "Not assessed", icon: "info" },
+};
+
+const METHOD: Record<OutcomeMeasurement["method"], string> = {
+  "model-assessed": "Assessed by AI review",
+  deterministic: "Measured",
+  "not-assessed": "Not assessed",
+  "user-confirmed": "Confirmed by the owner",
+};
+
+/** The cover kicker of an execution report, from its result state. */
+const KICKER: Record<ResultState, string> = {
+  verified: "Verified report",
+  verified_with_warnings: "Verified report · with warnings",
+  partial: "Partial report",
+  unverified: "Report · not verified",
+  accepted_failed_verification: "Report · did not pass verification",
+  in_progress: "Report",
+  blocked: "Report",
+  failed: "Report",
+  cancelled: "Report",
 };
 
 /** The lifecycle every shared result went through — described honestly, without the owner's private details. */
@@ -111,15 +133,23 @@ export function SharedReport({ token }: { token: string }) {
   const exec = r.kind === "execution";
   const title = exec ? r.title : reportTitle(r.result) || r.title;
   const v = exec ? r.verification ?? null : null;
-  const verified = !!v && v.status !== "FAIL";
+  const verified = !!v && v.status !== "FAIL" && v.status !== "UNVERIFIED";
+  // From what this execution actually ran on (or a server that is on mock AI now).
+  const mock = exec && (!!r.usedMockAI || config.mockAI);
+  // A test stub or local model endpoint, and a custom search endpoint, as recorded with this execution.
+  const modelEndpoint = exec ? modelEndpointOf(r) : null;
+  const customSearch = exec && usedCustomSearch(r);
+  const endpointExportNote = exec ? endpointNote(r) : null;
+  const resultState: ResultState | null = exec ? r.resultState ?? null : null;
   const criteria = exec ? r.objective?.criteria ?? [] : [];
   const measurements = r.objective?.measurements ?? [];
   const byCriterion = new Map(measurements.map((m) => [m.criterionId, m]));
   const met = measurements.filter((m) => m.result === "MET").length;
-  const outcome = exec ? r.objective?.outcomeStatus ?? null : null;
+  const confirmed = !!r.objective?.confirmedOutcomeStatus;
+  const outcome = exec ? r.objective?.confirmedOutcomeStatus ?? r.objective?.outcomeStatus ?? null : null;
   const team = r.team ?? [];
   const sourceCount = r.sources?.length ?? 0;
-  const kicker = !exec ? "Earlier report" : verified ? "Verified report" : "Report";
+  const kicker = !exec ? "Earlier report" : resultState ? KICKER[resultState] ?? "Report" : verified ? (v?.status === "PASS_WITH_WARNINGS" ? "Verified report · with warnings" : "Verified report") : "Report";
 
   return (
     <>
@@ -135,9 +165,10 @@ export function SharedReport({ token }: { token: string }) {
             title={title}
             markdown={r.result}
             sources={r.sources}
+            linkDomains={r.linkDomains}
             meta={
               exec
-                ? { date: r.completedAt, label: verified ? "Verified report" : "Report", note: AI_NOTE }
+                ? { date: r.completedAt, label: resultState ? resultReportLabel(resultState) : verified ? "Verified report" : "Report", note: [mock ? MOCK_EXPORT_NOTE : AI_NOTE, endpointExportNote].filter(Boolean).join(" ") }
                 : { date: r.completedAt, label: "Earlier report", version: r.version, note: LEGACY_NOTE }
             }
           />
@@ -145,7 +176,7 @@ export function SharedReport({ token }: { token: string }) {
 
         <header className={S.cover}>
           <p className={S.kicker}>
-            <Icon name={exec && verified ? "shield" : "report"} size={14} />
+            <Icon name={exec && (resultState ? resultState === "verified" || resultState === "verified_with_warnings" : verified) ? "shield" : "report"} size={14} />
             {kicker}
             {!exec && r.version > 1 && <span className={S.kickerSub}>Version {r.version}</span>}
           </p>
@@ -159,10 +190,20 @@ export function SharedReport({ token }: { token: string }) {
               </>
             )}
           </p>
-          {exec && config.mockAI && (
+          {mock && (
             <p className={S.mock}>
               <span className="tag warn">Mock AI — test output</span>
               <span>Generated by the mock AI provider for development and testing — not real analysis.</span>
+            </p>
+          )}
+          {(modelEndpoint || customSearch) && (
+            <p className={S.mock} data-testid="endpoint-note">
+              {modelEndpoint && (
+                <span className={`tag ${modelEndpoint === "stub" ? "warn" : "gray"}`} data-testid="endpoint-tag">
+                  {modelEndpointTag(r)}
+                </span>
+              )}
+              <span>{[modelEndpoint && MODEL_ENDPOINT_DETAIL[modelEndpoint], customSearch && CUSTOM_SEARCH_NOTE].filter(Boolean).join(" ")}</span>
             </p>
           )}
           {exec ? (
@@ -172,7 +213,11 @@ export function SharedReport({ token }: { token: string }) {
                   <dt>Outcome</dt>
                   <dd>
                     <span className={`${S.dot} ${S[`o_${outcome}`] ?? ""}`} aria-hidden="true" />
-                    {outcomeLabel(outcome)}
+                    {/* Same words as outcomeTagLabel, with the suffix set smaller so the figure stays readable. */}
+                    <span>
+                      {outcomeLabel(outcome)}
+                      {outcomeTagLabel(outcome, confirmed) !== outcomeLabel(outcome) && <small className="cs-ai-suffix"> {AI_ASSESSED}</small>}
+                    </span>
                   </dd>
                 </div>
               )}
@@ -181,8 +226,14 @@ export function SharedReport({ token }: { token: string }) {
                   <dt>Verification</dt>
                   <dd>
                     <span className={`${S.dot} ${S[`v_${v.status}`] ?? ""}`} aria-hidden="true" />
-                    {v.score}
-                    <small>/100</small>
+                    {v.status === "UNVERIFIED" ? (
+                      verificationLabel("UNVERIFIED")
+                    ) : (
+                      <>
+                        {v.score}
+                        <small>/100</small>
+                      </>
+                    )}
                   </dd>
                 </div>
               )}
@@ -223,7 +274,7 @@ export function SharedReport({ token }: { token: string }) {
                 </h2>
                 {r.objective?.outcomeSummary && <p className="cs-out-sum">{r.objective.outcomeSummary}</p>}
               </div>
-              {outcome && <OutcomeTag outcome={outcome} />}
+              {outcome && <OutcomeTag outcome={outcome} confirmed={confirmed} />}
             </div>
             <ol className="cs-crit" aria-label="Success criteria results">
               {criteria.map((c, i) => {
@@ -239,6 +290,7 @@ export function SharedReport({ token }: { token: string }) {
                         <p className="cs-crit-m">
                           {m.measurement}
                           {m.explanation ? ` — ${m.explanation}` : ""}
+                          <span className="cs-crit-how">{METHOD[m.method] ?? m.method}</span>
                         </p>
                       )}
                     </div>
@@ -253,6 +305,7 @@ export function SharedReport({ token }: { token: string }) {
         <ReportView
           markdown={r.result}
           sources={r.sources}
+          linkDomains={r.linkDomains}
           idPrefix="s"
           className={S.reader}
           disclaimer={exec ? AI_NOTE : LEGACY_NOTE}
@@ -289,6 +342,15 @@ export function SharedReport({ token }: { token: string }) {
                     </div>
                     <p className={S.verifySum}>{v.summary}</p>
                     {v.status === "FAIL" && <p className={S.verifyWarn}>This result did not pass verification. The owner chose to accept it with its warnings.</p>}
+                    {v.status === "UNVERIFIED" && <p className="cs-note-warn">The AI review could not run, so this result has not been verified. Only the evidence checks below ran.</p>}
+                    {resultState === "partial" && (
+                      <p className="cs-note-warn">
+                        This is a partial result: some planned work is missing.
+                        {(r.resultReasons ?? []).filter((x) => !/^Verification passed/i.test(x)).length > 0 && (
+                          <> {(r.resultReasons ?? []).filter((x) => !/^Verification passed/i.test(x)).join(" ")}</>
+                        )}
+                      </p>
+                    )}
                     {v.checks.length > 0 && (
                       <ul className="cs-checks" aria-label="Verification checks">
                         {v.checks.map((c) => (

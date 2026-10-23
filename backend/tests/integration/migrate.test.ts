@@ -18,7 +18,10 @@ function urlFor(db: string) {
   return u.toString();
 }
 
-async function freshDb(name: string): Promise<string> {
+async function freshDb(case_: string): Promise<string> {
+  // Named after the run's test database (ensemblis_test → ensemblis_test_m_legacy), so runs against
+  // different TEST_DATABASE_URLs never drop each other's throwaway databases.
+  const name = case_.replace(/^ensemblis_test/, decodeURIComponent(base.pathname.slice(1)) || "ensemblis_test");
   const admin = new PrismaClient({ datasources: { db: { url: urlFor("postgres") } } });
   await admin.$executeRawUnsafe(`DROP DATABASE IF EXISTS "${name}" WITH (FORCE)`);
   await admin.$executeRawUnsafe(`CREATE DATABASE "${name}"`);
@@ -116,6 +119,34 @@ describe("boot migrator", { timeout: 120_000 }, () => {
     expect(b.code, b.out).toBe(0);
     await legacyDataIntact(url);
     noDrift(url);
+  });
+
+  it("carries outcomes a person confirmed before confirmedOutcomeStatus existed over to it (data only, no drift)", async () => {
+    // A database deployed up to 20261014120000_real_execution_v1, holding a confirmation made by the code before it.
+    const url = await freshDb("ensemblis_test_m_backfill");
+    for (const name of ["0_init", "20261007120000_outcome_execution_system", "20261008090000_planning_quota_indexes", "20261014120000_real_execution_v1"]) {
+      execFileSync(process.execPath, [prismaCli, "db", "execute", "--file", path.join(root, "prisma/migrations", name, "migration.sql"), "--url", url], { cwd: root, stdio: "pipe" });
+      execFileSync(process.execPath, [prismaCli, "migrate", "resolve", "--applied", name], { cwd: root, env: { ...process.env, DATABASE_URL: url }, stdio: "pipe" });
+    }
+    sql(url, `INSERT INTO "User"(id,email,"passwordHash",name,credits) VALUES ('u1','legacy@example.com','hash','Legacy',4321);
+              INSERT INTO "Organization"(id,name,"ownerId","updatedAt") VALUES ('o1','Legacy','u1',now());
+              INSERT INTO "Objective"(id,"orgId",title,statement,"budgetCents","updatedAt") VALUES ('ob1','o1','Brief','Research it',2000,now());
+              INSERT INTO "Execution"(id,"objectiveId","orgId",status,"outcomeStatus","outcomeConfirmedAt","confirmedOutcomeStatus","updatedAt") VALUES
+                ('e1_legacy_confirmed','ob1','o1','COMPLETED','ACHIEVED',now(),NULL,now()),
+                ('e2_ai_assessed','ob1','o1','COMPLETED','PARTIALLY_ACHIEVED',NULL,NULL,now()),
+                ('e3_confirmed_since','ob1','o1','COMPLETED','ACHIEVED',now(),'NOT_ACHIEVED',now());`);
+    const r = await migrate(url);
+    expect(r.code, r.out).toBe(0);
+    expect(r.out).toMatch(/database state: migrated/);
+    noDrift(url);
+    const p = new PrismaClient({ datasources: { db: { url } } });
+    const rows = await p.execution.findMany({ select: { id: true, outcomeStatus: true, confirmedOutcomeStatus: true }, orderBy: { id: "asc" } });
+    await p.$disconnect();
+    expect(rows).toEqual([
+      { id: "e1_legacy_confirmed", outcomeStatus: "ACHIEVED", confirmedOutcomeStatus: "ACHIEVED" },
+      { id: "e2_ai_assessed", outcomeStatus: "PARTIALLY_ACHIEVED", confirmedOutcomeStatus: null },
+      { id: "e3_confirmed_since", outcomeStatus: "ACHIEVED", confirmedOutcomeStatus: "NOT_ACHIEVED" },
+    ]);
   });
 
   it("refuses to guess when v4 tables exist without any migration history", async () => {

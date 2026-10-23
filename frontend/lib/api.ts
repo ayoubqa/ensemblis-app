@@ -58,11 +58,47 @@ export type ExecutionStatus = "PLANNING" | "PLANNED" | "WAITING_FOR_APPROVAL" | 
 export type StepStatus = "PENDING" | "RUNNING" | "COMPLETED" | "FAILED" | "SKIPPED";
 export type OutcomeStatus = "ACHIEVED" | "PARTIALLY_ACHIEVED" | "NOT_ACHIEVED" | "UNKNOWN";
 export type CriterionResult = "MET" | "PARTIALLY_MET" | "NOT_MET" | "UNKNOWN";
-export type VerificationStatus = "PASS" | "PASS_WITH_WARNINGS" | "FAIL";
+/** UNVERIFIED: the AI verifier could not run (credentials, quota, timeout, invalid output), so the result is not verified. */
+export type VerificationStatus = "PASS" | "PASS_WITH_WARNINGS" | "FAIL" | "UNVERIFIED";
 export type ClaimStatus = "SUPPORTED" | "PARTIALLY_SUPPORTED" | "UNSUPPORTED" | "UNCITED" | "ESTIMATE";
 export type RiskLevel = "LOW" | "MEDIUM" | "HIGH";
 export type EvidenceKind = "WEB" | "WIKIPEDIA" | "DOCUMENT" | "COMPANY_CONTEXT" | "WEBSITE" | "CALCULATION" | "TOOL_OUTPUT" | "ARTIFACT";
 export type ExecutiveKey = "chief_of_staff" | "marketing" | "sales" | "finance" | "operations";
+/** The deliverable an objective asks for. null = the general decision memo. */
+export type ObjectiveKind = "research_brief";
+/** What a claim in the report is (from the section it appears in). */
+export type ClaimType = "source" | "inference" | "uncertainty" | "recommendation";
+
+/**
+ * One honest reading of where an execution ended up (backend engine/resultState.ts). It keeps
+ * "the work finished" apart from "the result was verified": a completed execution whose
+ * verification failed or never ran, or whose planned work (including research) was incomplete,
+ * is never reported as plainly successful.
+ */
+export type ResultState =
+  | "in_progress"
+  | "blocked"
+  | "failed"
+  | "cancelled"
+  | "verified"
+  | "verified_with_warnings"
+  | "partial"
+  | "unverified"
+  | "accepted_failed_verification";
+export const RESULT_STATES: readonly ResultState[] = [
+  "in_progress",
+  "blocked",
+  "failed",
+  "cancelled",
+  "verified",
+  "verified_with_warnings",
+  "partial",
+  "unverified",
+  "accepted_failed_verification",
+];
+
+/** What a research step's web search achieved. off: search is off on the server. */
+export type ResearchStatus = "ok" | "degraded" | "no_results" | "failed" | "off";
 
 export interface SuccessCriterion {
   id: string;
@@ -83,8 +119,20 @@ export interface ExecutionSummary {
   refundedCents: number;
   verificationStatus: VerificationStatus | null;
   verificationScore: number | null;
+  /** The AI-measured outcome (the verifier's reading of the report). A person's confirmation never overwrites it. */
   outcomeStatus: OutcomeStatus | null;
+  /** Set once a person confirmed the outcome. */
+  confirmedOutcomeStatus?: OutcomeStatus | null;
   outcomeSummary: string | null;
+  // The fields below were added with real execution v1. They are optional so a console
+  // served before the API upgrade still renders (see resultStateOf in lib/openIssues.ts).
+  resultState?: ResultState;
+  /** Why the result reads as it does (skipped steps, failed research, verification…). */
+  resultReasons?: string[];
+  /** True when any part of this execution actually ran on the mock AI provider. */
+  usedMockAI?: boolean;
+  /** Where its model and web search calls went, as recorded with it at run time. Absent from an older API. */
+  endpoints?: ExecutionEndpoints;
   planSource: "planner" | "fallback" | null;
   startedAt: string | null;
   completedAt: string | null;
@@ -93,11 +141,26 @@ export interface ExecutionSummary {
   currentStep: { title: string; agent: string; executive: string; executiveTitle: string } | null;
 }
 
+/**
+ * Where an execution's calls went, recorded with it (never the server's current setting).
+ * model: stub = a test stub endpoint (not a real model); local = a model on this machine or a private
+ * network (self-hosted or a test endpoint); hosted = a model API. search: custom = TAVILY_BASE_URL, not
+ * the public Tavily API. null: not used (the mock model, no web search) or not known (an older execution).
+ */
+export interface ExecutionEndpoints {
+  model: "hosted" | "local" | "stub" | null;
+  search: "public" | "custom" | null;
+}
+
 export interface Objective {
   id: string;
   title: string;
   statement: string;
   contextNotes: string;
+  /** null (or absent) = the general decision memo. */
+  kind?: ObjectiveKind | null;
+  /** Constraints the plan and every step must respect (user instructions). */
+  constraints?: string | null;
   deadline: string | null;
   budgetCents: number;
   autonomy: Autonomy;
@@ -124,6 +187,28 @@ export interface PlanInfo {
   version: string;
   estimatedCostCents: number;
   estimatedManualHours: number | null;
+  /** Why this plan cannot run yet (no AI key, quota exhausted, or a research brief with web search off). Nothing is charged. */
+  blocked?: { kind: "config" | "quota" | "search_unavailable"; message: string } | null;
+}
+
+/** One search request a research step made. Skipped providers have httpStatus null and an error that says why. */
+export interface SearchAttempt {
+  query: string;
+  provider: string;
+  ok: boolean;
+  httpStatus: number | null;
+  error: string | null;
+  resultCount: number;
+  ms: number | null;
+  /** custom: the request went to TAVILY_BASE_URL, not the public Tavily API. Absent when no request was made, and on older attempts. */
+  endpoint?: "public" | "custom";
+}
+
+/** What a research step did: the providers that answered, the queries sent and every attempt. */
+export interface StepResearch {
+  providers: string[];
+  queries: string[];
+  attempts: SearchAttempt[];
 }
 
 export interface ExecutionStep {
@@ -152,12 +237,17 @@ export interface ExecutionStep {
   model: string | null;
   tokensIn: number;
   tokensOut: number;
+  /** true: the counts are estimates (≈4 characters per token) because the provider reported no usage; null: not known. */
+  tokensEstimated?: boolean | null;
   latencyMs: number | null;
   costCents: number;
   retryAt: string | null;
   startedAt: string | null;
   completedAt: string | null;
   evidenceNs: number[];
+  /** Set on steps that searched the web (or would have, with search off). */
+  researchStatus?: ResearchStatus | null;
+  research?: StepResearch | null;
 }
 
 export interface Evidence {
@@ -172,6 +262,14 @@ export interface Evidence {
   publishedAt: string | null;
   stepId: string | null;
   createdAt: string;
+  /** Search provider that returned this source (tavily | wikipedia), when any. */
+  provider?: string | null;
+  /** The search query that found it. */
+  query?: string | null;
+  /** When it was retrieved (ISO). */
+  retrievedAt?: string | null;
+  /** How it was obtained: a search snippet, the company website, an upload, or provided by the organization (not retrieved). */
+  retrieval?: "search_snippet" | "website" | "upload" | "provided" | "page_fetch" | null;
 }
 
 export interface VerificationCheck {
@@ -180,6 +278,29 @@ export interface VerificationCheck {
   status: "pass" | "warn" | "fail" | "not_assessed";
   score: number | null;
   detail: string;
+}
+
+/** The AI verifier's verdict on one success criterion, saved with the verification round (visible before the outcome is recorded). */
+export interface CriterionAssessment {
+  /** 1-based, in success-criterion order. */
+  index: number;
+  status: CriterionResult;
+  measuredValue: number | null;
+  measurement: string;
+  explanation: string;
+  /** Evidence numbers [n] the verdict relies on (only numbers that exist in this execution). */
+  evidence: number[];
+}
+
+export interface VerificationClaim {
+  claim: string;
+  status: ClaimStatus;
+  evidenceNs: number[];
+  supportScore: number;
+  note: string;
+  claimType?: ClaimType | null;
+  /** The passage of the cited source that supports it, when found. */
+  quote?: string | null;
 }
 
 export interface Verification {
@@ -193,7 +314,23 @@ export interface Verification {
   humanJudgment: string[];
   method: string;
   version: string;
-  claims: { claim: string; status: ClaimStatus; evidenceNs: number[]; supportScore: number; note: string }[];
+  /** The model that ran the AI review (null when it did not run or was not recorded). */
+  modelProvider?: string | null;
+  modelName?: string | null;
+  /** Why the AI review could not run (UNVERIFIED rounds). */
+  assessorError?: string | null;
+  criteria?: CriterionAssessment[];
+  claims: VerificationClaim[];
+  createdAt: string;
+}
+
+/** One verification round, oldest first in Execution.verificationHistory. */
+export interface VerificationRound {
+  round: number;
+  status: VerificationStatus;
+  score: number;
+  summary: string;
+  method: string;
   createdAt: string;
 }
 
@@ -204,6 +341,35 @@ export interface OutcomeMeasurement {
   measurement: string;
   explanation: string;
   method: "model-assessed" | "deterministic" | "not-assessed" | "user-confirmed";
+  /** Evidence numbers [n] the measurement relies on. */
+  evidenceNs?: number[];
+}
+
+/** Model calls metered for one purpose, provider and model. */
+export interface UsageByPurpose {
+  purpose: string;
+  provider: string;
+  model: string | null;
+  calls: number;
+  failed: number;
+  tokensIn: number;
+  tokensOut: number;
+  latencyMs: number;
+  /** True when any of these calls' token counts are estimates (or were not recorded as measured). */
+  estimated: boolean;
+}
+
+/** Every model call and web search metered for an execution (plan, queries, steps, verification, memory). */
+export interface ExecutionUsage {
+  calls: number;
+  failedCalls: number;
+  tokensIn: number;
+  tokensOut: number;
+  /** Sum of model-call latencies (ms). */
+  latencyMs: number;
+  estimated: boolean;
+  byPurpose: UsageByPurpose[];
+  searches: { provider: string; calls: number; failed: number }[];
 }
 
 export interface ExecutionEvent {
@@ -236,7 +402,9 @@ export interface Approval {
   createdAt: string;
 }
 
-export type ExceptionAction = "provide_info" | "proceed" | "retry" | "accept" | "cancel";
+/** skip: continue without a failed step (the result is then partial and the step's cost is refunded). */
+export type ExceptionAction = "provide_info" | "proceed" | "retry" | "skip" | "accept" | "cancel";
+export type ExceptionKind = "MISSING_INFORMATION" | "STEP_FAILED" | "VERIFICATION_FAILED" | "INSUFFICIENT_FUNDS" | "POLICY_BLOCKED" | "PROVIDER_UNAVAILABLE";
 
 export interface ExceptionItem {
   id: string;
@@ -244,7 +412,7 @@ export interface ExceptionItem {
   objectiveTitle: string | null;
   executionId: string;
   stepId: string | null;
-  kind: "MISSING_INFORMATION" | "STEP_FAILED" | "VERIFICATION_FAILED" | "INSUFFICIENT_FUNDS" | "POLICY_BLOCKED";
+  kind: ExceptionKind;
   status: "OPEN" | "RESOLVED" | "DISMISSED";
   severity: RiskLevel;
   title: string;
@@ -288,7 +456,13 @@ export interface Execution extends ExecutionSummary {
   revisionCount: number;
   steps: ExecutionStep[];
   evidence: Evidence[];
+  /** The domains the result may link to; the report renderers show any other link as text. Absent from an older API (the evidence's domains then). */
+  linkDomains?: string[];
+  /** The latest verification round. */
   verification: Verification | null;
+  /** Every round, oldest first (e.g. round 1 failed → revision → round 2). */
+  verificationHistory?: VerificationRound[];
+  usage?: ExecutionUsage;
   measurements: OutcomeMeasurement[];
   approvals: Approval[];
   exceptions: ExceptionItem[];
@@ -327,6 +501,9 @@ export interface CreateObjectiveInput {
   deadline?: string | null; // YYYY-MM-DD
   budgetCents?: number;
   contextNotes?: string;
+  /** "research_brief" asks for an evidence-backed brief; omitted or null = decision memo. */
+  kind?: ObjectiveKind | null;
+  constraints?: string;
   autonomy?: Autonomy;
   draft?: boolean;
 }
@@ -432,9 +609,15 @@ export interface Briefing {
     completedAt: string | null;
     costCents: number;
     outcomeStatus: OutcomeStatus | null;
+    /** True when a person confirmed the outcome (otherwise it is the AI verifier's assessment). */
+    outcomeConfirmed?: boolean;
     outcomeSummary: string | null;
     verificationStatus: VerificationStatus | null;
     verificationScore: number | null;
+    /** Optional: read when the API sends them (otherwise the result state is read from the verification alone). */
+    resultState?: ResultState;
+    usedMockAI?: boolean;
+    endpoints?: ExecutionEndpoints;
   }[];
   context: { filled: number; total: number; missing: string[] };
   value30d: { criteriaMet: number; estimatedHoursReturned: number; executionCostCents: number };
@@ -548,18 +731,37 @@ export interface PublicReport {
   result: string;
   version: number;
   sources: TaskSource[];
+  /** Execution reports: the domains the result may link to (never from the owner's notes). Absent: the sources' domains. */
+  linkDomains?: string[];
   completedAt: string | null;
   /** Legacy task reports only. */
   leadAgent: { name: string; hue?: number } | null;
   team: { agentName: string; role: string; title: string }[];
+  /** Execution reports: taken from what the execution actually ran on. */
+  usedMockAI?: boolean;
+  endpoints?: ExecutionEndpoints;
+  resultState?: ResultState;
+  resultReasons?: string[];
   objective?: {
     title: string;
     criteria: SuccessCriterion[];
     measurements: OutcomeMeasurement[];
+    /** The AI-measured outcome. */
     outcomeStatus: OutcomeStatus | null;
+    /** Set once the owner confirmed the outcome. */
+    confirmedOutcomeStatus?: OutcomeStatus | null;
+    outcomeConfirmedAt?: string | null;
     outcomeSummary: string | null;
   };
-  verification?: { status: VerificationStatus; score: number; summary: string; warnings: string[]; checks: VerificationCheck[] } | null;
+  verification?: {
+    status: VerificationStatus;
+    score: number;
+    summary: string;
+    warnings: string[];
+    checks: VerificationCheck[];
+    method?: string;
+    criteria?: CriterionAssessment[];
+  } | null;
 }
 
 // ---------- Teams (organization members) ----------
@@ -612,10 +814,20 @@ export interface PublicConfig {
   maxTasksPerUserPerDay: number;
   maxDescriptionLength: number;
   aiProviderLabel: string;
+  /** false when model calls can't work on this server (unknown provider, missing key, mock where forbidden). */
+  aiConfigured: boolean;
+  /** Why model calls can't work, naming environment variables only (never a key); null when configured. */
+  aiProblem: string | null;
   mockAI: boolean;
+  /** Where this server's model calls go now: stub also for the mock AI (neither is a real model). Absent from an older API. */
+  aiEndpoint?: "hosted" | "local" | "stub";
   verificationCostCents: number;
   searchEnabled: boolean;
+  /** The search provider actually used: tavily, wikipedia (no Tavily key) or off. */
+  searchProvider: "tavily" | "wikipedia" | "off";
   searchProviderLabel: string;
+  /** True when TAVILY_BASE_URL sends web search to an endpoint other than the public Tavily API (a stub or a proxy). Absent from an older API. */
+  searchCustomEndpoint?: boolean;
   emailEnabled: boolean;
   paymentsEnabled: boolean;
   creditPacks: CreditPack[];

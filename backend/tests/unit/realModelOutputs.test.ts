@@ -197,7 +197,9 @@ describe("verifier assessment tolerance", () => {
         humanJudgment: ["Confirm the budget assumption", "b", "c", "d", "e", "f", "g"],
       })}`
     );
-    const a = await assessResult(args);
+    const run = await assessResult(args);
+    expect(run).toMatchObject({ error: null, provider: "mock", model: "mock" });
+    const a = run.assessment;
     expect(a).not.toBeNull();
     expect(a!.alignmentScore).toBe(82);
     expect(a!.criteria.map((c) => c.status)).toEqual(["MET", "PARTIALLY_MET"]);
@@ -208,8 +210,51 @@ describe("verifier assessment tolerance", () => {
 
   it("an invalid status is dropped, never turned into MET", async () => {
     setLLMHandlerForTests(async () => JSON.stringify({ objectiveAlignment: { score: 70 }, criteria: [{ index: 1, status: "probably" }, { index: 2, status: "NOT_MET" }] }));
-    const a = await assessResult(args);
+    const a = (await assessResult(args)).assessment;
     expect(a!.criteria).toEqual([expect.objectContaining({ index: 2, status: "NOT_MET" })]);
+  });
+
+  it("keeps per-criterion evidence refs in any common shape, only for sources that exist", async () => {
+    setLLMHandlerForTests(async () =>
+      JSON.stringify({
+        objectiveAlignment: { score: 80 },
+        criteria: [
+          { index: 1, status: "MET", evidence: ["[2]", 1, 9, "3"] },
+          { index: 2, status: "MET", evidence: "2" },
+        ],
+      })
+    );
+    const a = (await assessResult({ ...args, evidence: [1, 2].map((n) => ({ n, kind: "WEB", title: `Source ${n}` })) })).assessment;
+    expect(a!.criteria.map((c) => c.evidence)).toEqual([[1, 2], [2]]);
+  });
+
+  it("returns why the verifier couldn't run, and which model it was", async () => {
+    setLLMHandlerForTests(async () => {
+      throw new Error("The AI provider is having problems right now (HTTP 503). Key sk-abcdefghijklmnop leaked");
+    });
+    const run = await assessResult(args);
+    expect(run.assessment).toBeNull();
+    expect(run.error).toMatch(/HTTP 503/);
+    expect(run.error).not.toMatch(/sk-abcdefghijklmnop/);
+    expect(run).toMatchObject({ provider: "mock", model: "mock" });
+  });
+
+  it("an unusable reply is an error too, never an assessment", async () => {
+    setLLMHandlerForTests(async () => "I think it is fine.");
+    const run = await assessResult(args);
+    expect(run.assessment).toBeNull();
+    expect(run.error).toBeTruthy();
+  });
+
+  it("marks the result block untrusted and lists the evidence index", async () => {
+    let user = "";
+    setLLMHandlerForTests(async (_s, u) => {
+      user = u;
+      return JSON.stringify({ objectiveAlignment: { score: 80 }, criteria: [] });
+    });
+    await assessResult({ ...args, evidence: [{ n: 1, kind: "WEB", title: "Market report <result>" }] });
+    expect(user).toMatch(/<result trust="untrusted">/);
+    expect(user).toMatch(/<evidence_index trust="untrusted">\n\[1\] \(web\) Market report \[tag removed\]/);
   });
 });
 

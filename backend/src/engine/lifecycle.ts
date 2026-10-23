@@ -3,7 +3,9 @@
 //   PLANNING ─▶ PLANNED ─────────────────────────────▶ RUNNING ─▶ VERIFYING ─▶ COMPLETED
 //      │           └─▶ WAITING_FOR_APPROVAL ─approve─▶ ┘   │  ▲         │
 //      │                        └─reject─▶ CANCELLED       │  │         └─(fail ×2)─▶ BLOCKED
-//      └─(missing info)─▶ BLOCKED ─answer─▶ PLANNING        └─(step fails)─▶ BLOCKED ─retry─┘
+//      └─(missing info)─▶ BLOCKED ─answer─▶ PLANNING        └─(step fails)─▶ BLOCKED ─retry / skip─┘
+//      └─(provider unavailable)─▶ BLOCKED ─retry─▶ PLANNING (re-plan; never charged on the way)
+//   VERIFYING ─(not verified ×2)─▶ BLOCKED ─retry─▶ VERIFYING (verify again, no revision)
 //   Any non-terminal state ─▶ CANCELLED (person) / FAILED (unrecoverable, refunded).
 //
 // Every transition is a guarded conditional update (`updateMany … where
@@ -15,12 +17,14 @@ import { Prisma, type ExceptionKind, type ExecutionStatus, type RiskLevel } from
 import { prisma } from "../db";
 import { assertPlanningQuotaInTx } from "../lib/usageLimits";
 import { HttpError } from "../lib/http";
-import { log } from "../lib/log";
+import { log, redact } from "../lib/log";
 import { onAttentionNeeded, onExecutionSettled } from "../lib/notify";
 import type { OrgContext } from "../org/organization";
 import { VERIFICATION_COST_CENTS, SYNTHESIS_CAPABILITY, getCapability } from "../org/registry";
 import { chargeExecution, eur, refundExecution } from "./billing";
 import { emit } from "./events";
+import { isResearchBrief } from "./prompts";
+import { INSUFFICIENT_EVIDENCE } from "./verification/checks";
 import { enqueue } from "./queue";
 
 type Tx = Prisma.TransactionClient;
@@ -217,7 +221,7 @@ export interface ExceptionInput {
   recommendation: string;
   neededFromUser: string;
   questions?: { question: string; whyItMatters: string }[];
-  actions: ("provide_info" | "proceed" | "retry" | "accept" | "cancel")[];
+  actions: ResolveAction[];
 }
 
 /** Blocks the execution and records what a person needs to do. */
@@ -257,7 +261,8 @@ export function notifyAttention(executionId: string, headline: string, detail: s
   onAttentionNeeded(executionId, headline, detail).catch(() => undefined);
 }
 
-export type ResolveAction = "provide_info" | "proceed" | "retry" | "accept" | "cancel";
+/** How a person resolves an exception. "skip" continues without a failed work step (the result is then partial). */
+export type ResolveAction = "provide_info" | "proceed" | "retry" | "skip" | "accept" | "cancel";
 
 export async function resolveException(org: OrgContext, exceptionId: string, action: ResolveAction, response?: string): Promise<{ executionId: string }> {
   const exc = await prisma.exception.findFirst({ where: { id: exceptionId, orgId: org.orgId } });
@@ -296,12 +301,74 @@ export async function resolveException(org: OrgContext, exceptionId: string, act
       return;
     }
 
+    if (action === "skip") {
+      // Continue without a failed work step: it stays SKIPPED with its error, its cost is refunded.
+      const step = exc.stepId ? await tx.executionStep.findUnique({ where: { id: exc.stepId } }) : null;
+      if (!step || step.executionId !== ex.id) throw new HttpError(400, "There is no failed step to continue without.");
+      if (getCapability(step.capability)?.kind === "synthesis") throw new HttpError(400, "The final step writes the result, so it can't be skipped. Retry it or cancel.");
+      const skipped = await tx.executionStep.updateMany({ where: { id: step.id, status: "FAILED" }, data: { status: "SKIPPED", notBefore: null, partialOutput: null } });
+      if (skipped.count === 0) throw new HttpError(409, "This step is no longer failed.");
+      if (!(await flip(tx, ex.id, ["BLOCKED"], "RUNNING"))) throw new HttpError(409, "This execution is no longer blocked.");
+      await mirror(tx, ex.objectiveId, "RUNNING");
+      const refunded = await refundExecution(tx, ex.id, step.costCents, "skipped step");
+      await emit(tx, {
+        ...base,
+        stepId: step.id,
+        type: "STEP_SKIPPED",
+        actor: "user",
+        message: `Continuing without “${step.title.slice(0, 160)}” — the result will be marked partial`,
+        data: { stepId: step.id, costCents: step.costCents, refundedCents: refunded },
+      });
+      if (refunded > 0) {
+        await emit(tx, { ...base, stepId: step.id, type: "FUNDS_REFUNDED", actor: "system", message: `${eur(refunded)} refunded for “${step.title.slice(0, 120)}”, which was skipped`, data: { amountCents: refunded } });
+      }
+      await emit(tx, { ...base, type: "EXECUTION_RESUMED", actor: "user", message: "Execution resumed without the failed step" });
+      await enqueueTick(ex.id, 0, tx);
+      return;
+    }
+
     if (action === "retry") {
+      if (exc.kind === "PROVIDER_UNAVAILABLE") {
+        // The plan was never made (or never charged): plan again. Never startInTx here — a plan built
+        // without the model must not be charged; the re-plan goes through approval and charging as usual.
+        await assertPlanningQuotaInTx(tx, ex.orgId);
+        if (!(await flip(tx, ex.id, ["BLOCKED"], "PLANNING"))) throw new HttpError(409, "This execution is no longer blocked.");
+        await mirror(tx, ex.objectiveId, "PLANNING");
+        await emit(tx, { ...base, type: "PLANNING_STARTED", actor: "chief_of_staff", message: "Chief of Staff is planning again" });
+        await enqueueTick(ex.id, 0, tx);
+        return;
+      }
+      const latestRound =
+        exc.kind === "VERIFICATION_FAILED"
+          ? await tx.verification.findFirst({
+              where: { executionId: ex.id },
+              orderBy: { round: "desc" },
+              select: { status: true, checks: true, claims: { where: { status: "UNSUPPORTED" }, select: { id: true }, take: 1 } },
+            })
+          : null;
       if (!ex.chargedAt) {
         // Never started (insufficient funds / daily limit): charge and start now.
         await startInTx(tx, ex.id, org.userId, ["BLOCKED"]);
+      } else if (exc.kind === "VERIFICATION_FAILED" && latestRound?.status === "UNVERIFIED") {
+        // The AI verifier couldn't run: verify the same result again (no revision).
+        if (!(await flip(tx, ex.id, ["BLOCKED"], "VERIFYING"))) throw new HttpError(409, "This execution is no longer blocked.");
+        await mirror(tx, ex.objectiveId, "VERIFYING");
+        await emit(tx, { ...base, type: "EXECUTION_RESUMED", actor: "user", message: "Verifying the result again" });
+        await enqueueTick(ex.id, 0, tx);
+        return;
       } else if (exc.kind === "VERIFICATION_FAILED") {
-        await addRevisionStep(tx, ex.id, [exc.whatHappened, response?.trim() ? `Guidance from ${org.userId === ex.triggeredById ? "the requester" : "your team"}: ${response.trim()}` : ""].filter(Boolean));
+        // A research brief that failed for lack of evidence (or on unsupported claims) researches once more first.
+        const objective = await tx.objective.findUniqueOrThrow({ where: { id: ex.objectiveId }, select: { kind: true } });
+        const evidenceFailed = (Array.isArray(latestRound?.checks) ? (latestRound.checks as { key?: string; status?: string; detail?: string }[]) : []).some(
+          (c) => c.key === "citation_support" && c.status === "fail" && typeof c.detail === "string" && c.detail.startsWith(INSUFFICIENT_EVIDENCE)
+        );
+        const research = isResearchBrief(objective.kind) && latestRound?.status === "FAIL" && (evidenceFailed || (latestRound?.claims.length ?? 0) > 0);
+        await addRevisionStep(
+          tx,
+          ex.id,
+          [exc.whatHappened, response?.trim() ? `Guidance from ${org.userId === ex.triggeredById ? "the requester" : "your team"}: ${response.trim()}` : ""].filter(Boolean),
+          { research }
+        );
         if (!(await flip(tx, ex.id, ["BLOCKED"], "RUNNING"))) throw new HttpError(409, "This execution is no longer blocked.");
         await mirror(tx, ex.objectiveId, "RUNNING");
       } else {
@@ -317,9 +384,15 @@ export async function resolveException(org: OrgContext, exceptionId: string, act
     }
 
     if (action === "accept") {
+      const latestRound = await tx.verification.findFirst({ where: { executionId: ex.id }, orderBy: { round: "desc" }, select: { status: true } });
       if (!(await flip(tx, ex.id, ["BLOCKED"], "VERIFYING"))) throw new HttpError(409, "This execution is no longer blocked.");
       await mirror(tx, ex.objectiveId, "VERIFYING");
-      await emit(tx, { ...base, type: "EXECUTION_RESUMED", actor: "user", message: "Result accepted with its verification warnings — finalizing" });
+      await emit(tx, {
+        ...base,
+        type: "EXECUTION_RESUMED",
+        actor: "user",
+        message: latestRound?.status === "UNVERIFIED" ? "Result accepted without verification — finalizing" : "Result accepted with its verification warnings — finalizing",
+      });
       await enqueueTick(ex.id, 0, tx);
     }
   });
@@ -327,24 +400,33 @@ export async function resolveException(org: OrgContext, exceptionId: string, act
   return { executionId: exc.executionId };
 }
 
-/** Appends a revision of the synthesis step carrying the verifier's feedback. */
-export async function addRevisionStep(tx: Tx, executionId: string, feedback: string[]): Promise<void> {
+/**
+ * Appends a revision of the synthesis step carrying the verifier's feedback. With `research`, the
+ * revision first gathers more evidence (one round of web research, see executor.readRevisionInputs):
+ * inputs are then `{ feedback, research: true }`; otherwise the legacy string[] of feedback.
+ */
+export async function addRevisionStep(tx: Tx, executionId: string, feedback: string[], opts: { research?: boolean } = {}): Promise<void> {
   const steps = await tx.executionStep.findMany({ where: { executionId }, orderBy: { order: "asc" }, select: { order: true, key: true, kind: true } });
   const cap = getCapability(SYNTHESIS_CAPABILITY)!;
   const n = steps.filter((s) => s.kind === "revision").length + 1;
+  const lines = feedback.slice(0, 12);
   await tx.executionStep.create({
     data: {
       executionId,
       key: `r${n}`,
       order: (steps[steps.length - 1]?.order ?? -1) + 1,
-      title: `Revise the result to address verification findings${n > 1 ? ` (${n})` : ""}`,
-      purpose: "Fix every issue the verification gate found; remove or qualify claims the evidence does not support.",
+      title: opts.research
+        ? `Gather more evidence and revise the result${n > 1 ? ` (${n})` : ""}`
+        : `Revise the result to address verification findings${n > 1 ? ` (${n})` : ""}`,
+      purpose: opts.research
+        ? "Search once more for external sources, then fix every issue the verification gate found; remove or qualify claims the evidence does not support."
+        : "Fix every issue the verification gate found; remove or qualify claims the evidence does not support.",
       executive: cap.executive,
       capability: cap.key,
       capabilityVersion: cap.version,
       agent: cap.specialist,
       dependsOn: steps.filter((s) => s.kind === "work").map((s) => s.key),
-      inputs: feedback.slice(0, 12) as unknown as Prisma.InputJsonValue,
+      inputs: (opts.research ? { feedback: lines, research: true } : lines) as unknown as Prisma.InputJsonValue,
       outputs: cap.deliverable as unknown as Prisma.InputJsonValue,
       verification: cap.verificationFocus as unknown as Prisma.InputJsonValue,
       kind: "revision",
@@ -357,7 +439,9 @@ export async function addRevisionStep(tx: Tx, executionId: string, feedback: str
 // ---------------------------------------------------------------- terminal transitions
 
 /** Fails an execution and refunds everything not yet refunded. Idempotent. */
-export async function failExecution(executionId: string, message: string): Promise<boolean> {
+export async function failExecution(executionId: string, rawMessage: string): Promise<boolean> {
+  // The reason can carry provider error text: keys and tokens are masked before it is stored or shown.
+  const message = redact(rawMessage);
   let meta: { orgId: string; objectiveId: string; costCents: number; refundedCents: number } | null = null;
   const done = await prisma.$transaction(async (tx) => {
     const ex = await tx.execution.findUnique({ where: { id: executionId } });
@@ -396,7 +480,8 @@ export async function cancelExecution(executionId: string, opts: { userId: strin
       throw new HttpError(409, `This execution has already ${ex.status === "COMPLETED" ? "completed" : ex.status.toLowerCase()}.`);
     }
     const failedVerification = await tx.exception.count({ where: { executionId, status: "OPEN", kind: "VERIFICATION_FAILED" } });
-    const unrun = ex.steps.filter((s) => s.status !== "COMPLETED").reduce((n, s) => n + s.costCents, 0) + (ex.verificationStatus ? 0 : VERIFICATION_COST_CENTS);
+    // A skipped step's cost was refunded when it was skipped; a verification that couldn't run is refunded.
+    const unrun = ex.steps.filter((s) => s.status !== "COMPLETED" && s.status !== "SKIPPED").reduce((n, s) => n + s.costCents, 0) + (ex.verificationStatus && ex.verificationStatus !== "UNVERIFIED" ? 0 : VERIFICATION_COST_CENTS);
     await tx.executionStep.updateMany({ where: { executionId, status: { in: ["PENDING", "RUNNING"] } }, data: { status: "SKIPPED", partialOutput: null } });
     await tx.approval.updateMany({ where: { executionId, status: "PENDING" }, data: { status: "CANCELLED" } });
     await tx.exception.updateMany({

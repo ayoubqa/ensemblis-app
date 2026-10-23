@@ -1,6 +1,6 @@
 // Word (.docx) export. Loaded lazily by <ExportMenu>; it lazy-loads `docx`.
 import type * as Docx from "docx";
-import { leadingTitle, markdownToBlocks, withoutLeadingTitle, type Block, type Inline } from "./markdown";
+import { leadingTitle, linkAllowed, linkAllowlist, markdownToBlocks, reduceLinkText, withoutLeadingTitle, type Block, type Inline, type LinkScope } from "./markdown";
 import { AI_NOTE, metaLine, prettyDate, safeHref, sortSources, sourceDomain, sourceLabel, type ExportInput } from "./shared";
 import { BRAND, loadBrandMark } from "./brand";
 
@@ -18,11 +18,15 @@ const BODY_TWIPS = 9026; // A4 width minus 1" margins
 const FONT = "Calibri";
 
 /** Build the docx Document (pure apart from the module passed in; unit-testable in Node). */
-export function buildDocxDocument(d: DocxModule, input: ExportInput, mark: Uint8Array | null = null): Docx.Document {
+export function buildDocxDocument(d: DocxModule, input: ExportInput & LinkScope, mark: Uint8Array | null = null): Docx.Document {
   const sources = sortSources(input.sources);
   const valid = new Set(sources.map((s) => s.n));
-  const parsed = markdownToBlocks(input.markdown || "", { isCite: (n) => valid.has(n) });
-  const title = (input.title || leadingTitle(parsed) || "Report").trim();
+  // Links to domains the report may not link to (see linkAllowed) are written as plain text.
+  const allowed = linkAllowlist(input.linkDomains, sources);
+  const isLinkAllowed = (url: string) => linkAllowed(url, allowed);
+  const parsed = markdownToBlocks(input.markdown || "", { isCite: (n) => valid.has(n), isLinkAllowed });
+  // The title (and the footer) are written outside the markdown: their link-shaped text is reduced as the body's is.
+  const title = reduceLinkText((input.title || leadingTitle(parsed) || "Report").trim(), isLinkAllowed);
   const blocks = withoutLeadingTitle(parsed);
   const orderedRefs = new Map<number, string>(); // start number → numbering reference
   let listInstance = 0;
@@ -210,14 +214,15 @@ export function buildDocxDocument(d: DocxModule, input: ExportInput, mark: Uint8
     );
     for (const s of sources) {
       const url = safeHref(s.url);
-      const where = [sourceDomain(s), sourceLabel(s), s.publishedAt ? prettyDate(s.publishedAt) : null].filter(Boolean).join(" · ");
+      // A source's title and snippet are its page's own text: their link-shaped text is reduced as the body's is.
+      const where = reduceLinkText([sourceDomain(s), sourceLabel(s), s.publishedAt ? prettyDate(s.publishedAt) : null].filter(Boolean).join(" · "), isLinkAllowed);
       body.push(
         new d.Paragraph({
           keepNext: true,
           spacing: { after: 20 },
           children: [
             new d.Bookmark({ id: `src_${s.n}`, children: [new d.TextRun({ text: `[${s.n}] `, bold: true, color: ACCENT })] }),
-            new d.TextRun({ text: s.title || "Untitled source", bold: true }),
+            new d.TextRun({ text: reduceLinkText(s.title || "Untitled source", isLinkAllowed), bold: true }),
           ],
         })
       );
@@ -228,7 +233,7 @@ export function buildDocxDocument(d: DocxModule, input: ExportInput, mark: Uint8
         line.push(new d.ExternalHyperlink({ link: url, children: [new d.TextRun({ text: url, color: ACCENT, underline: {}, size: 18 })] }));
       }
       if (line.length) body.push(new d.Paragraph({ children: line, spacing: { after: 20 }, keepNext: !!s.snippet }));
-      if (s.snippet) body.push(new d.Paragraph({ children: [new d.TextRun({ text: s.snippet, italics: true, color: MUTED, size: 18 })], spacing: { after: 160 } }));
+      if (s.snippet) body.push(new d.Paragraph({ children: [new d.TextRun({ text: reduceLinkText(s.snippet, isLinkAllowed), italics: true, color: MUTED, size: 18 })], spacing: { after: 160 } }));
       else body.push(new d.Paragraph({ children: [], spacing: { after: 100 } }));
     }
   }
@@ -282,7 +287,7 @@ export function buildDocxDocument(d: DocxModule, input: ExportInput, mark: Uint8
 }
 
 /** Render the report to a .docx Blob (browser only). */
-export async function exportDocx(input: ExportInput): Promise<Blob> {
+export async function exportDocx(input: ExportInput & LinkScope): Promise<Blob> {
   const mod = (await import("docx")) as unknown as DocxModule & { default?: DocxModule };
   const d = (mod.Document ? mod : mod.default) as DocxModule;
   const doc = buildDocxDocument(d, input, await loadBrandMark("bytes"));

@@ -1,11 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { Execution, ExecutionStep, TaskSource } from "@/lib/api";
-import { Icon, StepStatusTag, Tag } from "@/components";
+import type { Execution, ExecutionStatus, ExecutionStep, PlanInfo, TaskSource } from "@/lib/api";
+import { Icon, StepStatusTag, Tag, VerificationTag } from "@/components";
+import { ResearchTag, providerName } from "@/components/Tags";
 import { CiteProvider, ReportMarkdown } from "@/components/report";
 import { ExecBadge, evidenceToSources } from "@/components/ops";
 import { duration, eur, relativeTime } from "@/lib/format";
+import { UNFINISHED_STEP, unfinishedStep, verificationStopped } from "@/lib/openIssues";
 import { EvidenceChips, evidenceId, focusEvidence } from "./Evidence";
 
 /** The Chief of Staff at work before a plan exists. */
@@ -23,6 +25,37 @@ function Planning() {
         <i />
       </span>
     </div>
+  );
+}
+
+const BLOCKED_TITLE: Record<NonNullable<PlanInfo["blocked"]>["kind"], string> = {
+  config: "The AI provider isn't configured",
+  quota: "The AI provider is out of quota",
+  search_unavailable: "Web search is unavailable",
+};
+
+type Blocked = NonNullable<PlanInfo["blocked"]>;
+const blockedTitle = (b: Blocked) => BLOCKED_TITLE[b.kind] ?? "This plan can't run yet";
+/** The server's message often starts with the same words as the title ("The AI provider isn't configured: …"). */
+const repeatsTitle = (b: Blocked) => !!b.message && b.message.trim().toLowerCase().startsWith(blockedTitle(b).toLowerCase());
+/** The bold lead of the notice: the message itself when it already says what the title would. */
+function blockedLead(b: Blocked): string {
+  if (repeatsTitle(b)) return b.message.trim();
+  return `${blockedTitle(b)}.`;
+}
+
+/** Model time: "850 ms", "4.2 s". */
+export function latency(ms: number | null | undefined): string | null {
+  if (ms == null || !Number.isFinite(ms) || ms <= 0) return null;
+  return ms < 1000 ? `${Math.round(ms)} ms` : `${(ms / 1000).toFixed(ms < 10_000 ? 1 : 0)} s`;
+}
+
+/** Shown next to token counts that are estimates (≈4 characters per token). Only counts recorded as measured go without it. */
+export function EstTag() {
+  return (
+    <small className="cs-est" title="Not measured by the provider: estimated at about 4 characters per token, or not recorded as measured.">
+      ≈ est.
+    </small>
   );
 }
 
@@ -73,6 +106,16 @@ export function PlanSummary({ execution }: { execution: Execution }) {
           </dd>
         </div>
       </dl>
+      {plan.blocked && (
+        <div className="cs-empty is-warn cs-plan-blocked" role="note" data-testid="plan-blocked" data-kind={plan.blocked.kind}>
+          <Icon name="alert" size={16} />
+          <p>
+            <b>{blockedLead(plan.blocked)}</b> {plan.blocked.message && !repeatsTitle(plan.blocked) ? `${plan.blocked.message} ` : ""}
+            Nothing has been charged.
+            {plan.source === "fallback" && work.length > 0 && " The steps below are the standard playbook, not a plan from the Chief of Staff's model."}
+          </p>
+        </div>
+      )}
       {plan.notes.length > 0 && <p className="cs-plan-notes">{plan.notes.join(" ")}</p>}
       {(plan.assumptions.length > 0 || plan.risks.length > 0 || missing.length > 0) && (
         <div className="cs-plan-more">
@@ -150,15 +193,23 @@ function StepNode({ step }: { step: ExecutionStep }) {
   );
 }
 
-function StepItem({ step, partial, sources, charged }: { step: ExecutionStep; partial?: string; sources: TaskSource[]; charged: boolean }) {
+function StepItem({ step, partial, sources, charged, runStatus }: { step: ExecutionStep; partial?: string; sources: TaskSource[]; charged: boolean; runStatus: ExecutionStatus }) {
   const [open, setOpen] = useState(false);
   const live = step.status === "RUNNING";
   const text = live ? partial ?? step.partialOutput : null;
   const secs = step.startedAt && step.completedAt ? Math.round((new Date(step.completedAt).getTime() - new Date(step.startedAt).getTime()) / 1000) : null;
   const tokens = step.tokensIn + step.tokensOut;
-  const audit = [`Capability ${step.capabilityName} v${step.capabilityVersion}`, step.model ? `model ${step.model}` : null, tokens > 0 ? `${tokens.toLocaleString()} tokens` : null]
-    .filter(Boolean)
-    .join(" · ");
+  const audit = `Capability ${step.capabilityName} v${step.capabilityVersion}`;
+  // Where the step ran: shown for every step that called a model, failed ones included.
+  const ran = !!(step.provider || step.model || tokens > 0);
+  const modelTime = latency(step.latencyMs);
+  const research = step.researchStatus ?? null;
+  const researchDetail =
+    research === "ok" || research === "degraded"
+      ? (step.research?.providers ?? []).map(providerName).join(" + ") || null
+      : null;
+  // The run ended without finishing this step ("Not run" / "Stopped"); otherwise a skip is a person's.
+  const unfinished = unfinishedStep(step, runStatus);
   return (
     <li className={`cs-tl-i st-${step.status}`} data-testid="plan-step" data-status={step.status}>
       <StepNode step={step} />
@@ -181,7 +232,13 @@ function StepItem({ step, partial, sources, charged }: { step: ExecutionStep; pa
               <span className="cs-cap">{step.capabilityName}</span>
             </p>
           </div>
-          <StepStatusTag status={step.status} />
+          {unfinished ? (
+            <Tag variant="gray" title={UNFINISHED_STEP[unfinished].title}>
+              {UNFINISHED_STEP[unfinished].label}
+            </Tag>
+          ) : (
+            <StepStatusTag status={step.status} />
+          )}
         </div>
         <p className="cs-tl-purpose">{step.purpose}</p>
         {step.summary && step.status === "COMPLETED" && <p className="cs-tl-sum">{step.summary}</p>}
@@ -192,8 +249,43 @@ function StepItem({ step, partial, sources, charged }: { step: ExecutionStep; pa
             {step.error}
           </p>
         )}
+        {unfinished === "stopped" && step.error && (
+          // An unfinished step keeps an error only while it waits to retry (starting an attempt clears it).
+          <p className="cs-tl-err is-skip">
+            <Icon name="info" size={14} />
+            <span>
+              The execution ended while this step was waiting to retry after a failed attempt. <span className="cs-tl-err-why">{step.error}</span>
+            </span>
+          </p>
+        )}
+        {step.status === "SKIPPED" && step.kind === "work" && step.error && !unfinished && (
+          <p className="cs-tl-err is-skip" data-testid="step-skipped-why">
+            <Icon name="info" size={14} />
+            <span>
+              {/* A cancelled or failed run delivered no result to leave the step out of. */}
+              Skipped after it failed
+              {runStatus === "COMPLETED" ? " — the result was produced without it." : runStatus === "CANCELLED" || runStatus === "FAILED" ? "." : " — the result will be produced without it."}{" "}
+              <span className="cs-tl-err-why">{step.error}</span>
+            </span>
+          </p>
+        )}
         {step.status === "PENDING" && step.retryAt && <p className="cs-tl-retry">Retry scheduled {relativeTime(step.retryAt)}.</p>}
+        {ran && (
+          <p className="cs-tl-model" data-testid="step-meta">
+            <span>
+              <span className="sr-only">Model: </span>
+              {providerName(step.provider)}
+              {step.model && step.model !== step.provider ? ` · ${step.model}` : ""}
+            </span>
+            <span>
+              {step.tokensIn.toLocaleString("en-US")} in / {step.tokensOut.toLocaleString("en-US")} out tokens
+              {step.tokensEstimated !== false && <EstTag />}
+            </span>
+            {modelTime && <span>{modelTime} model time</span>}
+          </p>
+        )}
         <div className="cs-tl-meta">
+          {research && <ResearchTag status={research} detail={researchDetail} />}
           <EvidenceChips ns={step.evidenceNs} />
           {step.attempts > 1 && <span>{step.attempts} attempts</span>}
           {secs !== null && (
@@ -240,12 +332,26 @@ export function ExecutionTimeline({ execution, partials }: { execution: Executio
     );
   }
   const v = execution.verification;
-  const gate = v ? (v.status === "FAIL" ? "FAILED" : "COMPLETED") : execution.status === "VERIFYING" ? "RUNNING" : "PENDING";
+  // A finished execution with no verification either ended while the gate was working (every work
+  // step finished: "Stopped") or never reached it (cancelled, rejected or failed first: "Not run").
+  const gateStopped = verificationStopped(execution);
+  const gateNotRun = !v && !gateStopped && ["COMPLETED", "FAILED", "CANCELLED"].includes(execution.status);
+  const gate = v
+    ? v.status === "FAIL"
+      ? "FAILED"
+      : v.status === "UNVERIFIED"
+        ? "UNVERIFIED"
+        : "COMPLETED"
+    : execution.status === "VERIFYING"
+      ? "RUNNING"
+      : gateStopped || gateNotRun
+        ? "SKIPPED"
+        : "PENDING";
   return (
-    <CiteProvider sources={sources} jump={jump} prefix="ev" targetId={evidenceId}>
+    <CiteProvider sources={sources} linkDomains={execution.linkDomains} jump={jump} prefix="ev" targetId={evidenceId}>
       <ol className="cs-tl" aria-label="Execution steps">
         {execution.steps.map((s) => (
-          <StepItem key={s.id} step={s} partial={partials[s.id]} sources={sources} charged={execution.costCents > 0} />
+          <StepItem key={s.id} step={s} partial={partials[s.id]} sources={sources} charged={execution.costCents > 0} runStatus={execution.status} />
         ))}
         <li className={`cs-tl-i cs-tl-gate st-${gate}`}>
           <span className="cs-tl-node" aria-hidden="true">
@@ -257,11 +363,23 @@ export function ExecutionTimeline({ execution, partials }: { execution: Executio
                 <h3 className="cs-tl-title">Verification gate</h3>
                 <p className="cs-tl-who">Evidence · success criteria · completeness · consistency</p>
               </div>
-              <StepStatusTag status={gate} />
+              {v ? (
+                <VerificationTag status={v.status} />
+              ) : gateStopped ? (
+                <Tag variant="gray" title="The execution ended while its result was being verified.">
+                  {UNFINISHED_STEP.stopped.label}
+                </Tag>
+              ) : gateNotRun ? (
+                <Tag variant="gray" title="The execution ended before its result was verified.">
+                  {UNFINISHED_STEP.not_run.label}
+                </Tag>
+              ) : (
+                <StepStatusTag status={gate === "RUNNING" ? "RUNNING" : "PENDING"} />
+              )}
             </div>
             {v && (
               <p className="cs-tl-sum">
-                Score {v.score}/100 — {v.summary}{" "}
+                {v.status === "UNVERIFIED" ? "The AI review could not run, so the result is not verified." : `Score ${v.score}/100 — ${v.summary}`}{" "}
                 <a href="#verification" className="cs-inline-link">
                   See the checks
                 </a>

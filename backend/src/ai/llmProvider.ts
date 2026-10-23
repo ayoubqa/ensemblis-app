@@ -23,17 +23,23 @@
 // limiter (MAX_CONCURRENT_LLM, one pool for the main model and one for the
 // fast model) so a burst of tasks queues up instead of tripping a free tier's
 // rate limits, and has a timeout (LLM_TIMEOUT_MS).
+//
+// Provider failures are thrown as readable messages that ai/errors.ts
+// classifies (config / quota / rate_limit / too_large / transient). Error
+// text never carries API keys (redacted) or the provider's base URL. Token
+// counts the provider did not report are estimates, and say so
+// (LLMResult.tokensEstimated, UsageEvent.estimated).
 
 import Anthropic from "@anthropic-ai/sdk";
 import { recordUsage } from "../lib/usage";
-import { log } from "../lib/log";
-import { mockAIForbidden } from "../config";
+import { log, redact } from "../lib/log";
+import { DEFAULT_OLLAMA_BASE_URL, DEFAULT_OPENAI_BASE_URL, mockAIForbidden, modelEndpoint, type ModelEndpoint } from "../config";
 import { mockLLM } from "./mockProvider";
 
 export type Provider = "ollama" | "openai" | "anthropic" | "mock";
 export type ModelTier = "main" | "fast";
 /** What a call is for — used for metering, logs and (in tests) the mock provider. Never sent to the model. */
-export type LLMPurpose = "plan" | "queries" | "step" | "verify" | "memory" | "suggest" | "other";
+export type LLMPurpose = "plan" | "queries" | "step" | "verify" | "verify_claims" | "memory" | "suggest" | "other";
 
 export interface LLMOptions {
   /** Called with each new piece of text as it streams in. Errors thrown by it are ignored. */
@@ -62,6 +68,12 @@ export interface LLMResult {
   tokensOut: number;
   /** True when the provider stopped at the output-token limit: the text is cut off. */
   truncated?: boolean;
+  /**
+   * True when tokensIn/tokensOut are a ≈4 chars/token estimate rather than the
+   * provider's own count: the provider sent no usage, or the reply came from
+   * the mock/test handler.
+   */
+  tokensEstimated: boolean;
 }
 
 export function currentProvider(): Provider {
@@ -297,7 +309,7 @@ function ollamaModel(tier: ModelTier): string {
 }
 
 async function runWithOllama(systemPrompt: string, userContent: string, opts: LLMOptions, sink: TextSink): Promise<LLMResult> {
-  const baseUrl = (process.env.OLLAMA_BASE_URL || "http://localhost:11434").replace(/\/+$/, "");
+  const baseUrl = (process.env.OLLAMA_BASE_URL || DEFAULT_OLLAMA_BASE_URL).replace(/\/+$/, "");
   const model = ollamaModel(opts.model ?? "main");
   const ms = timeoutMs("ollama", opts.timeoutMs);
 
@@ -334,12 +346,12 @@ async function runWithOllama(systemPrompt: string, userContent: string, opts: LL
 
   if (!res.ok) {
     const body = await res.text().catch(() => "");
-    throw new Error(`Ollama returned ${res.status}: ${body.slice(0, 300) || res.statusText}`);
+    throw new Error(`Ollama returned ${res.status}: ${redact(body.slice(0, 300)) || res.statusText}`);
   }
   if (!res.body) throw new Error("Ollama returned an empty response");
 
-  let tokensIn = 0;
-  let tokensOut = 0;
+  let tokensIn: number | null = null;
+  let tokensOut: number | null = null;
   let truncated = false;
   const parser = new NDJSONParser((line) => {
     let obj: {
@@ -355,7 +367,7 @@ async function runWithOllama(systemPrompt: string, userContent: string, opts: LL
     } catch {
       return; // ignore a malformed line
     }
-    if (obj.error) throw new Error(`Ollama error: ${String(obj.error).slice(0, 300)}`);
+    if (obj.error) throw new Error(`Ollama error: ${redact(String(obj.error)).slice(0, 300)}`);
     if (typeof obj.message?.content === "string") sink.add(obj.message.content);
     if (typeof obj.prompt_eval_count === "number") tokensIn = obj.prompt_eval_count;
     if (typeof obj.eval_count === "number") tokensOut = obj.eval_count;
@@ -371,20 +383,29 @@ async function runWithOllama(systemPrompt: string, userContent: string, opts: LL
   }
 
   if (!sink.text.trim()) throw new Error("Ollama returned an empty response");
-  return { text: sink.text, provider: "ollama", model, tokensIn, tokensOut, truncated };
+  return {
+    text: sink.text,
+    provider: "ollama",
+    model,
+    tokensIn: tokensIn ?? approxTokens(systemPrompt + userContent),
+    tokensOut: tokensOut ?? approxTokens(sink.text),
+    truncated,
+    tokensEstimated: tokensIn === null || tokensOut === null,
+  };
 }
 
 // ---------------------------------------------------------------------------
 // OpenAI-compatible (Groq by default)
 // ---------------------------------------------------------------------------
 
-const DEFAULT_OPENAI_BASE_URL = "https://api.groq.com/openai/v1";
 // Groq retired llama-3.3-70b-versatile on 2026-08-16; gpt-oss-120b is its recommended replacement.
 const DEFAULT_OPENAI_MODEL = "openai/gpt-oss-120b";
 const DEFAULT_GROQ_FAST_MODEL = "openai/gpt-oss-20b";
 const MAX_RETRIES = 3;
 const MAX_RETRY_WAIT_MS = 20_000;
-const RETRYABLE = new Set([429, 502, 503, 504]);
+// 500 is included: a single internal error at the provider is usually a blip,
+// and failing here sends the planner to its fallback plan and the verifier to "unavailable".
+const RETRYABLE = new Set([429, 500, 502, 503, 504]);
 
 /** Parses a Retry-After header (seconds or HTTP date) into ms, or null. */
 export function parseRetryAfter(value: string | null): number | null {
@@ -396,10 +417,59 @@ export function parseRetryAfter(value: string | null): number | null {
   return null;
 }
 
+/** "Please try again in 7m12.5s" (Groq / OpenAI rate-limit bodies) → ms, or null. */
+export function waitFromErrorBody(body: string): number | null {
+  const m = /try again in\s+(?:(\d+)h)?\s*(?:(\d+)m(?!s))?\s*(?:([\d.]+)s)?/i.exec(body);
+  if (!m || (!m[1] && !m[2] && !m[3])) return null;
+  const ms = (Number(m[1] || 0) * 3600 + Number(m[2] || 0) * 60 + Number(m[3] || 0)) * 1000;
+  return Number.isFinite(ms) ? Math.round(ms) : null;
+}
+
 function backoffMs(attempt: number, retryAfter: string | null): number {
   const hinted = parseRetryAfter(retryAfter);
   const base = hinted ?? 1000 * 2 ** attempt + Math.floor(Math.random() * 500); // 1s, 2s, 4s (+ jitter)
   return Math.min(base, MAX_RETRY_WAIT_MS);
+}
+
+function formatWait(ms: number): string {
+  const minutes = Math.max(1, Math.ceil(ms / 60_000));
+  return minutes >= 120 ? `~${Math.round(minutes / 60)} h` : `~${minutes} min`;
+}
+
+/** The readable message for an exhausted quota (classified "quota" by ai/errors.ts). */
+export function quotaExhaustedMessage(waitMs: number | null, envHint = "the AI provider account"): string {
+  const when = waitMs !== null && waitMs > 0 ? ` — retry after ${formatWait(waitMs)}` : "";
+  return `The AI provider's quota is exhausted for now${when}. (Owner: check the usage limits and credits of ${envHint}.)`;
+}
+
+/** The readable message for short-term throttling that outlasted the retries (classified "rate_limit"). */
+const RATE_LIMITED_MESSAGE = "AI rate limit reached: the AI provider is throttling requests right now. Please try again in a minute.";
+
+const TOO_LARGE_MESSAGE =
+  "This request is too large for the AI model's limits (provider request-size cap). Shorten the objective, context notes or documents, or use a model with a higher limit.";
+
+/** A 429 body that means "quota", not "slow down": exhausted credits or a per-day window. */
+const QUOTA_BODY_RE = /insufficient_quota|exceeded your current quota|credit balance|tokens per day|requests per day|\((?:TPD|RPD)\)/i;
+
+/** The provider's own error message from a JSON error body (or the raw text), redacted and short. */
+function providerDetail(body: string, max = 200): string {
+  let detail = body;
+  try {
+    const j = JSON.parse(body) as { error?: { message?: unknown } | string; message?: unknown; detail?: unknown };
+    const m = typeof j.error === "string" ? j.error : j.error?.message ?? j.message ?? j.detail;
+    if (typeof m === "string" && m.trim()) detail = m;
+  } catch {
+    /* not JSON */
+  }
+  detail = redact(detail.replace(/\s+/g, " ").trim());
+  return detail.length > max ? `${detail.slice(0, max - 1)}…` : detail;
+}
+
+/** A short, URL-free reason for a failed fetch (e.g. ECONNREFUSED, UND_ERR_SOCKET). */
+function networkReason(err: unknown): string {
+  const e = err as { code?: unknown; cause?: { code?: unknown; message?: unknown } } | null;
+  const code = typeof e?.cause?.code === "string" ? e.cause.code : typeof e?.code === "string" ? e.code : "";
+  return code || "network error";
 }
 
 function openaiBaseUrl(): string {
@@ -428,6 +498,39 @@ export function openaiModel(tier: ModelTier): string {
   return isGroq(openaiBaseUrl()) ? DEFAULT_GROQ_FAST_MODEL : main;
 }
 
+/** OpenAI-hosted reasoning models (o-series, gpt-5) reject `max_tokens` and any non-default temperature. */
+export function isOpenAIReasoningModel(baseUrl: string, model: string): boolean {
+  return hostOf(baseUrl) === "api.openai.com" && /^(o\d|gpt-5)/i.test(model);
+}
+
+/** The Chat Completions request body (exported for unit tests). */
+export function openaiRequestBody(a: {
+  baseUrl: string;
+  model: string;
+  system: string;
+  user: string;
+  maxTokens: number;
+  temperature?: number;
+  reasoningEffort?: string;
+}): Record<string, unknown> {
+  const reasoningModel = isOpenAIReasoningModel(a.baseUrl, a.model);
+  // Only api.openai.com is known to accept stream_options; other compatible
+  // providers may reject unknown fields (Groq reports usage in x_groq anyway).
+  const includeUsage = hostOf(a.baseUrl) === "api.openai.com";
+  return {
+    model: a.model,
+    messages: [
+      { role: "system", content: a.system },
+      { role: "user", content: a.user },
+    ],
+    ...(reasoningModel ? { max_completion_tokens: a.maxTokens } : { max_tokens: a.maxTokens, temperature: a.temperature ?? 0.5 }),
+    stream: true,
+    ...(includeUsage ? { stream_options: { include_usage: true } } : {}),
+    // "low" | "medium" | "high" — only sent when set, since non-reasoning models reject it.
+    ...(a.reasoningEffort ? { reasoning_effort: a.reasoningEffort } : {}),
+  };
+}
+
 interface OpenAIChunk {
   error?: { message?: unknown } | string;
   choices?: { delta?: { content?: unknown }; message?: { content?: unknown }; finish_reason?: unknown }[];
@@ -446,7 +549,7 @@ function applyOpenAIChunk(
 ): void {
   if (obj.error) {
     const m = typeof obj.error === "string" ? obj.error : String(obj.error.message ?? "unknown error");
-    throw new FatalLLMError(`The AI provider reported an error mid-response: ${m.slice(0, 300)}`);
+    throw new FatalLLMError(`The AI provider reported an error mid-response: ${redact(m).slice(0, 300)}`);
   }
   const choice = obj.choices?.[0];
   // Only `content` is the answer. Reasoning models also stream `reasoning` /
@@ -475,13 +578,14 @@ async function runWithOpenAI(systemPrompt: string, userContent: string, opts: LL
   const model = openaiModel(opts.model ?? "main");
   // Reasoning models (gpt-oss, o-series) spend part of this budget "thinking" before answering.
   const maxTokens = opts.maxTokens || Number(process.env.OPENAI_MAX_TOKENS) || 8192;
-  // "low" | "medium" | "high" — only sent when set, since non-reasoning models reject it.
   const reasoningEffort = process.env.OPENAI_REASONING_EFFORT?.trim() || "";
-  // Only api.openai.com is known to accept stream_options; other compatible
-  // providers may reject unknown fields (Groq reports usage in x_groq anyway).
-  const includeUsage = hostOf(baseUrl) === "api.openai.com";
+  const requestBody = JSON.stringify(
+    openaiRequestBody({ baseUrl, model, system: systemPrompt, user: userContent, maxTokens, temperature: opts.temperature, reasoningEffort })
+  );
   const ms = timeoutMs("openai", opts.timeoutMs);
   const deadline = Date.now() + ms;
+  const retryLog = (attempt: number, reason: string, wait: number, error?: string) =>
+    log.warn("llm.retry", { provider: "openai", model, purpose: opts.purpose, executionId: opts.executionId ?? undefined, reason, error, retry: attempt + 1, of: MAX_RETRIES, waitMs: wait });
 
   for (let attempt = 0; ; attempt++) {
     const remaining = deadline - Date.now();
@@ -493,22 +597,22 @@ async function runWithOpenAI(systemPrompt: string, userContent: string, opts: LL
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}`, Accept: "text/event-stream" },
         signal: AbortSignal.timeout(remaining),
-        body: JSON.stringify({
-          model,
-          messages: [
-            { role: "system", content: systemPrompt },
-            { role: "user", content: userContent },
-          ],
-          max_tokens: maxTokens,
-          temperature: opts.temperature ?? 0.5,
-          stream: true,
-          ...(includeUsage ? { stream_options: { include_usage: true } } : {}),
-          ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
-        }),
+        body: requestBody,
       });
     } catch (err) {
       if (isAbort(err)) throw timeoutError(ms);
-      throw new Error(`Could not reach the AI provider at ${baseUrl}: ${errMsg(err)}`);
+      // No response yet (connection refused/reset, DNS blip): nothing has been
+      // emitted, so a retry within the same deadline can't duplicate output.
+      if (attempt < MAX_RETRIES) {
+        const wait = backoffMs(attempt, null);
+        if (Date.now() + wait < deadline) {
+          retryLog(attempt, "network", wait, networkReason(err));
+          await sleep(wait);
+          continue;
+        }
+      }
+      // Never echo OPENAI_BASE_URL in text users can see.
+      throw new Error(`Could not reach the AI provider (${networkReason(err)}). Please try again.`);
     }
 
     if (res.ok) {
@@ -559,12 +663,12 @@ async function runWithOpenAI(systemPrompt: string, userContent: string, opts: LL
         if (!sink.emitted && attempt < MAX_RETRIES) {
           const wait = backoffMs(attempt, null);
           if (Date.now() + wait < deadline) {
-            log.warn("llm.retry", { provider: "openai", model, purpose: opts.purpose, executionId: opts.executionId ?? undefined, reason: "stream_interrupted", error: errMsg(err), retry: attempt + 1, of: MAX_RETRIES, waitMs: wait });
+            retryLog(attempt, "stream_interrupted", wait, errMsg(err));
             await sleep(wait);
             continue;
           }
         }
-        throw new Error(`The connection to the AI provider was interrupted mid-response (${errMsg(err)}). Please try again.`);
+        throw new Error(`The connection to the AI provider was interrupted mid-response (${redact(errMsg(err)).slice(0, 120)}). Please try again.`);
       }
 
       if (!sink.text.trim()) {
@@ -582,19 +686,23 @@ async function runWithOpenAI(systemPrompt: string, userContent: string, opts: LL
         tokensIn: state.usage?.in ?? approxTokens(systemPrompt + userContent),
         tokensOut: state.usage?.out ?? approxTokens(sink.text),
         truncated: state.finish === "length",
+        tokensEstimated: state.usage === null,
       };
     }
 
-    const body = (await res.text().catch(() => "")).slice(0, 300);
+    const body = (await res.text().catch(() => "")).slice(0, 2000);
+    const retryAfter = res.headers.get("retry-after");
+    const hintedWait = parseRetryAfter(retryAfter);
 
-    // A 429 whose Retry-After is longer than we'd wait (a per-minute/day quota window) fails now
-    // instead of burning the remaining retries on requests the provider will reject.
-    const hintedWait = parseRetryAfter(res.headers.get("retry-after"));
-    const longQuotaWait = res.status === 429 && hintedWait !== null && hintedWait > MAX_RETRY_WAIT_MS;
-    if (RETRYABLE.has(res.status) && attempt < MAX_RETRIES && !sink.emitted && !longQuotaWait) {
-      const wait = backoffMs(attempt, res.headers.get("retry-after"));
+    // A 429 that means "quota" — exhausted credits, a per-day window, or a Retry-After longer than
+    // we'd wait — fails now instead of burning the remaining retries on requests the provider will reject.
+    if (res.status === 429 && ((hintedWait !== null && hintedWait > MAX_RETRY_WAIT_MS) || QUOTA_BODY_RE.test(body))) {
+      throw new Error(quotaExhaustedMessage(hintedWait ?? waitFromErrorBody(body), "the account behind OPENAI_API_KEY"));
+    }
+    if (RETRYABLE.has(res.status) && attempt < MAX_RETRIES && !sink.emitted) {
+      const wait = backoffMs(attempt, retryAfter);
       if (Date.now() + wait < deadline) {
-        log.warn("llm.retry", { provider: "openai", model, purpose: opts.purpose, executionId: opts.executionId ?? undefined, reason: `http_${res.status}`, retry: attempt + 1, of: MAX_RETRIES, waitMs: wait });
+        retryLog(attempt, `http_${res.status}`, wait);
         await sleep(wait);
         continue;
       }
@@ -606,19 +714,16 @@ async function runWithOpenAI(systemPrompt: string, userContent: string, opts: LL
           "(Owner: check OPENAI_API_KEY in the backend's environment variables.)"
       );
     }
-    if (res.status === 429) {
-      throw new Error("AI rate limit reached: the free AI quota is used up for now — try again later.");
-    }
-    if (res.status === 413) {
-      throw new Error("This request is too large for the AI model's limits (provider request-size cap). Shorten the objective, context notes or documents, or use a model with a higher limit.");
-    }
+    if (res.status === 429) throw new Error(RATE_LIMITED_MESSAGE);
+    if (res.status === 413) throw new Error(TOO_LARGE_MESSAGE);
     if (res.status === 404) {
-      throw new Error(`The AI provider doesn't recognise the model "${model}" (check OPENAI_MODEL / OPENAI_FAST_MODEL). ${body}`.trim());
+      const detail = providerDetail(body);
+      throw new Error(`The AI provider doesn't recognise the model "${model}" (check OPENAI_MODEL / OPENAI_FAST_MODEL).${detail ? ` ${detail}` : ""}`);
     }
     if (res.status >= 500) {
       throw new Error(`The AI provider is having problems right now (HTTP ${res.status}). Please try again later.`);
     }
-    throw new Error(`The AI provider returned HTTP ${res.status}: ${body || res.statusText}`);
+    throw new Error(`The AI provider returned HTTP ${res.status}: ${providerDetail(body) || res.statusText}`);
   }
 }
 
@@ -631,6 +736,46 @@ function claudeModel(tier: ModelTier): string {
   // once quality matters more than cost.
   const main = process.env.CLAUDE_MODEL?.trim() || "claude-haiku-4-5-20251001";
   return tier === "fast" ? process.env.CLAUDE_FAST_MODEL?.trim() || main : main;
+}
+
+/**
+ * Turns an Anthropic SDK error into the same readable, classifiable messages
+ * the OpenAI-compatible path throws (exported for unit tests). SDK messages
+ * look like `401 {"type":"error","error":{"type":"authentication_error",…}}`.
+ */
+export function mapAnthropicError(err: unknown, model: string, ms = timeoutMs("anthropic")): Error {
+  if (err instanceof Anthropic.APIConnectionTimeoutError) return timeoutError(ms);
+  if (err instanceof Anthropic.APIConnectionError) return new Error("Could not reach the AI provider (connection error). Please try again.");
+  const status = (err as { status?: unknown } | null)?.status;
+  if (!(err instanceof Anthropic.APIError) && typeof status !== "number") return err instanceof Error ? err : new Error(String(err));
+  const apiErr = err as { status?: number; message?: string; error?: unknown; headers?: Record<string, string> | null };
+  const inner = (apiErr.error as { error?: { type?: unknown; message?: unknown } } | undefined)?.error;
+  const detailRaw = typeof inner?.message === "string" ? inner.message : apiErr.message ?? "";
+  const type = typeof inner?.type === "string" ? inner.type : "";
+  const detail = redact(detailRaw.replace(/\s+/g, " ").trim()).slice(0, 200);
+  const code = typeof status === "number" ? status : 0;
+  if (code === 401 || code === 403 || type === "authentication_error" || type === "permission_error") {
+    return new Error(
+      "The AI provider rejected the server's API key (invalid or revoked, or not allowed to use this model). " +
+        "(Owner: check ANTHROPIC_API_KEY in the backend's environment variables.)"
+    );
+  }
+  if (code === 404 || type === "not_found_error") {
+    return new Error(`The AI provider doesn't recognise the model "${model}" (check CLAUDE_MODEL / CLAUDE_FAST_MODEL).`);
+  }
+  if (code === 413 || type === "request_too_large" || /prompt is too long|too large/i.test(detailRaw)) return new Error(TOO_LARGE_MESSAGE);
+  if (/credit balance|quota|spend limit|billing/i.test(detailRaw) && (code === 400 || code === 402 || code === 429)) {
+    return new Error(quotaExhaustedMessage(null, "the account behind ANTHROPIC_API_KEY"));
+  }
+  if (code === 429 || type === "rate_limit_error") {
+    const wait = parseRetryAfter(apiErr.headers?.["retry-after"] ?? null);
+    if (wait !== null && wait > MAX_RETRY_WAIT_MS) return new Error(quotaExhaustedMessage(wait, "the account behind ANTHROPIC_API_KEY"));
+    return new Error(RATE_LIMITED_MESSAGE);
+  }
+  if (code === 529 || code >= 500 || type === "overloaded_error" || type === "api_error") {
+    return new Error(`The AI provider is having problems right now (HTTP ${code || "error"}). Please try again later.`);
+  }
+  return new Error(`The AI provider returned HTTP ${code || "error"}: ${detail || "unknown error"}`);
 }
 
 async function runWithAnthropic(systemPrompt: string, userContent: string, opts: LLMOptions, sink: TextSink): Promise<LLMResult> {
@@ -666,17 +811,20 @@ async function runWithAnthropic(systemPrompt: string, userContent: string, opts:
       .map((block) => block.text)
       .join("\n\n");
     if (!text.trim()) throw new Error("The AI model returned an empty response");
+    const usage = message.usage as { input_tokens?: unknown; output_tokens?: unknown } | undefined;
+    const reported = typeof usage?.input_tokens === "number" && typeof usage?.output_tokens === "number";
     return {
       text,
       provider: "anthropic",
       model,
-      tokensIn: message.usage?.input_tokens ?? approxTokens(systemPrompt + userContent),
-      tokensOut: message.usage?.output_tokens ?? approxTokens(text),
+      tokensIn: reported ? (usage!.input_tokens as number) : approxTokens(systemPrompt + userContent),
+      tokensOut: reported ? (usage!.output_tokens as number) : approxTokens(text),
       truncated: message.stop_reason === "max_tokens",
+      tokensEstimated: !reported,
     };
   } catch (err) {
-    if (timedOut || isAbort(err)) throw timeoutError(ms);
-    throw err;
+    if (timedOut || isAbort(err) || err instanceof Anthropic.APIUserAbortError) throw timeoutError(ms);
+    throw mapAnthropicError(err, model, ms);
   } finally {
     clearTimeout(timer);
   }
@@ -714,7 +862,8 @@ async function runWithHandler(
     sink.add(text.slice(i, i + size));
     if (delay) await new Promise((r) => setTimeout(r, delay / 4));
   }
-  return { text, provider, model: "mock", tokensIn: approxTokens(systemPrompt + userContent), tokensOut: approxTokens(text), truncated };
+  // The mock and test handlers report no usage: their token counts are always estimates.
+  return { text, provider, model: "mock", tokensIn: approxTokens(systemPrompt + userContent), tokensOut: approxTokens(text), truncated, tokensEstimated: true };
 }
 
 /**
@@ -739,7 +888,7 @@ export async function runLLM(systemPrompt: string, userContent: string, opts: LL
               ? await runWithOpenAI(systemPrompt, userContent, opts, sink)
               : await runWithOllama(systemPrompt, userContent, opts, sink);
       const latencyMs = Date.now() - started;
-      log.info("llm.call", { ...meta, model: result.model, latencyMs, tokensIn: result.tokensIn, tokensOut: result.tokensOut });
+      log.info("llm.call", { ...meta, model: result.model, latencyMs, tokensIn: result.tokensIn, tokensOut: result.tokensOut, tokensEstimated: result.tokensEstimated });
       void recordUsage({
         kind: "llm",
         provider,
@@ -750,11 +899,15 @@ export async function runLLM(systemPrompt: string, userContent: string, opts: LL
         taskId: opts.taskId ?? null,
         executionId: opts.executionId ?? null,
         latencyMs,
+        purpose: meta.purpose,
+        estimated: result.tokensEstimated,
       }).catch(() => undefined);
       return { ...result, latencyMs };
     } catch (err) {
       const latencyMs = Date.now() - started;
-      log.warn("llm.call_failed", { ...meta, model: modelFor(provider, tier), latencyMs, error: err instanceof Error ? err.message : String(err) });
+      const message = err instanceof Error ? err.message : String(err);
+      log.warn("llm.call_failed", { ...meta, model: modelFor(provider, tier), latencyMs, error: message });
+      // A failed call's token counts are always estimates (the provider never reported usage).
       void recordUsage({
         kind: "llm",
         provider,
@@ -765,10 +918,47 @@ export async function runLLM(systemPrompt: string, userContent: string, opts: LL
         taskId: opts.taskId ?? null,
         executionId: opts.executionId ?? null,
         latencyMs,
+        purpose: meta.purpose,
+        estimated: true,
+        error: message,
       }).catch(() => undefined);
       throw err;
     }
   });
+}
+
+/**
+ * Why model calls cannot work with the current configuration, or null when
+ * they can be attempted: an unknown AI_PROVIDER, the mock where it is
+ * forbidden, or a missing API key. (Whether a present key is valid is only
+ * known after a call.) The messages are the ones runLLM would throw, so
+ * ai/errors.ts classifies them as "config". No secrets are included.
+ */
+export function aiConfigProblem(): string | null {
+  let provider: Provider;
+  try {
+    provider = currentProvider();
+  } catch (err) {
+    return err instanceof Error ? err.message : String(err);
+  }
+  if (provider === "openai" && !process.env.OPENAI_API_KEY?.trim()) {
+    return "The AI provider isn't configured: OPENAI_API_KEY is missing on the server.";
+  }
+  if (provider === "anthropic" && !process.env.ANTHROPIC_API_KEY?.trim()) {
+    return "The AI provider isn't configured: ANTHROPIC_API_KEY is missing on the server.";
+  }
+  return null;
+}
+
+/** The provider and model a call of this tier would use right now (as runLLM records them). */
+export function describeModel(tier: ModelTier = "main"): { provider: string; model: string } {
+  if (testHandler) return { provider: "mock", model: "mock" };
+  try {
+    const provider = currentProvider();
+    return { provider, model: modelFor(provider, tier) };
+  } catch {
+    return { provider: "unconfigured", model: "none" };
+  }
 }
 
 const MODEL_LABELS: Record<string, string> = {
@@ -778,23 +968,42 @@ const MODEL_LABELS: Record<string, string> = {
   "openai/gpt-oss-20b": "GPT-OSS 20B",
 };
 
-/** Human-readable provider name for GET /api/config, e.g. "Groq (Llama 3.3 70B)". */
-export function aiProviderLabel(): string {
+function modelLabel(provider: Provider): string {
   if (process.env.AI_PROVIDER_LABEL?.trim()) return process.env.AI_PROVIDER_LABEL.trim();
+  if (provider === "anthropic") return "Claude";
+  if (provider === "ollama") return "Ollama";
+  if (provider === "mock") return "Mock AI (development/testing only)";
+  const model = process.env.OPENAI_MODEL || DEFAULT_OPENAI_MODEL;
+  const label = MODEL_LABELS[model] ?? model;
+  const base = (process.env.OPENAI_BASE_URL || DEFAULT_OPENAI_BASE_URL).toLowerCase();
+  if (base.includes("groq.com")) return `Groq (${label})`;
+  if (base.includes("api.openai.com")) return `OpenAI (${label})`;
+  if (base.includes("openrouter.ai")) return `OpenRouter (${label})`;
+  return label;
+}
+
+/**
+ * Human-readable provider name for GET /api/config, e.g. "Groq (GPT-OSS 120B)". A test stub or a
+ * local endpoint says so (config.ts modelEndpoint), even with AI_PROVIDER_LABEL set.
+ */
+export function aiProviderLabel(): string {
   let provider: Provider;
   try {
     provider = currentProvider();
   } catch {
     return "Unconfigured";
   }
-  if (provider === "anthropic") return "Claude";
-  if (provider === "ollama") return "Local model (Ollama)";
-  if (provider === "mock") return "Mock AI (development/testing only)";
-  const model = process.env.OPENAI_MODEL || DEFAULT_OPENAI_MODEL;
-  const modelLabel = MODEL_LABELS[model] ?? model;
-  const base = (process.env.OPENAI_BASE_URL || DEFAULT_OPENAI_BASE_URL).toLowerCase();
-  if (base.includes("groq.com")) return `Groq (${modelLabel})`;
-  if (base.includes("api.openai.com")) return `OpenAI (${modelLabel})`;
-  if (base.includes("openrouter.ai")) return `OpenRouter (${modelLabel})`;
-  return modelLabel;
+  const label = modelLabel(provider);
+  const endpoint = provider === "mock" ? null : modelEndpoint();
+  if (endpoint?.kind === "stub") return `Test stub endpoint (E2E_STUB=1) — ${label}, not a real model`;
+  if (endpoint?.kind === "local") return `Local model endpoint (${endpoint.host}) — ${label}`;
+  return label;
+}
+
+/**
+ * Where this server's model calls go right now (config.ts modelEndpoint), or null when they are
+ * the mock's (AI_PROVIDER=mock or a test handler). Stamped on each plan (Plan.runtime).
+ */
+export function currentModelEndpoint(): ModelEndpoint | null {
+  return describeModel("main").provider === "mock" ? null : modelEndpoint()?.kind ?? null;
 }

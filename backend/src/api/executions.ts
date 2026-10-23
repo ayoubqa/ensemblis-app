@@ -84,19 +84,23 @@ const outcomeSchema = z.object({
   note: z.string().trim().max(1000).optional(),
 });
 
-// A person confirms (or corrects) the measured outcome.
+// A person confirms (or corrects) the measured outcome. The AI-measured value
+// stays in outcomeStatus; the person's answer is confirmedOutcomeStatus.
 router.post(
   "/:id/outcome",
   ah<OrgRequest>(async (req, res) => {
     const body = parse(outcomeSchema, req.body);
     const ex = await own(req, req.params.id);
     if (ex.status !== "COMPLETED") throw new HttpError(409, "You can confirm the outcome once the execution has completed.");
-    await prisma.$transaction(async (tx) => {
-      await tx.execution.update({
+    const measured = await prisma.$transaction(async (tx) => {
+      const current = await tx.execution.update({
         where: { id: ex.id },
-        data: { outcomeStatus: body.status, outcomeConfirmedById: req.userId!, outcomeConfirmedAt: new Date() },
+        data: { confirmedOutcomeStatus: body.status, outcomeConfirmedById: req.userId!, outcomeConfirmedAt: new Date() },
+        select: { outcomeStatus: true },
       });
-      await tx.objective.update({ where: { id: ex.objectiveId }, data: { outcomeStatus: body.status } });
+      // The objective mirrors its latest attempt: confirmed ?? measured (confirmed here).
+      const latest = await tx.execution.findFirst({ where: { objectiveId: ex.objectiveId }, orderBy: { attempt: "desc" }, select: { id: true } });
+      if (latest?.id === ex.id) await tx.objective.update({ where: { id: ex.objectiveId }, data: { outcomeStatus: body.status } });
       await tx.valueRecord.create({
         data: {
           orgId: ex.orgId,
@@ -108,6 +112,7 @@ router.post(
           note: `Confirmed by a person${body.note ? `: ${body.note}` : ""}`.slice(0, 500),
         },
       });
+      return current.outcomeStatus;
     });
     await emitNow({
       executionId: ex.id,
@@ -115,7 +120,7 @@ router.post(
       type: "OUTCOME_MEASURED",
       actor: "user",
       message: `Outcome confirmed by a person: ${body.status.replace(/_/g, " ").toLowerCase()}`,
-      data: { confirmed: true, status: body.status },
+      data: { confirmed: true, status: body.status, measured: measured ?? null },
     });
     const full = (await prisma.execution.findUniqueOrThrow({ where: { id: ex.id }, include: FULL_EXECUTION_INCLUDE })) as FullExecution;
     res.json({ execution: toPublicExecution(full) });

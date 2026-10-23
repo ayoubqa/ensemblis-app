@@ -11,23 +11,39 @@
 //     registry entry and are enforced by org/policy.ts.
 // When the model is unavailable or its output is unusable, a deterministic
 // playbook plan is used instead (fallbackPlan) and labelled as such.
+//
+// A plan can also be BLOCKED (plan.blocked): the AI provider isn't configured
+// or its quota is exhausted, or a research brief was asked for while web
+// search is off. Then nothing should run (or be charged) until an operator
+// fixes it and the objective is re-planned — a playbook plan is no
+// substitute, because every step would hit the same problem.
+//
+// A research brief (objective kind "research_brief") always has at least one
+// step that searches the web (normalizePlan / fallbackPlan guarantee it).
 
 import { z } from "zod";
 import { runStructured } from "../ai/structured";
+import { classifyProviderError } from "../ai/errors";
+import { aiConfigProblem, currentModelEndpoint, describeModel } from "../ai/llmProvider";
 import { bool, listOf, looseEnum, num, strList, text } from "../ai/lenient";
 import {
+  BUSINESS_RESEARCH_CAPABILITY,
   CAPABILITIES,
   EXECUTIVES,
   FRAMING_CAPABILITY,
   SYNTHESIS_CAPABILITY,
   VERIFICATION_COST_CENTS,
   getCapability,
+  searchesWeb,
   type Capability,
   type ExecutiveKey,
 } from "../org/registry";
 import { terms } from "../context/retrieval";
-import { clip } from "../research/text";
-import { block, TRUST_RULES } from "./prompts";
+import { redact } from "../lib/log";
+import { currentSearchEndpoint, searchEnabled, type SearchEndpoint } from "../research/search";
+import type { ModelEndpoint } from "../config";
+import { clip, collapse } from "../research/text";
+import { block, constraintsBlock, isResearchBrief, TRUST_RULES } from "./prompts";
 
 export const PLANNER_VERSION = "chief-of-staff-planner/1.0.0";
 export const MAX_STEPS = 7;
@@ -99,6 +115,15 @@ export interface PlannedCriterion {
   unit: string | null;
 }
 
+export type PlanBlockedKind = "config" | "quota" | "search_unavailable";
+
+/** Why a plan cannot run yet. Nothing runs or is charged until it is re-planned. */
+export interface PlanBlocked {
+  kind: PlanBlockedKind;
+  /** A readable, redacted reason (shown to the person and the operator). */
+  message: string;
+}
+
 export interface Plan {
   title: string;
   objective: string;
@@ -113,6 +138,24 @@ export interface Plan {
   version: string;
   /** Adjustments made while normalising the model's plan (shown for transparency). */
   notes: string[];
+  /** Set when the plan cannot run: see PlanBlocked. Absent on a runnable plan. */
+  blocked?: PlanBlocked;
+  /** Where this execution's model and web search calls go, stamped at (re-)planning. Absent on plans from before it. */
+  runtime?: PlanRuntime;
+}
+
+/**
+ * The endpoints an execution runs against, stored with it so a later configuration change never
+ * relabels it (serialize.ts endpointsOf). null: the mock model / web search off.
+ */
+export interface PlanRuntime {
+  modelEndpoint: ModelEndpoint | null;
+  searchEndpoint: SearchEndpoint | null;
+  /**
+   * The company website ("" for none) whose domain the result may link to, so a later change in
+   * Company Context never changes its links (serialize.ts linkDomainsOf). Absent on plans from before it.
+   */
+  website?: string;
 }
 
 export interface PlannerInput {
@@ -128,7 +171,15 @@ export interface PlannerInput {
   executionId?: string;
   /** True once a person answered (or waived) the Chief of Staff's questions: never block again. */
   questionsSettled: boolean;
+  /** Objective.kind: "research_brief" or null (the default decision memo). */
+  kind?: string | null;
+  /** Objective.constraints: scope, exclusions, sources or format the plan must respect. */
+  constraints?: string | null;
+  /** CompanyContext.website when planning (stamped as Plan.runtime.website). */
+  website?: string;
 }
+
+type PlanShape = Pick<PlannerInput, "title" | "statement" | "criteria"> & Partial<Pick<PlannerInput, "kind">>;
 
 // ---------------------------------------------------------------- normalisation
 
@@ -177,13 +228,23 @@ export function resolveCapability(raw: string): Capability | undefined {
   return undefined;
 }
 
+interface PlanEntry {
+  step: PlannedStep;
+  /** The model's dependency ids (raw). */
+  deps: string[];
+  /** Stable placeholder the raw ids map to, resolved to s1..sN once the order is final. */
+  ph: string;
+}
+
 /** Validates a raw (model) plan against the registry and the plan invariants. */
-export function normalizePlan(raw: RawPlan, input: Pick<PlannerInput, "title" | "statement" | "criteria">): Plan {
+export function normalizePlan(raw: RawPlan, input: PlanShape): Plan {
   const notes: string[] = [];
   const idMap = new Map<string, string>();
-  const work: { step: PlannedStep; deps: string[] }[] = [];
-  let framing: { step: PlannedStep; deps: string[] } | null = null;
-  let synthesis: { step: PlannedStep; deps: string[] } | null = null;
+  const work: PlanEntry[] = [];
+  let framing: PlanEntry | null = null;
+  let synthesis: PlanEntry | null = null;
+  let seq = 0;
+  const newPh = () => `__work${seq++}`;
 
   for (const s of raw.steps) {
     const cap = resolveCapability(s.capability);
@@ -202,15 +263,14 @@ export function normalizePlan(raw: RawPlan, input: Pick<PlannerInput, "title" | 
       outputs: s.outputs.length ? s.outputs : [...cap.deliverable],
       verification: s.verification.length ? s.verification : [...cap.verificationFocus],
     });
-    const entry = { step, deps: s.dependsOn, rawId: s.id };
     if (cap.key === FRAMING_CAPABILITY) {
-      if (!framing) framing = entry;
+      if (!framing) framing = { step, deps: s.dependsOn, ph: "__framing" };
       idMap.set(s.id, "__framing");
       continue;
     }
     if (cap.key === SYNTHESIS_CAPABILITY) {
       if (synthesis) notes.push("Only one synthesis step is kept (the last one).");
-      synthesis = entry;
+      synthesis = { step, deps: s.dependsOn, ph: "__synthesis" };
       idMap.set(s.id, "__synthesis");
       continue;
     }
@@ -218,7 +278,8 @@ export function normalizePlan(raw: RawPlan, input: Pick<PlannerInput, "title" | 
       notes.push(`Dropped step "${s.title}": plans are capped at ${MAX_STEPS} steps.`);
       continue;
     }
-    idMap.set(s.id, `__work${work.length}`);
+    const entry: PlanEntry = { step, deps: s.dependsOn, ph: newPh() };
+    idMap.set(s.id, entry.ph);
     work.push(entry);
   }
 
@@ -226,13 +287,28 @@ export function normalizePlan(raw: RawPlan, input: Pick<PlannerInput, "title" | 
     const fb = pickWorkCapabilities(`${input.title} ${input.statement}`, 1)[0];
     const cap = getCapability(fb)!;
     notes.push(`The plan had no research or analysis step; added ${cap.name}.`);
-    work.push({ step: stepFor(fb, { title: cap.name, purpose: `${cap.description} Focus on: ${clip(input.title, 160)}.` }), deps: [] });
+    work.push({ step: stepFor(fb, { title: cap.name, purpose: `${cap.description} Focus on: ${clip(input.title, 160)}.` }), deps: [], ph: newPh() });
+  }
+  // A research brief must be evidence-backed: at least one step searches the web.
+  if (isResearchBrief(input.kind) && !work.some((e) => searchesWeb(getCapability(e.step.capability)))) {
+    if (work.length >= MAX_WORK_STEPS) {
+      const dropped = work.pop()!;
+      notes.push(`Dropped step "${dropped.step.title}" to make room for web research: plans are capped at ${MAX_STEPS} steps.`);
+    }
+    const cap = getCapability(BUSINESS_RESEARCH_CAPABILITY)!;
+    work.unshift({
+      step: stepFor(cap.key, { title: "Research the question from external sources", purpose: `${cap.description} Focus on: ${clip(input.title, 160)}.` }),
+      deps: [],
+      ph: newPh(),
+    });
+    notes.push(`A research brief needs web research: added ${cap.name} after the framing.`);
   }
   if (!framing) {
     notes.push("Added Objective Planning as the first step.");
     framing = {
       step: stepFor(FRAMING_CAPABILITY, { title: "Frame the objective with company context", purpose: "Restate the objective and extract the company context that matters for it." }),
       deps: [],
+      ph: "__framing",
     };
   }
   if (!synthesis) {
@@ -240,6 +316,7 @@ export function normalizePlan(raw: RawPlan, input: Pick<PlannerInput, "title" | 
     synthesis = {
       step: stepFor(SYNTHESIS_CAPABILITY, { title: "Synthesise the result", purpose: "Integrate the team's work into one result that answers the objective and each success criterion." }),
       deps: [],
+      ph: "__synthesis",
     };
   }
 
@@ -248,7 +325,7 @@ export function normalizePlan(raw: RawPlan, input: Pick<PlannerInput, "title" | 
   const placeholderToKey = new Map<string, string>();
   ordered.forEach((e, i) => {
     e.step.key = `s${i + 1}`;
-    placeholderToKey.set(i === 0 ? "__framing" : i === ordered.length - 1 ? "__synthesis" : `__work${i - 1}`, e.step.key);
+    placeholderToKey.set(e.ph, e.step.key);
   });
   ordered.forEach((e, i) => {
     if (i === 0) {
@@ -298,13 +375,18 @@ export function normalizePlan(raw: RawPlan, input: Pick<PlannerInput, "title" | 
 
 // ---------------------------------------------------------------- deterministic fallback
 
-/** Up to `n` work capabilities whose keywords best match the text (never framing/synthesis). */
-export function pickWorkCapabilities(text: string, n: number): string[] {
+/** Work capabilities whose keywords match the text, best first (never framing/synthesis). */
+function scoreCapabilities(text: string): { key: string; kind: Capability["kind"]; score: number }[] {
   const t = ` ${terms(text).join(" ")} `;
-  const scored = CAPABILITIES.filter((c) => c.keywords.length)
+  return CAPABILITIES.filter((c) => c.keywords.length)
     .map((c) => ({ key: c.key, kind: c.kind, score: c.keywords.reduce((s, k) => s + (t.includes(` ${k} `) ? 2 : t.includes(k) ? 1 : 0), 0) }))
     .filter((x) => x.score > 0)
     .sort((a, b) => b.score - a.score);
+}
+
+/** Up to `n` work capabilities whose keywords best match the text (never framing/synthesis). Defaults to Business Research. */
+export function pickWorkCapabilities(text: string, n: number): string[] {
+  const scored = scoreCapabilities(text);
   const picked: string[] = [];
   // Prefer one research capability first (evidence), then analysis.
   const research = scored.find((x) => x.kind === "research");
@@ -313,8 +395,14 @@ export function pickWorkCapabilities(text: string, n: number): string[] {
     if (picked.length >= n) break;
     if (!picked.includes(x.key)) picked.push(x.key);
   }
-  if (!picked.length) picked.push("operational_research");
+  if (!picked.length) picked.push(BUSINESS_RESEARCH_CAPABILITY);
   return picked.slice(0, n);
+}
+
+/** A research brief's work steps: Business Research, plus the best-matching research specialist when that is a different one. */
+export function briefWorkCapabilities(text: string): string[] {
+  const best = scoreCapabilities(text).find((x) => x.kind === "research");
+  return best && best.key !== BUSINESS_RESEARCH_CAPABILITY ? [BUSINESS_RESEARCH_CAPABILITY, best.key] : [BUSINESS_RESEARCH_CAPABILITY];
 }
 
 export const DEFAULT_CRITERIA: PlannedCriterion[] = [
@@ -323,8 +411,9 @@ export const DEFAULT_CRITERIA: PlannedCriterion[] = [
   { description: "Assumptions, risks and next steps are stated", kind: "qualitative", targetValue: null, unit: null },
 ];
 
-export function fallbackPlan(input: Pick<PlannerInput, "title" | "statement" | "criteria">, reason: string): Plan {
-  const work = pickWorkCapabilities(`${input.title} ${input.statement}`, 2);
+export function fallbackPlan(input: PlanShape, reason: string): Plan {
+  const text = `${input.title} ${input.statement}`;
+  const work = isResearchBrief(input.kind) ? briefWorkCapabilities(text) : pickWorkCapabilities(text, 2);
   const steps: PlannedStep[] = [
     stepFor(FRAMING_CAPABILITY, { title: "Frame the objective with company context", purpose: "Restate the objective and extract the company context that matters for it." }),
     ...work.map((k) => {
@@ -375,13 +464,16 @@ export function contextGapQuestion(input: Pick<PlannerInput, "statement" | "cont
 
 // ---------------------------------------------------------------- the planner
 
-function plannerPrompt(input: PlannerInput): { system: string; user: string } {
+/** The planner's prompt (exported for tests). */
+export function plannerPrompt(input: PlannerInput): { system: string; user: string } {
   const exec = EXECUTIVES.map((e) => {
     const caps = CAPABILITIES.filter((c) => c.executive === e.key)
-      .map((c) => `  - ${c.key} (${c.kind}): ${c.name} — ${c.description}`)
+      .map((c) => `  - ${c.key} (${c.kind}${searchesWeb(c) ? ", searches the web" : ""}): ${c.name} — ${c.description}`)
       .join("\n");
     return `${e.key} — ${e.title}: ${e.mandate}\n${caps}`;
   }).join("\n");
+  const brief = isResearchBrief(input.kind);
+  const constraints = constraintsBlock(input.constraints);
 
   const system = [
     "You are the Chief of Staff of an AI organization that executes business objectives. You turn an objective into a short, executable plan and assign each step to the executive who owns the capability.",
@@ -395,13 +487,20 @@ function plannerPrompt(input: PlannerInput): { system: string; user: string } {
     "- If the user gave success criteria, do not replace them (return successCriteria: []). Otherwise propose 2–4 measurable criteria; use kind \"quantitative\" with targetValue/unit when the objective implies a number (e.g. \"three markets\" → 3, \"markets\").",
     "- missingInformation: at most 3 items, only information that is absent from the objective AND the company context and would materially change the result. Mark blocking=true only if the result would be meaningless without it.",
     "- estimatedManualHours: honest estimate of how long a competent analyst would need.",
+    ...(constraints ? ["- Respect every item in <constraints> (scope, exclusions, sources, format) in the steps you plan and in their purposes."] : []),
+    ...(brief
+      ? [
+          `- The deliverable is an evidence-backed research brief. Include at least one step whose capability searches the web — ${BUSINESS_RESEARCH_CAPABILITY} fits open-topic business research; add a more specific research capability only when the objective needs it. The final synthesis writes the brief.`,
+        ]
+      : []),
     'JSON shape: {"title": str, "objective": str, "successCriteria": [{"description": str, "kind": "qualitative"|"quantitative", "targetValue": number|null, "unit": str|null}], "assumptions": [str], "missingInformation": [{"question": str, "whyItMatters": str, "blocking": bool}], "steps": [{"id": str, "title": str, "executive": str, "capability": str, "purpose": str, "inputs": [str], "outputs": [str], "verification": [str], "dependsOn": [str]}], "estimatedManualHours": number, "risks": [str]}',
   ].join("\n");
 
   const criteria = input.criteria.length ? input.criteria.map((c, i) => `${i + 1}. ${c.description}`).join("\n") : "(none given — propose them)";
   const parts = [
-    block("objective", `Title: ${input.title}\n\n${clip(input.statement, 4000)}`, "user-instruction"),
+    block("objective", `Title: ${input.title}${brief ? "\nDeliverable: research brief (evidence-backed)" : ""}\n\n${clip(input.statement, 4000)}`, "user-instruction"),
     block("success_criteria", criteria, "user-instruction"),
+    ...(constraints ? [constraints] : []),
     block(
       "context_notes",
       [
@@ -421,8 +520,42 @@ function plannerPrompt(input: PlannerInput): { system: string; user: string } {
   return { system, user: parts.join("\n\n") };
 }
 
-/** Plans an objective. Never throws: falls back to the playbook plan. */
+export const SEARCH_UNAVAILABLE_MESSAGE =
+  "This research brief needs web search, but web search is off on this server (SEARCH_PROVIDER=off). " +
+  "Ask the operator to set TAVILY_API_KEY (or SEARCH_PROVIDER=wikipedia for limited, keyless research), then retry.";
+
+/** A plan that must not run: the playbook steps (for display) plus why it is blocked. */
+export function blockedPlan(input: PlanShape, blocked: PlanBlocked): Plan {
+  const plan = fallbackPlan(input, blocked.message);
+  plan.notes = [`Not planned yet: ${blocked.message}`];
+  plan.blocked = blocked;
+  return plan;
+}
+
+const blockedMessage = (message: string) => clip(redact(collapse(message)), 400);
+
+/**
+ * Plans an objective. Never throws: falls back to the playbook plan when the
+ * model's output is unusable or a transient error stopped it, and returns a
+ * blocked plan (plan.blocked) when nothing could run anyway — the AI provider
+ * isn't configured or is out of quota, or a research brief has no web search.
+ * Every plan carries the endpoints it runs against and the company website (Plan.runtime).
+ */
 export async function planObjective(input: PlannerInput): Promise<Plan> {
+  const plan = await planOrBlock(input);
+  plan.runtime = { modelEndpoint: currentModelEndpoint(), searchEndpoint: currentSearchEndpoint(), website: input.website };
+  return plan;
+}
+
+async function planOrBlock(input: PlannerInput): Promise<Plan> {
+  if (isResearchBrief(input.kind) && !searchEnabled()) {
+    return blockedPlan(input, { kind: "search_unavailable", message: SEARCH_UNAVAILABLE_MESSAGE });
+  }
+  // Known before any call (missing key, unknown or forbidden provider): don't spend a failed call on it.
+  // A test handler stands in for the provider (describeModel reports "mock"), so it is not pre-checked.
+  const configProblem = describeModel("main").provider === "mock" ? null : aiConfigProblem();
+  if (configProblem) return blockedPlan(input, { kind: "config", message: blockedMessage(configProblem) });
+
   let plan: Plan;
   try {
     const { system, user } = plannerPrompt(input);
@@ -436,11 +569,17 @@ export async function planObjective(input: PlannerInput): Promise<Plan> {
     if (res.ok) {
       plan = normalizePlan(res.data, input);
       if (res.attempts > 1) plan.notes.unshift(`The planner's first reply was unusable (${res.firstError}); its second reply was used.`);
+    } else if (res.errorKind === "config" || res.errorKind === "quota") {
+      return blockedPlan(input, { kind: res.errorKind, message: blockedMessage(res.error) });
     } else {
-      plan = fallbackPlan(input, res.attempts > 1 ? `the AI planner's output was not a valid plan (${res.error}).` : `the AI planner was unavailable (${res.error}).`);
+      const error = redact(res.error);
+      plan = fallbackPlan(input, res.attempts > 1 ? `the AI planner's output was not a valid plan (${error}).` : `the AI planner was unavailable (${error}).`);
     }
   } catch (err) {
-    plan = fallbackPlan(input, `the AI planner was unavailable (${err instanceof Error ? err.message : "unknown error"}).`);
+    const message = err instanceof Error ? err.message : "unknown error";
+    const kind = classifyProviderError(message);
+    if (kind === "config" || kind === "quota") return blockedPlan(input, { kind, message: blockedMessage(message) });
+    plan = fallbackPlan(input, `the AI planner was unavailable (${redact(message)}).`);
   }
   const gap = contextGapQuestion(input);
   if (gap && !plan.missingInformation.some((q) => q.blocking)) plan.missingInformation = [gap, ...plan.missingInformation].slice(0, 3);

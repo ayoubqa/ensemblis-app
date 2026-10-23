@@ -5,6 +5,11 @@
 //   PLANNED   → the plan's next state (→ BLOCKED / WAITING_FOR_APPROVAL / RUNNING)
 //   RUNNING   → the next runnable step runs (or → VERIFYING when all are done)
 //   VERIFYING → the verification gate runs (→ revision / BLOCKED / COMPLETED)
+// A plan that cannot run (the AI provider isn't configured or is out of quota,
+// or a research brief has no web search) blocks at PLANNING with a
+// PROVIDER_UNAVAILABLE exception before anything is charged. A result the AI
+// verifier could not check is re-verified once after a delay, then handed to
+// a person ("could not be verified"); it is never reported as verified.
 // After every tick the worker re-enqueues the execution while it is still in
 // a runnable state. Because each step's result is committed before the next
 // tick, a crash or redeploy loses at most the step in flight: its job lease
@@ -12,28 +17,35 @@
 
 import type { Execution, ExecutionStep } from "@prisma/client";
 import { prisma } from "../db";
-import { log } from "../lib/log";
-import { onExecutionSettled } from "../lib/notify";
+import { classifyProviderError } from "../ai/errors";
+import { log, redact } from "../lib/log";
+import { EMAIL_DETAIL, onExecutionSettled } from "../lib/notify";
 import { HttpError } from "../lib/http";
 import { DailyLimitError } from "../lib/usageLimits";
 import { contextCompleteness, formatCompanyProfile, getCompanyContext } from "../context/service";
 import { relevantMemories } from "../memory/service";
 import { decideApproval as approvalPolicy } from "../org/policy";
-import { getCapability, getExecutive } from "../org/registry";
+import { getCapability, getExecutive, VERIFICATION_COST_CENTS } from "../org/registry";
 import { emit } from "./events";
-import { runStep, StepError } from "./executor";
+import { readRevisionInputs, runStep, StepError } from "./executor";
 import { learnFromExecution } from "./learning";
 import { addRevisionStep, failExecution, notifyAttention, openException, requestApproval, startInTx } from "./lifecycle";
 import { recordOutcome } from "./outcome";
-import { DEFAULT_CRITERIA, planObjective, type Plan } from "./planner";
+import { incompleteWork } from "./resultState";
+import { DEFAULT_CRITERIA, planObjective, type Plan, type PlanBlockedKind } from "./planner";
 import { titleFor } from "./objectives";
-import { eur } from "./billing";
+import { eur, refundExecution } from "./billing";
 import { verifyExecution } from "./verification/service";
 import type { ModelAssessment } from "./verification/checks";
 import type { Prisma } from "@prisma/client";
 
 export const MAX_STEP_ATTEMPTS = 3;
 export const MAX_AUTO_REVISIONS = 1;
+/** Delay before verifying again when the AI verifier could not run (VERIFY_RETRY_DELAY_MS overrides). */
+export const VERIFY_RETRY_DELAY_MS = (() => {
+  const v = Number(process.env.VERIFY_RETRY_DELAY_MS ?? 60_000);
+  return Number.isFinite(v) && v >= 0 ? v : 60_000;
+})();
 /** Backoff before retrying a failed step (STEP_RETRY_DELAYS_MS="5000,20000" overrides; tests use 0). */
 const RETRY_DELAYS_MS = (process.env.STEP_RETRY_DELAYS_MS ?? "5000,20000,60000")
   .split(",")
@@ -59,14 +71,36 @@ export async function executionTick(executionId: string): Promise<TickResult> {
     case "RUNNING":
       return advancePhase(ex);
     case "VERIFYING":
-      await verifyPhase(ex);
-      return {};
+      return verifyPhase(ex);
     default:
       return {}; // waiting on a person, or finished
   }
 }
 
 // ---------------------------------------------------------------- planning
+
+/** Replaces the execution's steps with the plan's (a re-plan starts from a clean list). */
+async function saveSteps(tx: Prisma.TransactionClient, executionId: string, plan: Plan): Promise<void> {
+  await tx.executionStep.deleteMany({ where: { executionId } });
+  await tx.executionStep.createMany({
+    data: plan.steps.map((s, i) => ({
+      executionId,
+      key: s.key,
+      order: i,
+      title: s.title,
+      purpose: s.purpose,
+      executive: s.executive,
+      capability: s.capability,
+      capabilityVersion: s.capabilityVersion,
+      agent: s.agent,
+      dependsOn: s.dependsOn,
+      inputs: s.inputs,
+      outputs: s.outputs,
+      verification: s.verification,
+      costCents: s.costCents,
+    })),
+  });
+}
 
 async function planPhase(ex: Execution): Promise<void> {
   const objective = await prisma.objective.findUniqueOrThrow({
@@ -90,7 +124,15 @@ async function planPhase(ex: Execution): Promise<void> {
     documentTitles: docs.map((d) => d.name),
     executionId: ex.id,
     questionsSettled,
+    kind: objective.kind,
+    constraints: objective.constraints,
+    website: ctx.website,
   });
+
+  if (plan.blocked) {
+    await blockPlanning(ex, plan, plan.blocked);
+    return;
+  }
 
   const persisted = await prisma.$transaction(async (tx) => {
     const still = await tx.execution.updateMany({
@@ -105,25 +147,7 @@ async function planPhase(ex: Execution): Promise<void> {
       },
     });
     if (still.count === 0) return false; // cancelled meanwhile
-    await tx.executionStep.deleteMany({ where: { executionId: ex.id } });
-    await tx.executionStep.createMany({
-      data: plan.steps.map((s, i) => ({
-        executionId: ex.id,
-        key: s.key,
-        order: i,
-        title: s.title,
-        purpose: s.purpose,
-        executive: s.executive,
-        capability: s.capability,
-        capabilityVersion: s.capabilityVersion,
-        agent: s.agent,
-        dependsOn: s.dependsOn,
-        inputs: s.inputs,
-        outputs: s.outputs,
-        verification: s.verification,
-        costCents: s.costCents,
-      })),
-    });
+    await saveSteps(tx, ex.id, plan);
     let proposed = 0;
     if (!objective.criteria.length) {
       const list = plan.successCriteria.length ? plan.successCriteria : DEFAULT_CRITERIA;
@@ -173,6 +197,63 @@ async function planPhase(ex: Execution): Promise<void> {
   await afterPlan(ex.id);
 }
 
+const BLOCKED_TITLE: Record<PlanBlockedKind, string> = {
+  config: "The AI provider isn't available",
+  quota: "The AI provider's quota is exhausted",
+  search_unavailable: "Web search is off, so the brief can't be researched",
+};
+
+const BLOCKED_RECOMMENDATION: Record<PlanBlockedKind, string> = {
+  config:
+    "Ask the operator to fix the AI provider configuration on the server (the API key or model named above), then choose Retry: the Chief of Staff plans again. Or cancel — nothing was charged.",
+  quota:
+    "Wait until the AI provider's quota resets (the message above says roughly when) or ask the operator to raise the plan's limits, then choose Retry. Or cancel — nothing was charged.",
+  search_unavailable:
+    "Ask the operator to enable web search (set TAVILY_API_KEY, or SEARCH_PROVIDER=wikipedia for limited research), then choose Retry. Or cancel — nothing was charged.",
+};
+
+/**
+ * A plan that cannot run (plan.blocked): the plan and its steps are saved for display, and the
+ * execution blocks at PLANNING with a PROVIDER_UNAVAILABLE exception — before afterPlan, so nothing is
+ * charged and no approval is requested. No success criteria are proposed from it: the re-plan proposes its own.
+ */
+async function blockPlanning(ex: Execution, plan: Plan, blocked: NonNullable<Plan["blocked"]>): Promise<void> {
+  const message = redact(blocked.message);
+  const opened = await prisma.$transaction(async (tx) => {
+    const still = await tx.execution.updateMany({
+      where: { id: ex.id, status: "PLANNING" },
+      data: {
+        plan: plan as unknown as Prisma.InputJsonValue,
+        planSource: plan.source,
+        plannerVersion: plan.version,
+        estimatedCostCents: plan.estimatedCostCents,
+        estimatedManualHours: plan.estimatedManualHours,
+      },
+    });
+    if (still.count === 0) return null; // cancelled meanwhile
+    await saveSteps(tx, ex.id, plan);
+    return openException(
+      tx,
+      {
+        execution: { id: ex.id, orgId: ex.orgId, objectiveId: ex.objectiveId },
+        kind: "PROVIDER_UNAVAILABLE",
+        severity: "HIGH",
+        title: BLOCKED_TITLE[blocked.kind],
+        whatHappened: message,
+        whyItMatters: "Nothing has run and nothing was charged. Every step would fail the same way, so the Chief of Staff stopped before starting.",
+        recommendation: BLOCKED_RECOMMENDATION[blocked.kind],
+        neededFromUser: "Fix the configuration, then choose Retry. Or cancel.",
+        actions: ["retry", "cancel"],
+      },
+      ["PLANNING"]
+    );
+  });
+  if (!opened) return;
+  log.info("execution.blocked", { executionId: ex.id, orgId: ex.orgId, objectiveId: ex.objectiveId, kind: "PROVIDER_UNAVAILABLE", reason: blocked.kind, exceptionId: opened });
+  // The message names the operator's settings (env vars, the provider's error): the e-mail says only what to do.
+  notifyAttention(ex.id, BLOCKED_TITLE[blocked.kind], EMAIL_DETAIL.planBlocked);
+}
+
 /**
  * PLANNED → what the persisted plan calls for: a person's answers (BLOCKED), an approval
  * (WAITING_FOR_APPROVAL) or the start (RUNNING). Also a tick of its own, so an error here (a
@@ -183,6 +264,7 @@ async function afterPlan(executionId: string): Promise<void> {
   const ex = await prisma.execution.findUnique({ where: { id: executionId } });
   if (!ex || ex.status !== "PLANNED" || !ex.plan) return;
   const plan = ex.plan as unknown as Plan;
+  if (plan.blocked) return; // never started or charged (blockPlanning handles it)
   const objective = await prisma.objective.findUniqueOrThrow({
     where: { id: ex.objectiveId },
     include: { criteria: { orderBy: { order: "asc" } }, organization: true },
@@ -213,6 +295,7 @@ async function afterPlan(executionId: string): Promise<void> {
     );
     if (opened) {
       log.info("execution.blocked", { executionId: ex.id, orgId: ex.orgId, objectiveId: ex.objectiveId, kind: "MISSING_INFORMATION", exceptionId: opened });
+      // The planner model's question: attentionEmail drops any URL or address from it.
       notifyAttention(ex.id, "The Chief of Staff has a question", blocking[0].question);
     }
     return;
@@ -309,7 +392,7 @@ async function advancePhase(ex: Execution): Promise<TickResult> {
   const pending = steps.filter((s) => s.status === "PENDING");
   if (!pending.length) {
     const failed = steps.find((s) => s.status === "FAILED");
-    if (failed) return blockOnStep(ex, failed, failed.error ?? "This step failed.", false);
+    if (failed) return blockOnStep(ex, failed, failed.error ?? "This step failed.", false, { failed: true });
     await prisma.$transaction(async (tx) => {
       const ok = await tx.execution.updateMany({ where: { id: ex.id, status: "RUNNING" }, data: { status: "VERIFYING" } });
       if (ok.count) await tx.objective.update({ where: { id: ex.objectiveId }, data: { status: "VERIFYING" } });
@@ -319,7 +402,7 @@ async function advancePhase(ex: Execution): Promise<TickResult> {
   const next = pending.find((s) => s.dependsOn.every((d) => done.has(d)));
   if (!next) {
     const blocked = pending[0];
-    return blockOnStep(ex, blocked, `“${blocked.title}” depends on a step that didn't complete.`, false);
+    return blockOnStep(ex, blocked, `“${blocked.title}” depends on a step that didn't complete.`, false, { failed: false });
   }
   if (next.notBefore && next.notBefore.getTime() > Date.now()) return { nextRunInMs: next.notBefore.getTime() - Date.now() };
 
@@ -354,13 +437,14 @@ async function runOneStep(ex: Execution, step: ExecutionStep, steps: ExecutionSt
   const started = Date.now();
   try {
     const out = await runStep({
-      execution: { id: ex.id, orgId: ex.orgId },
+      execution: { id: ex.id, orgId: ex.orgId, plan: ex.plan },
       objective,
       criteria: objective.criteria,
       step: fresh,
       totalSteps: steps.length,
       priorSteps: prior,
-      revisionFeedback: step.kind === "revision" ? (step.inputs as string[]).join("\n") : null,
+      // Revision inputs are the legacy string[] or {feedback, research}: readRevisionInputs reads both.
+      revisionFeedback: step.kind === "revision" ? readRevisionInputs(step.inputs).feedback.join("\n") || null : null,
     });
     const finalText = cap?.kind === "synthesis";
     const committed = await prisma.$transaction(async (tx) => {
@@ -376,6 +460,7 @@ async function runOneStep(ex: Execution, step: ExecutionStep, steps: ExecutionSt
           model: out.model,
           tokensIn: out.tokensIn,
           tokensOut: out.tokensOut,
+          tokensEstimated: out.tokensEstimated,
           latencyMs: out.latencyMs,
           completedAt: new Date(),
         },
@@ -392,7 +477,15 @@ async function runOneStep(ex: Execution, step: ExecutionStep, steps: ExecutionSt
         type: "STEP_COMPLETED",
         actor: step.executive,
         message: `${step.agent} completed “${step.title}”${out.summary ? `: ${out.summary}` : ""}`,
-        data: { evidence: out.newEvidence.length, latencyMs: out.latencyMs, tokensIn: out.tokensIn, tokensOut: out.tokensOut },
+        data: {
+          evidence: out.newEvidence.length,
+          latencyMs: out.latencyMs,
+          tokensIn: out.tokensIn,
+          tokensOut: out.tokensOut,
+          tokensEstimated: out.tokensEstimated,
+          citationsRemoved: out.citationsRemoved,
+          researchStatus: out.research?.status ?? null,
+        },
       });
       return true;
     });
@@ -400,12 +493,14 @@ async function runOneStep(ex: Execution, step: ExecutionStep, steps: ExecutionSt
     return {};
   } catch (err) {
     const e = err instanceof StepError ? err : new StepError(err instanceof Error ? err.message : "Unknown error", true);
-    log.warn("execution.step_failed", { executionId: ex.id, orgId: ex.orgId, stepId: step.id, capability: step.capability, attempt, retryable: e.retryable, error: e.message });
+    // Provider error text can echo a key or token: it is masked before it is stored or shown.
+    const message = redact(e.message);
+    log.warn("execution.step_failed", { executionId: ex.id, orgId: ex.orgId, stepId: step.id, capability: step.capability, attempt, retryable: e.retryable, kind: e.kind, error: message });
     if (e.retryable && attempt < MAX_STEP_ATTEMPTS) {
       const delay = RETRY_DELAYS_MS[Math.min(attempt - 1, RETRY_DELAYS_MS.length - 1)];
       const ok = await prisma.executionStep.updateMany({
         where: { id: step.id, status: "RUNNING", attempts: attempt },
-        data: { status: "PENDING", error: e.message.slice(0, 2000), partialOutput: null, notBefore: new Date(Date.now() + delay) },
+        data: { status: "PENDING", error: message.slice(0, 2000), partialOutput: null, notBefore: new Date(Date.now() + delay) },
       });
       if (ok.count) {
         await emit(prisma, {
@@ -414,7 +509,7 @@ async function runOneStep(ex: Execution, step: ExecutionStep, steps: ExecutionSt
           stepId: step.id,
           type: "STEP_RETRY_SCHEDULED",
           actor: "system",
-          message: `“${step.title}” failed (${e.message.slice(0, 160)}) — retrying in ${Math.round(delay / 1000)}s`,
+          message: `“${step.title}” failed (${message.slice(0, 160)}) — retrying in ${Math.round(delay / 1000)}s`,
           data: { attempt, delayMs: delay },
         });
       }
@@ -422,17 +517,42 @@ async function runOneStep(ex: Execution, step: ExecutionStep, steps: ExecutionSt
     }
     const failed = await prisma.executionStep.updateMany({
       where: { id: step.id, status: "RUNNING", attempts: attempt },
-      data: { status: "FAILED", error: e.message.slice(0, 2000), partialOutput: null, completedAt: new Date() },
+      data: { status: "FAILED", error: message.slice(0, 2000), partialOutput: null, completedAt: new Date() },
     });
     if (failed.count === 0) return {}; // cancelled meanwhile, or a newer attempt owns the step
-    await emit(prisma, { executionId: ex.id, orgId: ex.orgId, stepId: step.id, type: "STEP_FAILED", actor: step.executive, message: `“${step.title}” failed: ${e.message.slice(0, 300)}` });
-    return blockOnStep(ex, step, e.message, e.kind === "policy");
+    await emit(prisma, {
+      executionId: ex.id,
+      orgId: ex.orgId,
+      stepId: step.id,
+      type: "STEP_FAILED",
+      actor: step.executive,
+      message: `“${step.title}” failed: ${message.slice(0, 300)}`,
+      data: { attempt, kind: e.kind, retryable: e.retryable },
+    });
+    return blockOnStep(ex, { ...step, attempts: attempt }, message, e.kind === "policy", { failed: true });
   }
 }
 
-async function blockOnStep(ex: Execution, step: ExecutionStep, message: string, policy: boolean): Promise<TickResult> {
-  const config = /isn't configured|API key|recognise the model/i.test(message);
-  const tooLarge = /too large for the AI model/i.test(message);
+/** What to do about a failed step, by the kind of provider error behind it (ai/errors.ts). */
+function stepRecommendation(message: string): string {
+  switch (classifyProviderError(message)) {
+    case "too_large":
+      return "This step's input is larger than the AI model accepts. Shorten the objective's context notes or remove large Company Context documents, then retry. Or cancel for a refund of the work that didn't run.";
+    case "config":
+      return "The AI provider is misconfigured on the server. Ask the operator to fix it, then retry. Or cancel for a refund of the work that didn't run.";
+    case "quota":
+      return "The AI provider's quota is exhausted, so retrying right away would fail the same way. Retry once it resets (the message says roughly when), or ask the operator to raise the limit. Or cancel for a refund of the work that didn't run.";
+    case "rate_limit":
+      return "The AI provider is throttling requests right now. Retry in a minute or two. If it keeps failing, cancel and you'll be refunded for the work that didn't run.";
+    default:
+      return "Retry the step — most failures are temporary (rate limits, timeouts). If it keeps failing, cancel and you'll be refunded for the work that didn't run.";
+  }
+}
+
+async function blockOnStep(ex: Execution, step: ExecutionStep, rawMessage: string, policy: boolean, opts: { failed: boolean }): Promise<TickResult> {
+  const message = redact(rawMessage);
+  // A failed work step can be left out (the result is then partial); the synthesis writes the result and can't.
+  const skippable = !policy && opts.failed && getCapability(step.capability)?.kind !== "synthesis";
   const opened = await prisma.$transaction((tx) =>
     openException(
       tx,
@@ -446,13 +566,9 @@ async function blockOnStep(ex: Execution, step: ExecutionStep, message: string, 
         whyItMatters: "The remaining steps depend on this one, so the execution is paused. Completed work is kept.",
         recommendation: policy
           ? "Cancel this execution. This step needs a permission your organization doesn't grant."
-          : tooLarge
-            ? "This step's input is larger than the AI model accepts. Shorten the objective's context notes or remove large Company Context documents, then retry. Or cancel for a refund of the work that didn't run."
-            : config
-            ? "The AI provider is misconfigured on the server. Ask the operator to fix it, then retry. Or cancel for a refund of the work that didn't run."
-            : "Retry the step — most failures are temporary (rate limits, timeouts). If it keeps failing, cancel and you'll be refunded for the work that didn't run.",
-        neededFromUser: policy ? "Cancel the execution." : "Choose Retry or Cancel.",
-        actions: policy ? ["cancel"] : ["retry", "cancel"],
+          : `${stepRecommendation(message)}${skippable ? " You can also continue without this step: the result is then marked partial, and this step's cost is refunded." : ""}`,
+        neededFromUser: policy ? "Cancel the execution." : skippable ? "Choose Retry, Continue without this step, or Cancel." : "Choose Retry or Cancel.",
+        actions: policy ? ["cancel"] : skippable ? ["retry", "skip", "cancel"] : ["retry", "cancel"],
       },
       ["RUNNING"]
     )
@@ -466,10 +582,30 @@ async function blockOnStep(ex: Execution, step: ExecutionStep, message: string, 
 
 // ---------------------------------------------------------------- verification + completion
 
-async function verifyPhase(ex: Execution): Promise<void> {
+/**
+ * UNVERIFIED rounds since the result last changed (a synthesis or revision step completed) or a person
+ * last asked to verify again: the first one is retried after a delay, the next one goes to a person.
+ */
+async function unverifiedRoundsSinceChange(executionId: string): Promise<number> {
+  const completed = await prisma.executionStep.findMany({ where: { executionId, status: "COMPLETED" }, select: { capability: true, completedAt: true } });
+  const retried = await prisma.exception.findFirst({
+    where: { executionId, kind: "VERIFICATION_FAILED", resolvedAction: "retry", resolvedAt: { not: null } },
+    orderBy: { resolvedAt: "desc" },
+    select: { resolvedAt: true },
+  });
+  const times = [
+    ...completed.filter((s) => getCapability(s.capability)?.kind === "synthesis").map((s) => s.completedAt?.getTime() ?? 0),
+    retried?.resolvedAt?.getTime() ?? 0,
+  ];
+  const sinceMs = Math.max(0, ...times);
+  const since = sinceMs > 0 ? new Date(sinceMs) : null;
+  return prisma.verification.count({ where: { executionId, status: "UNVERIFIED", ...(since ? { createdAt: { gte: since } } : {}) } });
+}
+
+async function verifyPhase(ex: Execution): Promise<TickResult> {
   if (!ex.result?.trim()) {
     await failExecution(ex.id, "The synthesis step produced no result to verify.");
-    return;
+    return {};
   }
   const latest = await prisma.verification.findFirst({ where: { executionId: ex.id }, orderBy: { round: "desc" } });
   const accepted = latest
@@ -479,32 +615,79 @@ async function verifyPhase(ex: Execution): Promise<void> {
     : null;
   if (latest && accepted) {
     await finalize(ex, (latest.assessment as unknown as ModelAssessment | null) ?? null, true);
-    return;
+    return {};
   }
 
   await emit(prisma, { executionId: ex.id, orgId: ex.orgId, type: "VERIFICATION_STARTED", actor: "chief_of_staff", message: "Verifying the result: evidence, success criteria, completeness, consistency" });
   const v = await verifyExecution(ex.id);
+  const assessorError = v.assessorError ? redact(v.assessorError).slice(0, 300) : null;
+  const unverified = v.status === "UNVERIFIED";
+  const retryLater = unverified && (await unverifiedRoundsSinceChange(ex.id)) <= 1;
   await emit(prisma, {
     executionId: ex.id,
     orgId: ex.orgId,
     type: "VERIFICATION_COMPLETED",
     actor: "chief_of_staff",
-    message: `Verification ${v.status.replace(/_/g, " ").toLowerCase()} — score ${v.score}/100`,
-    data: { status: v.status, score: v.score, round: v.round },
+    message: unverified
+      ? `The result could not be verified: the AI verifier didn't run${assessorError ? ` (${assessorError.slice(0, 160)})` : ""}${retryLater ? ` — verifying again in ${Math.round(VERIFY_RETRY_DELAY_MS / 1000)}s` : ""}`
+      : `Verification ${v.status.replace(/_/g, " ").toLowerCase()} — score ${v.score}/100`,
+    data: { status: v.status, score: v.score, round: v.round, method: v.method, assessorError },
   });
-  log.info("execution.verified", { executionId: ex.id, orgId: ex.orgId, status: v.status, score: v.score, round: v.round, method: v.model ? "deterministic+model" : "deterministic" });
+  log.info("execution.verified", { executionId: ex.id, orgId: ex.orgId, status: v.status, score: v.score, round: v.round, method: v.method, assessorError: assessorError ?? undefined });
+
+  if (unverified) {
+    // No revision: the result may be fine, it just wasn't checked. Try once more later, then ask a person.
+    if (retryLater) return { nextRunInMs: VERIFY_RETRY_DELAY_MS };
+    const opened = await prisma.$transaction((tx) =>
+      openException(
+        tx,
+        {
+          execution: { id: ex.id, orgId: ex.orgId, objectiveId: ex.objectiveId },
+          kind: "VERIFICATION_FAILED",
+          severity: "HIGH",
+          title: "The result could not be verified",
+          whatHappened:
+            `The AI verifier could not run${assessorError ? ` (${assessorError})` : ""}, so objective alignment, success criteria and consistency were not assessed. ` +
+            `It was tried again after a pause with the same result. The deterministic checks did run: ${redact(v.summary)}`,
+          whyItMatters: "Ensemblis won't present an unverified result as verified. The result exists, but nothing has checked it against your success criteria.",
+          recommendation:
+            "Retry once the AI provider is available again: only the verification runs, the result is not rewritten. Or accept the result as not verified (its outcome stays unmeasured and the verification fee is refunded), or cancel for a full refund.",
+          neededFromUser: "Retry verification, accept it as not verified, or cancel.",
+          actions: ["accept", "retry", "cancel"],
+        },
+        ["VERIFYING"]
+      )
+    );
+    if (opened) {
+      log.info("execution.blocked", { executionId: ex.id, orgId: ex.orgId, objectiveId: ex.objectiveId, kind: "VERIFICATION_FAILED", reason: "unverified", exceptionId: opened });
+      // assessorError is the provider's error (env var names, HTTP codes): the console shows it, the e-mail doesn't.
+      notifyAttention(ex.id, "A result could not be verified", EMAIL_DETAIL.verifierUnavailable);
+    }
+    return {};
+  }
 
   if (v.status === "FAIL") {
     const fresh = await prisma.execution.findUniqueOrThrow({ where: { id: ex.id }, select: { revisionCount: true } });
     if (fresh.revisionCount < MAX_AUTO_REVISIONS) {
+      // A research brief that failed for lack of evidence (or on unsupported claims) researches once more before rewriting.
+      const research = v.needsResearch;
       await prisma.$transaction(async (tx) => {
         const ok = await tx.execution.updateMany({ where: { id: ex.id, status: "VERIFYING" }, data: { status: "RUNNING" } });
         if (!ok.count) return;
-        await addRevisionStep(tx, ex.id, v.failures.length ? v.failures : [v.summary]);
+        await addRevisionStep(tx, ex.id, (v.failures.length ? v.failures : [v.summary]).map((f) => redact(f)), { research });
         await tx.objective.update({ where: { id: ex.objectiveId }, data: { status: "RUNNING" } });
-        await emit(tx, { executionId: ex.id, orgId: ex.orgId, type: "REVISION_REQUESTED", actor: "chief_of_staff", message: "The result didn't pass verification — the Synthesis Lead is revising it" });
+        await emit(tx, {
+          executionId: ex.id,
+          orgId: ex.orgId,
+          type: "REVISION_REQUESTED",
+          actor: "chief_of_staff",
+          message: research
+            ? "The brief didn't pass verification — more evidence is being gathered and the Synthesis Lead is revising it"
+            : "The result didn't pass verification — the Synthesis Lead is revising it",
+          data: { research, insufficientEvidence: v.insufficientEvidence },
+        });
       });
-      return;
+      return {};
     }
     const opened = await prisma.$transaction((tx) =>
       openException(
@@ -514,7 +697,7 @@ async function verifyPhase(ex: Execution): Promise<void> {
           kind: "VERIFICATION_FAILED",
           severity: "HIGH",
           title: "The result didn't pass verification",
-          whatHappened: `${v.summary} ${v.failures.slice(0, 4).join(" ")}`.trim(),
+          whatHappened: redact(`${v.summary} ${v.failures.slice(0, 4).join(" ")}`.trim()),
           whyItMatters: "Ensemblis won't present an unverified result as complete. You decide whether it is usable.",
           recommendation:
             "Review the verification details. Accept it if the flagged points don't affect your decision; retry with guidance if they do; or cancel for a full refund.",
@@ -526,16 +709,36 @@ async function verifyPhase(ex: Execution): Promise<void> {
     );
     if (opened) {
       log.info("execution.blocked", { executionId: ex.id, orgId: ex.orgId, objectiveId: ex.objectiveId, kind: "VERIFICATION_FAILED", exceptionId: opened });
-      notifyAttention(ex.id, "A result failed verification", v.summary);
+      // v.summary quotes the AI verifier's free text (it read the report, URLs included): the console shows it, the e-mail doesn't.
+      notifyAttention(ex.id, "A result failed verification", EMAIL_DETAIL.verificationFailed);
     }
-    return;
+    return {};
   }
   await finalize(ex, v.model, false);
+  return {};
 }
 
 async function finalize(ex: Execution, model: ModelAssessment | null, accepted: boolean): Promise<void> {
   const objective = await prisma.objective.findUniqueOrThrow({ where: { id: ex.objectiveId }, include: { criteria: { orderBy: { order: "asc" } } } });
-  const outcome = await prisma.$transaction((tx) => recordOutcome(tx, { executionId: ex.id, criteria: objective.criteria, model, acceptedDespiteFailure: accepted }));
+  const latest = await prisma.verification.findFirst({ where: { executionId: ex.id }, orderBy: { round: "desc" }, select: { id: true, status: true } });
+  const verificationStatus = latest?.status ?? null;
+  const hasUnsupported = latest ? (await prisma.claimCheck.count({ where: { verificationId: latest.id, status: { in: ["UNSUPPORTED", "UNCITED"] } } })) > 0 : false;
+  // A skipped or failed work step, or research that didn't deliver, makes the result partial for any objective kind.
+  const steps = await prisma.executionStep.findMany({ where: { executionId: ex.id }, select: { kind: true, status: true, researchStatus: true, title: true } });
+  const partial = incompleteWork(steps, objective.kind).length > 0;
+  const unverified = verificationStatus === "UNVERIFIED";
+  const outcome = await prisma.$transaction((tx) =>
+    recordOutcome(tx, {
+      executionId: ex.id,
+      criteria: objective.criteria,
+      model,
+      acceptedDespiteFailure: accepted && verificationStatus === "FAIL",
+      objectiveKind: objective.kind,
+      verificationStatus,
+      hasUnsupported,
+      partial,
+    })
+  );
   await emit(prisma, {
     executionId: ex.id,
     orgId: ex.orgId,
@@ -572,6 +775,20 @@ async function finalize(ex: Execution, model: ModelAssessment | null, accepted: 
       data: { status: "COMPLETED", completedAt: now, outcomeStatus: outcome.status, outcomeSummary: outcome.summary },
     });
     if (!ok.count) return false;
+    if (unverified) {
+      // The verification fee pays for a model check that never ran.
+      const refunded = await refundExecution(tx, ex.id, VERIFICATION_COST_CENTS, "verification unavailable");
+      if (refunded > 0) {
+        await emit(tx, {
+          executionId: ex.id,
+          orgId: ex.orgId,
+          type: "FUNDS_REFUNDED",
+          actor: "system",
+          message: `${eur(refunded)} verification fee refunded — the result could not be verified`,
+          data: { amountCents: refunded, reason: "verification unavailable" },
+        });
+      }
+    }
     const fresh = await tx.execution.findUniqueOrThrow({ where: { id: ex.id } });
     await tx.objective.update({ where: { id: ex.objectiveId }, data: { status: "COMPLETED", outcomeStatus: outcome.status, completedAt: now } });
     const values: Prisma.ValueRecordCreateManyInput[] = [

@@ -12,9 +12,9 @@ import { limiter, taskRunLimiter } from "../lib/rateLimits";
 import { requireOrg, type OrgRequest } from "../org/organization";
 import { formatCompanyProfile, getCompanyContext } from "../context/service";
 import { cleanText } from "../research/text";
-import { createObjective, MAX_BUDGET_CENTS, MIN_BUDGET_CENTS, planDraft, replaceCriteria, suggestForStatement } from "../engine/objectives";
+import { createObjective, MAX_BUDGET_CENTS, MAX_CONSTRAINTS_CHARS, MIN_BUDGET_CENTS, OBJECTIVE_KINDS, planDraft, replaceCriteria, suggestForStatement } from "../engine/objectives";
 import { newAttempt } from "../engine/lifecycle";
-import { FULL_EXECUTION_INCLUDE, toExecutionSummary, toPublicExecution, toPublicObjective, type FullExecution } from "../engine/serialize";
+import { FULL_EXECUTION_INCLUDE, STEP_LITE_SELECT, toExecutionSummary, toPublicExecution, toPublicObjective, type FullExecution } from "../engine/serialize";
 
 const router = Router();
 router.use(requireAuth, requireOrg);
@@ -61,6 +61,9 @@ const createSchema = z.object({
   contextNotes: z.string().max(8000).optional(),
   autonomy: z.enum(["REVIEW_PLAN", "AUTO_WITHIN_BUDGET"]).optional(),
   draft: z.boolean().optional(),
+  // null / omitted = the default decision memo.
+  kind: z.enum(OBJECTIVE_KINDS, { errorMap: () => ({ message: "kind must be \"research_brief\" or omitted" }) }).nullable().optional(),
+  constraints: z.string().max(MAX_CONSTRAINTS_CHARS, `Constraints are too long (max ${MAX_CONSTRAINTS_CHARS} characters)`).optional(),
 });
 
 router.post(
@@ -71,6 +74,7 @@ router.post(
     const created = await createObjective(req.org!, {
       ...body,
       contextNotes: body.contextNotes ? cleanText(body.contextNotes) : undefined,
+      constraints: body.constraints ? cleanText(body.constraints) : undefined,
       deadline: body.deadline ? new Date(body.deadline.length === 10 ? `${body.deadline}T23:59:59Z` : body.deadline) : null,
     });
     const objective = await prisma.objective.findUniqueOrThrow({
@@ -116,7 +120,7 @@ router.get(
         executions: {
           orderBy: { attempt: "desc" },
           take: 1,
-          include: { steps: { select: { status: true, title: true, agent: true, executive: true, order: true, kind: true } } },
+          include: { steps: { select: STEP_LITE_SELECT } },
         },
       },
     });
@@ -144,7 +148,7 @@ export async function loadObjectiveDetail(orgId: string, objectiveId: string) {
     include: {
       criteria: true,
       createdBy: { select: { id: true, name: true } },
-      executions: { orderBy: { attempt: "desc" }, include: { steps: { select: { status: true, title: true, agent: true, executive: true, order: true, kind: true } } } },
+      executions: { orderBy: { attempt: "desc" }, include: { steps: { select: STEP_LITE_SELECT } } },
     },
   });
   if (!objective) throw new HttpError(404, "Objective not found");
@@ -153,7 +157,7 @@ export async function loadObjectiveDetail(orgId: string, objectiveId: string) {
     : null;
   return {
     objective: toPublicObjective(objective),
-    executions: objective.executions.map(toExecutionSummary),
+    executions: objective.executions.map((x) => toExecutionSummary(x, { objectiveKind: objective.kind })),
     execution: latest ? toPublicExecution(latest) : null,
   };
 }

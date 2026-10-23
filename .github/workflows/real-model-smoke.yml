@@ -1,9 +1,14 @@
 name: Real-model smoke
 
-# Manual only: it spends real AI tokens. Runs backend/scripts/real-model-smoke.mjs
-# (scenarios A–D) against the provider configured by repository secrets:
-#   SMOKE_OPENAI_API_KEY (+ optional variables SMOKE_OPENAI_BASE_URL, SMOKE_OPENAI_MODEL)
-#   or SMOKE_ANTHROPIC_API_KEY;  optional SMOKE_TAVILY_API_KEY for real web search.
+# Manual only: it spends real AI tokens and real web searches. Runs
+# backend/scripts/real-model-smoke.mjs against the provider configured by
+# repository secrets:
+#   SMOKE_OPENAI_API_KEY (+ optional variables SMOKE_OPENAI_BASE_URL, SMOKE_OPENAI_MODEL, SMOKE_OPENAI_FAST_MODEL)
+#   or SMOKE_ANTHROPIC_API_KEY.
+#   SMOKE_TAVILY_API_KEY is REQUIRED for scenario E (the research brief): without it
+#   web search is off and E is reported SKIPPED — never as passed.
+# Scenarios: E research brief · A decision memo · B missing information · C cross-functional plan · D verification (on A).
+# The report (smoke-results/<timestamp>.json and .md) is uploaded as the run's artifact.
 on:
   workflow_dispatch:
     inputs:
@@ -13,8 +18,13 @@ on:
         options: [openai, anthropic]
         default: openai
       scenarios:
-        description: "Scenarios (A,B,C,D)"
-        default: "A,B,C,D"
+        description: "Scenarios (E,A,B,C,D — E needs SMOKE_TAVILY_API_KEY)"
+        default: "E,A,B,C,D"
+      e_expect:
+        description: "Scenario E: run, or ONE negative check (use scenarios=E): neg-a-model-key (invalid model key → blocked), neg-b-search-key (invalid Tavily key → degraded), neg-c-search-off (search off → blocked)"
+        type: choice
+        options: [run, neg-a-model-key, neg-b-search-key, neg-c-search-off]
+        default: run
       full:
         description: "Run B and C to completion too (≈3× tokens)"
         type: boolean
@@ -48,15 +58,19 @@ jobs:
       - name: Run the real-model smoke test
         env:
           AI_PROVIDER: ${{ inputs.provider }}
-          OPENAI_API_KEY: ${{ secrets.SMOKE_OPENAI_API_KEY }}
+          # Negative check (a) swaps in a deliberately invalid OpenAI-compatible key (provider openai); (b) an invalid Tavily key; (c) turns search off.
+          OPENAI_API_KEY: ${{ inputs.e_expect == 'neg-a-model-key' && 'gsk_invalid' || secrets.SMOKE_OPENAI_API_KEY }}
           OPENAI_BASE_URL: ${{ vars.SMOKE_OPENAI_BASE_URL || 'https://api.groq.com/openai/v1' }}
           OPENAI_MODEL: ${{ vars.SMOKE_OPENAI_MODEL || 'openai/gpt-oss-120b' }}
           OPENAI_FAST_MODEL: ${{ vars.SMOKE_OPENAI_FAST_MODEL || 'openai/gpt-oss-20b' }}
           OPENAI_REASONING_EFFORT: low
           OPENAI_MAX_TOKENS: "8192"
           ANTHROPIC_API_KEY: ${{ secrets.SMOKE_ANTHROPIC_API_KEY }}
-          TAVILY_API_KEY: ${{ secrets.SMOKE_TAVILY_API_KEY }}
+          TAVILY_API_KEY: ${{ inputs.e_expect == 'neg-b-search-key' && 'tvly-invalid' || secrets.SMOKE_TAVILY_API_KEY }}
+          SEARCH_PROVIDER: ${{ inputs.e_expect == 'neg-c-search-off' && 'off' || '' }}
+          SEARCH_DAILY_BUDGET: "200"
           SMOKE_SCENARIOS: ${{ inputs.scenarios }}
+          SMOKE_E_EXPECT: ${{ (inputs.e_expect == 'neg-a-model-key' || inputs.e_expect == 'neg-c-search-off') && 'blocked' || inputs.e_expect == 'neg-b-search-key' && 'degraded' || 'run' }}
           SMOKE_FULL: ${{ inputs.full && '1' || '0' }}
           SMOKE_DATABASE_URL: postgresql://ensemblis:ensemblis@localhost:5432/ensemblis_smoke?schema=public
         run: npm run smoke:real

@@ -5,8 +5,12 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import Markdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
+import * as docx from "docx";
+import type { TaskSource } from "@/lib/api";
 import { citeFromProps, remarkCitations } from "./cites";
-import { citeNumbers, leadingTitle, markdownToBlocks, withoutLeadingTitle, type Block, type Inline } from "./markdown";
+import { buildDocxDocument } from "./export-docx";
+import { buildPdfDefinition } from "./export-pdf";
+import { citeNumbers, leadingTitle, linkAllowed, markdownToBlocks, withoutLeadingTitle, type Block, type Inline } from "./markdown";
 
 let passed = 0;
 function test(name: string, fn: () => void) {
@@ -161,6 +165,91 @@ test("citeNumbers guards against silly ranges", () => {
 test("empty and whitespace input", () => {
   assert.deepEqual(markdownToBlocks(""), []);
   assert.deepEqual(markdownToBlocks("   \n\n  "), []);
+});
+
+// ---- Link allowlist in exports: links to other domains become plain text ----
+
+const hrefsOf = (blocks: Block[]) => [...JSON.stringify(blocks).matchAll(/"href":"([^"]*)"/g)].map((m) => m[1]);
+
+test("isLinkAllowed: only allowed links keep an href (inline, reference, autolink, encoded, e-mail)", () => {
+  const md = [
+    "[ok](https://www.evidence.example/a) [sub](https://data.evidence.example./b) [look](https://evidence.example.attacker.com/c?d=1) [pr](//evidence.example/x)",
+    "[ref][r] [okref][o] <https://attacker.example/c?d=2> &#104;ttps://attacker.example/c?d=3 https\\://attacker.example/c?d=4 www&#46;attacker.example/c?d=5",
+    "sales@attacker.example [user](https://evidence.example@attacker.example/x) ![img](https://evidence.example/i.png)",
+    "",
+    "[r]: https://attacker.example/c?d=6",
+    "[o]: https://evidence.example/o",
+  ].join("\n");
+  const blocks = markdownToBlocks(md, { isLinkAllowed: (url) => linkAllowed(url, ["evidence.example"]) });
+  assert.deepEqual(hrefsOf(blocks), ["https://www.evidence.example/a", "https://data.evidence.example./b", "https://evidence.example/o"]);
+  const all = text(only(blocks[0], "paragraph").inlines);
+  for (const t of ["look", "pr", "ref", "user", "img"]) assert.ok(all.includes(t), t);
+  // A refused URL or e-mail address written as text is reduced to its domain (a PDF viewer would link it again).
+  for (const t of ["https://attacker.example/c?d=3", "www.attacker.example/c?d=5", "sales@attacker.example"]) assert.ok(!all.includes(t), t);
+  assert.ok(all.includes("an address at attacker.example"));
+  // Without the hook every http(s) and mailto link stays (the exporters always pass one).
+  assert.ok(hrefsOf(markdownToBlocks(md)).includes("https://attacker.example/c?d=6"));
+});
+
+test("PDF and Word exports link only to linkDomains, else to the sources' domains", () => {
+  const sources: TaskSource[] = [{ n: 1, kind: "web", title: "S1", url: "https://evidence.example/s1", domain: "evidence.example", snippet: "", publishedAt: null }];
+  const md = "Fact [1]. [ok](https://evidence.example/a) [co](https://www.company.example/b) [bad](https://attacker.example/c?d=1) www.attacker.example/x mail@attacker.example";
+  const pdfLinks = (linkDomains?: string[]) =>
+    [...JSON.stringify(buildPdfDefinition({ title: "T", markdown: md, sources, linkDomains })).matchAll(/"link":"([^"]*)"/g)].map((m) => m[1]);
+  const docxLinks = (linkDomains?: string[]) => {
+    const links: string[] = [];
+    class Recorded extends docx.ExternalHyperlink {
+      constructor(o: ConstructorParameters<typeof docx.ExternalHyperlink>[0]) {
+        super(o);
+        links.push(o.link);
+      }
+    }
+    buildDocxDocument({ ...docx, ExternalHyperlink: Recorded }, { title: "T", markdown: md, sources, linkDomains });
+    return links;
+  };
+  for (const links of [pdfLinks, docxLinks]) {
+    // The source's own URL is linked in the sources appendix.
+    assert.deepEqual(links(["evidence.example", "company.example"]).sort(), ["https://evidence.example/a", "https://evidence.example/s1", "https://www.company.example/b"]);
+    assert.deepEqual(links().sort(), ["https://evidence.example/a", "https://evidence.example/s1"]);
+    assert.deepEqual(links([]).sort(), ["https://evidence.example/s1"]);
+  }
+});
+
+test("PDF and Word sources lists reduce link-shaped text in a source's title, snippet and label", () => {
+  // A search result's title and snippet are the page's own text; a PDF viewer would link a URL or address in them.
+  const source: TaskSource & { label: string } = {
+    n: 1,
+    kind: "web",
+    title: "Q3 https://attacker.example/x?d=1 and www.attacker.example/w",
+    url: "https://evidence.example/s1",
+    domain: "evidence.example",
+    snippet: "See https://attacker.example/s?d=2, www.attacker.example/t or ops@attacker.example for more.",
+    publishedAt: null,
+    label: "Mirror at www.attacker.example/m",
+  };
+  const input = { title: "T", markdown: "Fact [1].", sources: [source], linkDomains: ["evidence.example"] };
+  const strings = (n: unknown, out: string[] = []): string[] => {
+    if (typeof n === "string") out.push(n);
+    else if (Array.isArray(n)) n.forEach((c) => strings(c, out));
+    else if (n && typeof n === "object") for (const [k, v] of Object.entries(n)) if (k === "text" || typeof v === "object") strings(v, out);
+    return out;
+  };
+  const pdf = strings((buildPdfDefinition(input) as { content: unknown }).content).join("\n");
+  const docxText: string[] = [];
+  class Recorded extends docx.TextRun {
+    constructor(o: ConstructorParameters<typeof docx.TextRun>[0]) {
+      super(o);
+      docxText.push(typeof o === "string" ? o : (o.text ?? ""));
+    }
+  }
+  buildDocxDocument({ ...docx, TextRun: Recorded }, input);
+  for (const [name, all] of [["pdf", pdf], ["docx", docxText.join("\n")]]) {
+    assert.ok(!/https?:\/\/attacker|www\.attacker|@attacker/.test(all), `${name}: ${all}`);
+    for (const t of ["Q3 attacker.example and attacker.example", "See attacker.example, attacker.example or an address at attacker.example for more.", "evidence.example · Mirror at attacker.example"])
+      assert.ok(all.includes(t), `${name}: ${t}`);
+    // The source's own (allowed) URL is printed as it is.
+    assert.ok(all.includes("https://evidence.example/s1"), name);
+  }
 });
 
 // ---- On-screen renderer: the remark plugin feeding react-markdown ----

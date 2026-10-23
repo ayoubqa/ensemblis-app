@@ -2602,6 +2602,472 @@ a.cs-life-i:focus-visible {
   color: var(--accent);
 }
 
+/* ------------------------------------------------------------------ honest result states (real execution v1) */
+/* a finished stage with issues: skipped work, research that didn't deliver, a verifier that could not run */
+.cs-mark.is-warn {
+  background: var(--warn-soft);
+  border-color: var(--warn);
+  color: var(--warn);
+}
+.is-warn > .cs-life-i::before {
+  background: repeating-linear-gradient(90deg, var(--warn) 0 10px, color-mix(in srgb, var(--warn) 45%, var(--line2)) 10px 14px);
+}
+.is-warn .cs-life-n,
+.cs-stage.is-warn .cs-stage-meta,
+.cs-life-now.is-warn {
+  color: var(--warn);
+}
+
+/* objective: deliverable + constraints */
+.cs-obj-kind {
+  display: grid;
+  gap: 8px;
+  margin: 14px 0 0;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface2);
+}
+.cs-obj-kind > div {
+  display: grid;
+  grid-template-columns: 110px minmax(0, 1fr);
+  gap: 4px 12px;
+  align-items: baseline;
+}
+.cs-obj-kind dt {
+  font-size: 11.5px;
+  font-weight: 650;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--subtle);
+}
+.cs-obj-kind dd {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--ink);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* plan that can't run yet (provider or search unavailable) */
+.cs-plan-blocked {
+  margin-top: 14px;
+}
+.cs-plan-blocked b,
+.cs-ev-notice b,
+.cs-gate-unv b {
+  font-weight: 650;
+  color: var(--ink-strong);
+}
+
+/* now card: up to two links */
+.cs-now-ctas {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 18px;
+  margin-top: 14px;
+}
+.cs-now-ctas .cs-now-cta {
+  margin-top: 0;
+}
+
+/* step: where it ran (provider · model · tokens · model time), always visible */
+.cs-tl-model {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 14px;
+  margin-top: 10px;
+  font-size: 12.5px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+.cs-tl-model > span {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px;
+  min-width: 0;
+}
+.cs-tl-model > span:first-child {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--ink);
+}
+.cs-tl-meta .tag {
+  font-size: 11.5px;
+  padding: 2px 9px;
+}
+.cs-tl-gate.st-UNVERIFIED > .cs-tl-node {
+  background: var(--warn-soft);
+  border-color: var(--warn);
+  color: var(--warn);
+}
+.cs-tl-gate.st-UNVERIFIED > .cs-tl-card {
+  border-color: color-mix(in srgb, var(--warn) 35%, var(--line));
+}
+
+/* a step skipped after it failed: why, without the alarm of a live failure */
+.cs-tl-err.is-skip {
+  color: var(--muted);
+}
+.cs-tl-err-why {
+  color: var(--ink);
+}
+
+/* evidence: research notice, failed searches, provenance */
+.cs-ev-notice,
+.cs-ev-failed {
+  margin-bottom: 12px;
+}
+.cs-ev-failed > ul {
+  padding-left: 32px;
+}
+.cs-ev-failed b {
+  font-weight: 650;
+}
+.cs-ev-meta {
+  margin-top: 6px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+.cs-ev-meta > span + span::before {
+  content: "·";
+  margin: 0 8px;
+  color: var(--subtle);
+}
+
+/* verification: not verified, earlier rounds, per-criterion verdicts, claim quotes */
+.cs-dial.s-UNVERIFIED .cs-dial-fg {
+  stroke: var(--warn);
+}
+.cs-gate-unv {
+  margin-top: 16px;
+}
+.cs-rounds {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 14px;
+  padding: 10px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface2);
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--ink);
+}
+.cs-rounds > svg {
+  flex: none;
+  margin-top: 3px;
+  color: var(--muted);
+}
+.cs-vcrit {
+  margin-top: 18px;
+  scroll-margin-top: 110px;
+}
+.cs .cs-vcrit-h {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 650;
+  color: var(--ink-strong);
+}
+.cs-vcrit .cs-crit {
+  margin-top: 10px;
+}
+.cs-crit-ev {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.cs-crit-noev {
+  font-size: 12px;
+  color: var(--muted);
+}
+.cs-claims {
+  scroll-margin-top: 110px;
+}
+.cs-claims > ul > li.c-UNSUPPORTED .cs-claim-b > p {
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, var(--bad) 55%, transparent);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+.cs-claim-q {
+  margin: 8px 0 0;
+  padding: 6px 0 6px 12px;
+  border-left: 2px solid var(--line2);
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+/* outcome head: the tag drops below the title on narrow screens instead of squeezing it */
+.cs-out-head > .cs-out-tt {
+  flex: 1 1 220px;
+}
+
+/* a result that is not plainly verified (partial, not verified): a warning, not a failure */
+.cs-note-warn {
+  margin-top: 8px;
+  padding: 10px 14px;
+  border-radius: var(--radius);
+  border: 1px solid color-mix(in srgb, var(--warn) 35%, var(--line));
+  background: var(--warn-soft);
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: var(--ink);
+}
+
+/* "(AI-assessed)" after an outcome: never split at its hyphen */
+.cs-ai-suffix {
+  white-space: nowrap;
+}
+
+/* outcome: whose judgment it is */
+.cs-out-basis {
+  margin-top: 4px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+/* open issues (Outcome stage) */
+.cs-issues {
+  margin-top: 16px;
+  scroll-margin-top: 84px;
+}
+.cs-issues-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.cs-issues-ic {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+.cs-issues.is-clear .cs-issues-ic {
+  background: var(--ok-soft);
+  color: var(--ok);
+}
+.cs .cs-issues-head h3 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 15px;
+  font-weight: 650;
+  color: var(--ink-strong);
+}
+.cs-issues-sub,
+.cs-issues-none {
+  margin-top: 8px;
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+.cs-issues-g {
+  margin-top: 16px;
+}
+.cs-issues-g h4 {
+  margin: 0;
+  font-size: 11.5px;
+  font-weight: 650;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--subtle);
+}
+.cs-issues-g ul {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+}
+.cs-issues-g li {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+  padding: 8px 0;
+  border-top: 1px solid var(--line);
+}
+.cs-issues-g li:first-child {
+  border-top: 0;
+}
+.cs-issue-ic {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  margin-top: 1px;
+  border-radius: 50%;
+  background: var(--surface2);
+  color: var(--muted);
+  border: 1px solid var(--line2);
+}
+.sev-bad .cs-issue-ic {
+  background: var(--bad-soft);
+  border-color: color-mix(in srgb, var(--bad) 35%, transparent);
+  color: var(--bad);
+}
+.sev-warn .cs-issue-ic {
+  background: var(--warn-soft);
+  border-color: color-mix(in srgb, var(--warn) 35%, transparent);
+  color: var(--warn);
+}
+.cs-issue-b {
+  min-width: 0;
+}
+.cs-issue-a {
+  font-size: 13.5px;
+  font-weight: 600;
+  line-height: 1.45;
+  color: var(--ink);
+  text-decoration: underline;
+  text-decoration-color: var(--line2);
+  text-underline-offset: 3px;
+  overflow-wrap: anywhere;
+}
+.cs-issue-a:hover {
+  color: var(--accent);
+  text-decoration-color: var(--accent);
+}
+.cs-issue-a:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+.cs-issue-b p {
+  margin-top: 2px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+.cs-issues-more {
+  display: inline-block;
+  margin-top: 4px;
+  font-size: 12.5px;
+}
+
+/* usage (per execution) */
+.cs-use-sum {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1px;
+  margin: 0;
+  background: var(--line);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.cs-use-sum > div {
+  flex: 1 1 150px;
+  min-width: 0;
+  padding: 10px 14px;
+  background: var(--surface2);
+}
+.cs-use-sum dt {
+  font-size: 11.5px;
+  font-weight: 650;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--subtle);
+}
+.cs-use-sum dd {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 6px;
+  margin: 3px 0 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+.cs-use-sum dd small:not(.cs-est) {
+  flex-basis: 100%;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--muted);
+}
+.cs-use-list {
+  list-style: none;
+  margin: 14px 0 0;
+  padding: 0;
+}
+.cs-use-list > li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 4px 16px;
+  padding: 10px 0;
+  border-top: 1px solid var(--line);
+}
+.cs-use-list > li:first-child {
+  border-top: 0;
+}
+.cs-use-k {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.cs-use-k b {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.cs-use-k span {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+.cs-use-v {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 14px;
+  font-size: 12.5px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.cs-use-v > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.cs-use-v em {
+  font-style: normal;
+  color: var(--bad);
+}
+.cs-use-note {
+  margin-top: 12px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+/* exception card: what "Continue without this step" does */
+.cs-dc-note {
+  margin-top: 10px;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--muted);
+}
+
 /* ------------------------------------------------------------------ motion */
 @keyframes cs-flow {
   to {
@@ -2863,4 +3329,14 @@ a.cs-life-i:focus-visible {
   color: var(--muted);
   font-size: 14px;
   line-height: 1.5;
+}
+
+@media (max-width: 640px) {
+  .cs-obj-kind > div {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .cs-use-list > li {
+    flex-direction: column;
+    align-items: stretch;
+  }
 }

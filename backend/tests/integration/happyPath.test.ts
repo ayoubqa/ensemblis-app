@@ -77,6 +77,17 @@ describe("objective → plan → approve → execute → verify → outcome", ()
     expect(done.outcomeStatus).toBe("ACHIEVED");
     expect(done.measurements).toHaveLength(2);
 
+    // Honest labels (the mock model here): research recorded per step with the provider that answered,
+    // web evidence with its provenance, a result state separate from the outcome, and the mock flagged.
+    const researched = done.steps.filter((s: { researchStatus: string | null }) => s.researchStatus);
+    expect(researched.length).toBeGreaterThan(0);
+    expect(researched.every((s: { researchStatus: string; research: { providers: string[] } }) => s.researchStatus === "ok" && s.research.providers[0] === "tavily")).toBe(true);
+    expect(done.evidence.filter((e: { kind: string }) => e.kind === "WEB").every((e: { provider: string; retrieval: string }) => e.provider === "tavily" && e.retrieval === "search_snippet")).toBe(true);
+    expect(["verified", "verified_with_warnings"]).toContain(done.resultState);
+    expect(done.usedMockAI).toBe(true);
+    expect(done.verification.modelProvider).toBe("mock");
+    expect(done.usage.estimated).toBe(true);
+
     // Event log tells the story in order.
     const types = done.events.map((e: { type: string }) => e.type);
     for (const t of ["OBJECTIVE_CREATED", "OBJECTIVE_PLANNED", "APPROVAL_REQUESTED", "APPROVAL_GRANTED", "EXECUTION_STARTED", "STEP_STARTED", "SOURCE_FOUND", "STEP_COMPLETED", "VERIFICATION_STARTED", "VERIFICATION_COMPLETED", "OUTCOME_MEASURED", "EXECUTION_COMPLETED"]) {

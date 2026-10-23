@@ -2,11 +2,22 @@
 // adapt to how this server is configured (PublicConfig in frontend/lib/api.ts).
 // Never include secrets here: only on/off flags, limits and public keys.
 
-import { config, searchProviderLabel } from "../config";
-import { aiProviderLabel, currentProvider } from "../ai/llmProvider";
+import { config, modelEndpoint } from "../config";
+import { aiConfigProblem, aiProviderLabel, currentProvider } from "../ai/llmProvider";
+import { effectiveSearchProvider, searchCustomEndpoint, searchEnabled, searchProviderLabel } from "../research/search";
 import { VERIFICATION_COST_CENTS } from "../org/registry";
 
 export function publicConfig() {
+  // Why model calls can't work right now (unknown provider, missing key, mock where forbidden), or null.
+  // Names environment variables only — never a key.
+  const aiProblem = aiConfigProblem();
+  const mockAI = (() => {
+    try {
+      return currentProvider() === "mock";
+    } catch {
+      return false;
+    }
+  })();
   return {
     demoMode: config.demoMode,
     inviteRequired: !!config.signupInviteCode,
@@ -16,18 +27,19 @@ export function publicConfig() {
     maxTasksPerUserPerDay: config.maxTasksPerUserPerDay,
     maxDescriptionLength: config.maxDescriptionLength,
     aiProviderLabel: aiProviderLabel(),
+    aiConfigured: aiProblem === null,
+    aiProblem,
     sampleCatalogStats: false, // v4: no seeded catalog statistics are shown anywhere
-    mockAI: (() => {
-      try {
-        return currentProvider() === "mock";
-      } catch {
-        return false;
-      }
-    })(),
+    mockAI,
+    // Where model calls go (config.ts modelEndpoint): "stub" also for the mock — neither is a real model. Never the host.
+    aiEndpoint: mockAI ? "stub" : modelEndpoint()?.kind ?? "hosted",
     verificationCostCents: VERIFICATION_COST_CENTS,
-    // v3
-    searchEnabled: config.search.provider !== "off",
+    // v3. The provider actually used: SEARCH_PROVIDER=tavily without a key means Wikipedia.
+    searchEnabled: searchEnabled(),
+    searchProvider: effectiveSearchProvider(),
     searchProviderLabel: searchProviderLabel(),
+    // TAVILY_BASE_URL sends web search to a stub or proxy: its sources are not live Tavily results.
+    searchCustomEndpoint: searchCustomEndpoint(),
     emailEnabled: config.email.enabled,
     paymentsEnabled: config.stripe.enabled,
     creditPacks: config.creditPacks.map((p) => ({

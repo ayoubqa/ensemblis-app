@@ -3,7 +3,9 @@
 import { useState } from "react";
 import { api, type Execution, type Objective, type OutcomeMeasurement, type OutcomeStatus } from "@/lib/api";
 import { CriterionTag, Icon, outcomeLabel, useToast, type IconName } from "@/components";
+import { outcomeTagLabel } from "@/components/Tags";
 import { relativeTime } from "@/lib/format";
+import { EvidenceChips } from "./Evidence";
 
 const METHOD: Record<OutcomeMeasurement["method"], string> = {
   "model-assessed": "Assessed by AI review",
@@ -28,7 +30,12 @@ export function OutcomePanel({ objective, execution, onExecution, readOnly = fal
   const toast = useToast();
   const [busy, setBusy] = useState<OutcomeStatus | null>(null);
   const byCriterion = new Map(execution.measurements.map((m) => [m.criterionId, m]));
-  const status = execution.outcomeStatus ?? "UNKNOWN";
+  // A person's confirmation and the AI's assessment are kept apart. Before they were (no
+  // confirmedOutcomeStatus), a confirmation overwrote outcomeStatus: it is then the person's value.
+  const confirmedValue = execution.confirmedOutcomeStatus ?? (execution.outcomeConfirmedAt ? execution.outcomeStatus : null);
+  const aiValue = execution.confirmedOutcomeStatus ? execution.outcomeStatus : execution.outcomeConfirmedAt ? null : execution.outcomeStatus;
+  const confirmed = !!confirmedValue;
+  const status = confirmedValue ?? aiValue ?? "UNKNOWN";
   const confirm = async (s: Exclude<OutcomeStatus, "UNKNOWN">) => {
     setBusy(s);
     try {
@@ -48,8 +55,21 @@ export function OutcomePanel({ objective, execution, onExecution, readOnly = fal
           <Icon name={OUTCOME_ICON[status]} size={20} />
         </span>
         <div className="cs-out-tt">
-          <p className="cs-out-v">{outcomeLabel(status)}</p>
+          <p className="cs-out-v">{outcomeTagLabel(status, confirmed)}</p>
           {execution.outcomeSummary && <p className="cs-out-sum">{execution.outcomeSummary}</p>}
+          <p className="cs-out-basis" data-testid="outcome-basis" data-confirmed={confirmed ? "true" : "false"}>
+            {confirmed
+              ? `Confirmed by a person.${
+                  aiValue && aiValue !== confirmedValue
+                    ? ` The AI verifier assessed it as ${outcomeLabel(aiValue).toLowerCase()}.`
+                    : aiValue
+                      ? " The AI verifier's assessment was the same."
+                      : ""
+                }`
+              : status === "UNKNOWN"
+                ? "The AI verifier could not measure the outcome. Confirm it yourself below."
+                : "The AI verifier's reading of the report against your success criteria — not a measurement of the business result. Not confirmed by a person."}
+          </p>
         </div>
         {execution.outcomeConfirmedAt && (
           <span className="cs-out-conf">
@@ -85,6 +105,11 @@ export function OutcomePanel({ objective, execution, onExecution, readOnly = fal
                     <span className="cs-crit-how">{METHOD[m.method] ?? m.method}</span>
                   </p>
                 )}
+                {m && (m.evidenceNs?.length ?? 0) > 0 && (
+                  <p className="cs-crit-ev">
+                    <EvidenceChips ns={m.evidenceNs ?? []} label="Evidence" />
+                  </p>
+                )}
               </div>
               {m ? <CriterionTag result={m.result} /> : <span className="cs-crit-none">Not measured</span>}
             </li>
@@ -98,8 +123,8 @@ export function OutcomePanel({ objective, execution, onExecution, readOnly = fal
           <div className="cs-judge-tt">
             <p className="cs-judge-l">Your judgment</p>
             <p className="cs-judge-h">
-              {execution.outcomeConfirmedAt
-                ? `Confirmed as ${outcomeLabel(status).toLowerCase()} ${relativeTime(execution.outcomeConfirmedAt)}.`
+              {confirmedValue
+                ? `Confirmed as ${outcomeLabel(confirmedValue).toLowerCase()} ${relativeTime(execution.outcomeConfirmedAt)}.`
                 : "Not confirmed by a person for this attempt."}
             </p>
           </div>
@@ -110,11 +135,11 @@ export function OutcomePanel({ objective, execution, onExecution, readOnly = fal
           <p id={`judge-${execution.id}`} className="cs-judge-l">
             Your judgment
           </p>
-          <p className="cs-judge-h">Was the outcome achieved? Your answer is recorded with this result.</p>
+          <p className="cs-judge-h">Was the outcome achieved? Your answer is recorded with this result, next to the AI&apos;s assessment — it doesn&apos;t replace it.</p>
         </div>
         <div className="cs-seg">
           {JUDGMENTS.map(([s, label]) => {
-            const on = execution.outcomeStatus === s && !!execution.outcomeConfirmedAt;
+            const on = confirmedValue === s;
             return (
               <button key={s} type="button" className={on ? "on" : undefined} aria-pressed={on} onClick={() => confirm(s)} aria-busy={busy === s} disabled={!!busy}>
                 {on && <Icon name="check" size={13} />}

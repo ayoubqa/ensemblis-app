@@ -7,13 +7,25 @@
 //   3. Results are merged round-robin, de-duplicated by URL and capped.
 //
 // Never throws: research problems must not fail a step — the step proceeds
-// with whatever evidence exists, and the verifier sees how much there is.
+// with whatever evidence exists. But they are never silent either: the
+// outcome says how the research went (status), which providers actually
+// answered (providersUsed) and every search attempt with its error, so the
+// step, the event log and the verifier can report it truthfully.
+//
+//   ok          every search succeeded and something was found
+//   degraded    something was found, but some searches failed or a fallback was used
+//   no_results  the searches worked but found nothing
+//   failed      no search succeeded (or research itself broke) — see `reason`
+//   off         web search is off on this server
 
 import { z } from "zod";
 import { runLLM } from "../ai/llmProvider";
 import { parseStructured } from "../ai/json";
-import { activeSearchBackend, searchEnabled, SearchResult, webSearch } from "./search";
+import { activeSearchBackend, effectiveSearchProvider, searchEnabled, webSearchDetailed, type SearchAttempt, type SearchProviderName, type SearchResult } from "./search";
 import { clip, collapse, normalizeUrl } from "./text";
+import { redact } from "../lib/log";
+
+export type { SearchAttempt, SearchProviderName, SearchResult } from "./search";
 
 const RESEARCH_TIME_BUDGET_MS = 75_000;
 
@@ -100,11 +112,53 @@ export interface ResearchRequest {
   seenUrls?: string[];
 }
 
+export type ResearchStatus = "ok" | "degraded" | "no_results" | "failed" | "off";
+
 export interface ResearchOutcome {
+  status: ResearchStatus;
+  /** Why the status isn't "ok" (a short, redacted sentence), or null. */
+  reason: string | null;
+  /** The backend chosen before searching (the queries are written for it). What answered is `providersUsed`. */
   backend: "tavily" | "wikipedia" | "off";
+  /** Providers that answered at least one search successfully, in first-use order. */
+  providersUsed: SearchProviderName[];
   queries: string[];
+  /** Every search attempt, failed and skipped ones included. */
+  attempts: SearchAttempt[];
+  /** New results (merged, de-duplicated against seenUrls, capped). */
   results: SearchResult[];
   queryWriter: "model" | "heuristic" | "none";
+}
+
+const PROVIDER_NAMES: Record<SearchProviderName, string> = { tavily: "Tavily", wikipedia: "Wikipedia" };
+
+/** Status, reason and providers from the attempts of one research run (exported for tests). */
+export function summarizeAttempts(attempts: SearchAttempt[]): { status: Exclude<ResearchStatus, "off">; reason: string | null; providersUsed: SearchProviderName[] } {
+  const providersUsed: SearchProviderName[] = [];
+  for (const a of attempts) if (a.ok && !providersUsed.includes(a.provider)) providersUsed.push(a.provider);
+  const failed = attempts.filter((a) => !a.ok);
+  const found = attempts.reduce((n, a) => n + (a.ok ? a.resultCount : 0), 0);
+  const failures = () => {
+    const seen = new Set<string>();
+    const parts: string[] = [];
+    for (const a of failed) {
+      const line = `${PROVIDER_NAMES[a.provider]}: ${a.error ?? "failed"}`;
+      if (!seen.has(line)) {
+        seen.add(line);
+        parts.push(line);
+      }
+    }
+    return parts.slice(0, 3).join("; ");
+  };
+  if (!attempts.length) return { status: "failed", reason: "No search could be run.", providersUsed };
+  if (!providersUsed.length) {
+    return { status: "failed", reason: `All ${attempts.length} search attempt${attempts.length === 1 ? "" : "s"} failed — ${failures()}`, providersUsed };
+  }
+  if (found === 0) {
+    return { status: "no_results", reason: failed.length ? `The searches found nothing (and some failed — ${failures()})` : "The searches found nothing.", providersUsed };
+  }
+  if (failed.length) return { status: "degraded", reason: `Some searches failed or fell back — ${failures()}`, providersUsed };
+  return { status: "ok", reason: null, providersUsed };
 }
 
 async function writeQueries(req: ResearchRequest, backend: "tavily" | "wikipedia"): Promise<{ queries: string[]; by: "model" | "heuristic" }> {
@@ -135,22 +189,54 @@ async function writeQueries(req: ResearchRequest, backend: "tavily" | "wikipedia
   return { queries: heuristicQueries(req.topic, req.brief, req.queryCount), by: "heuristic" };
 }
 
+const OFF_REASON = "Web search is off on this server (SEARCH_PROVIDER=off).";
+
 /** Runs the research. Never throws. */
 export async function research(req: ResearchRequest): Promise<ResearchOutcome> {
+  const off = (): ResearchOutcome => ({ status: "off", reason: OFF_REASON, backend: "off", providersUsed: [], queries: [], attempts: [], results: [], queryWriter: "none" });
+  let backend: ResearchOutcome["backend"] = "off";
+  let queries: string[] = [];
+  let queryWriter: ResearchOutcome["queryWriter"] = "none";
+  const attempts: SearchAttempt[] = [];
   try {
-    if (!searchEnabled()) return { backend: "off", queries: [], results: [], queryWriter: "none" };
-    const backend = await activeSearchBackend();
-    if (backend === "off") return { backend, queries: [], results: [], queryWriter: "none" };
+    if (!searchEnabled()) return off();
+    backend = await activeSearchBackend();
+    if (backend === "off") return off();
     const started = Date.now();
-    const { queries, by } = await writeQueries(req, backend);
+    const written = await writeQueries(req, backend);
+    queries = written.queries;
+    queryWriter = written.by;
     const lists: SearchResult[][] = [];
     for (const q of queries) {
       if (Date.now() - started > RESEARCH_TIME_BUDGET_MS) break;
-      lists.push(await webSearch(q, { executionId: req.executionId ?? null }));
+      const r = await webSearchDetailed(q, { executionId: req.executionId ?? null });
+      attempts.push(...r.attempts);
+      lists.push(r.results);
     }
     const seen = new Set((req.seenUrls ?? []).map(normalizeUrl));
-    return { backend, queries, results: mergeResults(lists, seen, req.maxResults), queryWriter: by };
+    const results = mergeResults(lists, seen, req.maxResults);
+    const summary = summarizeAttempts(attempts);
+    return { ...summary, backend, queries, attempts, results, queryWriter };
+  } catch (err) {
+    // An internal failure is a failed research run, never "search is off".
+    const message = err instanceof Error ? err.message : String(err);
+    return {
+      status: "failed",
+      reason: `Research failed: ${clip(redact(collapse(message)), 160)}`,
+      backend: backend === "off" ? safeEffective() : backend,
+      providersUsed: summarizeAttempts(attempts).providersUsed,
+      queries,
+      attempts,
+      results: [],
+      queryWriter,
+    };
+  }
+}
+
+function safeEffective(): ResearchOutcome["backend"] {
+  try {
+    return effectiveSearchProvider();
   } catch {
-    return { backend: "off", queries: [], results: [], queryWriter: "none" };
+    return "off";
   }
 }

@@ -3,8 +3,10 @@
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { api, type LegacyTask, type Objective } from "@/lib/api";
-import { EmptyState, Icon, OutcomeTag, PageHead, RequireAuth, Skeleton, VerificationTag, useToast } from "@/components";
+import { EmptyState, Icon, OutcomeTag, PageHead, RequireAuth, Skeleton, Tag, VerificationTag, useToast } from "@/components";
+import { ResultStateTag } from "@/components/Tags";
 import { eur, plural, shortDate } from "@/lib/format";
+import { MOCK_TAG_LABEL, listedEndpointTag, listedResultState, resultScore } from "@/lib/openIssues";
 import { ROUTES } from "@/lib/routes";
 
 export default function ReportsPage() {
@@ -17,7 +19,7 @@ export default function ReportsPage() {
 
 const LEGACY_STATUS: Record<LegacyTask["status"], string> = { PLANNING: "Planning", RUNNING: "In progress", COMPLETED: "Completed", FAILED: "Failed", REFUNDED: "Refunded" };
 
-/** Verified deliverables: completed objectives (with outcome + verification) and the earlier reports from before objectives existed. */
+/** Deliverables: completed objectives (with outcome + result state) and the earlier reports from before objectives existed. */
 function Reports() {
   const toast = useToast();
   const [done, setDone] = useState<Objective[] | null>(null);
@@ -92,7 +94,7 @@ function Reports() {
       <PageHead
         eyebrow="Reports"
         title="Reports"
-        sub="Your verified deliverables: every objective whose latest attempt completed, with its outcome, verification and evidence — and the reports produced before objectives existed. Results of earlier attempts stay in each objective's Attempts list."
+        sub="Your deliverables: every objective whose latest attempt completed, with its outcome, whether it was verified and its evidence — and the reports produced before objectives existed. Results of earlier attempts stay in each objective's Attempts list."
         actions={
           <Link href={ROUTES.objectives} className="btn">
             <Icon name="list" />
@@ -197,9 +199,18 @@ function Reports() {
   );
 }
 
+/** What the execution cost after refunds (a skipped step, a verification that could not run). */
+function costLine(ex: NonNullable<Objective["latestExecution"]>): string {
+  const net = eur(Math.max(0, ex.costCents - ex.refundedCents), { decimals: true });
+  return ex.refundedCents > 0 ? `Net cost ${net} · ${eur(ex.refundedCents, { decimals: true })} refunded` : `Cost ${net}`;
+}
+
 function ReportCard({ o }: { o: Objective }) {
   const ex = o.latestExecution;
   const n = o.criteria.length;
+  // A result that isn't plainly verified says so; a partial one also keeps its verification verdict.
+  const result = listedResultState(ex);
+  const endpoint = listedEndpointTag(ex);
   return (
     <li>
       <Link href={ROUTES.objective(o.id)} className="ws-panel ws-rep">
@@ -212,11 +223,18 @@ function ReportCard({ o }: { o: Objective }) {
         <h3 className="ws-rep-t">{o.title}</h3>
         {ex?.outcomeSummary && <p className="ws-rep-s">{ex.outcomeSummary}</p>}
         <span className="ws-tags ws-rep-tags">
-          <OutcomeTag outcome={o.outcomeStatus ?? ex?.outcomeStatus} />
-          <VerificationTag status={ex?.verificationStatus} score={ex?.verificationScore} />
+          <OutcomeTag outcome={o.outcomeStatus ?? ex?.outcomeStatus} confirmed={!!ex?.confirmedOutcomeStatus} />
+          {result && <ResultStateTag state={result} suffix={result === "partial" ? null : resultScore(ex)} />}
+          {(!result || result === "partial") && <VerificationTag status={ex?.verificationStatus} score={ex?.verificationScore} />}
+          {ex?.usedMockAI && <Tag variant="warn">{MOCK_TAG_LABEL}</Tag>}
+          {endpoint && (
+            <Tag variant={endpoint.variant} title={endpoint.detail}>
+              {endpoint.label}
+            </Tag>
+          )}
         </span>
         <span className="ws-rep-foot">
-          <span className="ws-meta">{[ex?.outcomeSummary ? null : plural(n, "success criterion", "success criteria"), ex ? `Cost ${eur(ex.costCents, { decimals: true })}` : null].filter(Boolean).join(" · ")}</span>
+          <span className="ws-meta">{[ex?.outcomeSummary ? null : plural(n, "success criterion", "success criteria"), ex ? costLine(ex) : null].filter(Boolean).join(" · ")}</span>
           <span className="ws-rep-open">
             Open report <Icon name="arrow" size={14} />
           </span>
