@@ -65,6 +65,8 @@ export const config = {
   // Runaway guard: an execution whose model calls have used this many tokens
   // stops (and is refunded like any failed execution). 0 = off.
   maxTokensPerExecution: int("MAX_TOKENS_PER_EXECUTION", 600_000, 0),
+  // Server-wide model tokens per UTC day, all calls together (ai/dailyBudget.ts). 0 = no daily ceiling.
+  dailyTokenBudget: int("DAILY_TOKEN_BUDGET", 0, 0),
 
   // Daily task caps — the "kill switch" protecting the AI bill. Every task run
   // (create, retry, workflow run, scheduled run) counts once.

@@ -37,6 +37,7 @@ import { DEFAULT_OLLAMA_BASE_URL, DEFAULT_OPENAI_BASE_URL, mockAIForbidden, mode
 import { mockLLM } from "./mockProvider";
 import { notePremiumSpend, onPremiumFailure, premiumRouteFor, premiumSettings, type PremiumSettings } from "./premium";
 import { priceModelCall } from "../billing/pricing";
+import { dailyTokenBudgetExhausted, noteTokensUsed } from "./dailyBudget";
 
 export type Provider = "ollama" | "openai" | "anthropic" | "mock";
 export type ModelTier = "main" | "fast";
@@ -925,6 +926,12 @@ export async function runLLM(systemPrompt: string, userContent: string, opts: LL
   return getLimiter(tier).run(async () => {
     let started = Date.now();
     const meta = { provider, tier, purpose: opts.purpose ?? "other", executionId: opts.executionId ?? undefined };
+    // The server's daily token budget (ai/dailyBudget.ts): checked when the call would start, before any provider spend.
+    const overBudget = await dailyTokenBudgetExhausted();
+    if (overBudget) {
+      log.warn("llm.daily_budget_reached", meta);
+      throw new Error(overBudget);
+    }
     /** The model the current attempt went to (the premium route's, until it falls back). */
     let attemptModel = modelFor(provider, tier);
     try {
@@ -945,6 +952,7 @@ export async function runLLM(systemPrompt: string, userContent: string, opts: LL
             if (sink.emitted || !fallBack) throw err;
             const message = err instanceof Error ? err.message : String(err);
             log.warn("llm.premium_fallback", { ...meta, model: attemptModel, fallbackModel: modelFor(provider, tier), kind, error: message });
+            noteTokensUsed(approxTokens(systemPrompt + userContent));
             void recordUsage({
               kind: "llm",
               provider,
@@ -968,6 +976,7 @@ export async function runLLM(systemPrompt: string, userContent: string, opts: LL
         if (premiumResult) notePremiumSpend(result.model, priceModelCall({ provider, model: result.model, tokensIn: result.tokensIn, cachedTokensIn: result.cachedTokensIn, tokensOut: result.tokensOut }));
       } else result = await runWithOllama(systemPrompt, userContent, opts, sink);
       const latencyMs = Date.now() - started;
+      noteTokensUsed(result.tokensIn + result.tokensOut);
       log.info("llm.call", { ...meta, model: result.model, latencyMs, tokensIn: result.tokensIn, tokensOut: result.tokensOut, tokensEstimated: result.tokensEstimated });
       void recordUsage({
         kind: "llm",
@@ -990,6 +999,7 @@ export async function runLLM(systemPrompt: string, userContent: string, opts: LL
       const latencyMs = Date.now() - started;
       const message = err instanceof Error ? err.message : String(err);
       log.warn("llm.call_failed", { ...meta, model: attemptModel, latencyMs, error: message });
+      noteTokensUsed(approxTokens(systemPrompt + userContent) + approxTokens(sink.text));
       // A failed call's token counts are always estimates (the provider never reported usage).
       void recordUsage({
         kind: "llm",

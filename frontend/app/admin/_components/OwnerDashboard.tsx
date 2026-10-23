@@ -181,6 +181,7 @@ function Body({ d }: { d: AdminOverview }) {
         </Tile>
         <Tile icon="chart" label="AI calls today" value={num(ai.callsToday)} flag={ai.failuresToday > 0 ? { tone: "bad", text: `${num(ai.failuresToday)} failed` } : undefined}>
           {ai.providerLabel || "AI provider"} · {compact(tokensToday)} tokens
+          {ai.dailyTokenBudget ? ` of ${compact(ai.dailyTokenBudget)} daily budget` : ""}
           {ai.premium && "model" in ai.premium && <PremiumLine p={ai.premium} />}
         </Tile>
         <Tile

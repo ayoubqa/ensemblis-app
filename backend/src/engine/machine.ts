@@ -37,6 +37,7 @@ import { titleFor } from "./objectives";
 import { formatCredits, refundExecution } from "./billing";
 import { tokenCeilingReached } from "./budget";
 import { CREDITS_UNIT } from "../billing/credits";
+import { DAILY_BUDGET_MESSAGE } from "../ai/dailyBudget";
 import { verifyExecution } from "./verification/service";
 import type { ModelAssessment } from "./verification/checks";
 import type { Prisma } from "@prisma/client";
@@ -219,8 +220,15 @@ const BLOCKED_RECOMMENDATION: Record<PlanBlockedKind, string> = {
  * execution blocks at PLANNING with a PROVIDER_UNAVAILABLE exception — before afterPlan, so nothing is
  * charged and no approval is requested. No success criteria are proposed from it: the re-plan proposes its own.
  */
+/** Our own daily token budget stopped the call (ai/dailyBudget.ts), not the provider. */
+const DAILY_BUDGET_TITLE = "Today's AI processing quota is used up";
+const DAILY_BUDGET_RECOMMENDATION =
+  "Ensemblis limits how much AI work this server runs per day. Choose Retry after midnight UTC, when the quota resets. Or cancel — you are refunded for the work that didn't run.";
+const isDailyBudget = (message: string) => message.includes(DAILY_BUDGET_MESSAGE);
+
 async function blockPlanning(ex: Execution, plan: Plan, blocked: NonNullable<Plan["blocked"]>): Promise<void> {
   const message = redact(blocked.message);
+  const daily = isDailyBudget(message);
   const opened = await prisma.$transaction(async (tx) => {
     const still = await tx.execution.updateMany({
       where: { id: ex.id, status: "PLANNING" },
@@ -240,11 +248,11 @@ async function blockPlanning(ex: Execution, plan: Plan, blocked: NonNullable<Pla
         execution: { id: ex.id, orgId: ex.orgId, objectiveId: ex.objectiveId },
         kind: "PROVIDER_UNAVAILABLE",
         severity: "HIGH",
-        title: BLOCKED_TITLE[blocked.kind],
+        title: daily ? DAILY_BUDGET_TITLE : BLOCKED_TITLE[blocked.kind],
         whatHappened: message,
         whyItMatters: "Nothing has run and nothing was charged. Every step would fail the same way, so the Chief of Staff stopped before starting.",
-        recommendation: BLOCKED_RECOMMENDATION[blocked.kind],
-        neededFromUser: "Fix the configuration, then choose Retry. Or cancel.",
+        recommendation: daily ? DAILY_BUDGET_RECOMMENDATION : BLOCKED_RECOMMENDATION[blocked.kind],
+        neededFromUser: daily ? "Choose Retry after midnight UTC. Or cancel." : "Fix the configuration, then choose Retry. Or cancel.",
         actions: ["retry", "cancel"],
       },
       ["PLANNING"]
@@ -253,7 +261,7 @@ async function blockPlanning(ex: Execution, plan: Plan, blocked: NonNullable<Pla
   if (!opened) return;
   log.info("execution.blocked", { executionId: ex.id, orgId: ex.orgId, objectiveId: ex.objectiveId, kind: "PROVIDER_UNAVAILABLE", reason: blocked.kind, exceptionId: opened });
   // The message names the operator's settings (env vars, the provider's error): the e-mail says only what to do.
-  notifyAttention(ex.id, BLOCKED_TITLE[blocked.kind], EMAIL_DETAIL.planBlocked);
+  notifyAttention(ex.id, daily ? DAILY_BUDGET_TITLE : BLOCKED_TITLE[blocked.kind], EMAIL_DETAIL.planBlocked);
 }
 
 /**
@@ -544,6 +552,7 @@ async function runOneStep(ex: Execution, step: ExecutionStep, steps: ExecutionSt
 
 /** What to do about a failed step, by the kind of provider error behind it (ai/errors.ts). */
 function stepRecommendation(message: string): string {
+  if (isDailyBudget(message)) return DAILY_BUDGET_RECOMMENDATION;
   switch (classifyProviderError(message)) {
     case "too_large":
       return "This step's input is larger than the AI model accepts. Shorten the objective's context notes or remove large Company Context documents, then retry. Or cancel for a refund of the work that didn't run.";

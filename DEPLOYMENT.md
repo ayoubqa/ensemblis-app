@@ -105,6 +105,28 @@ Credits and cost accounting (API only; defaults shown — none needs setting for
 | `MAX_TOKENS_PER_EXECUTION` | `600000` (`render.yaml`: `400000`) | Runaway guard: an execution whose model calls have used this many tokens stops before its next step (or verification) and fails, which refunds its credits. `0` turns it off. The largest legitimate run (7 steps, a revision, two verification rounds at `OPENAI_MAX_TOKENS=8192`) is estimated at under ~300,000 tokens; that estimate is not yet measured on real traffic, so check the token figures on the owner dashboard after launch before lowering it further. |
 | `PROVIDER_PRICING` | set in `render.yaml` (checked 2026-10-23) | JSON price table for **internal** cost accounting (owner dashboard, `/api/admin/economics`): per-million-token prices per model, per-call prices per paid tool, exchange rates to EUR, plus `asOf` (the date the prices were checked; older than 90 days is flagged on the dashboard) and `sources`. Optional `fixedMonthlyEur` (e.g. `{"render":0,"neon":19}`, allocated pro rata) and `paymentFees` (`{"percent":1.5,"fixedEurCents":25}` per completed purchase) — left out, they are reported as *not configured*, never as zero. Change it in `render.yaml` (a dashboard edit is overwritten by the next Blueprint sync); take numbers only from the providers' own price pages. Unset or invalid: usage is still recorded, but costs stay unpriced (never guessed). None of the resulting figures is net profit: credit value is list price (demo credits are not revenue), and taxes and labour are never included. |
 
+| Variable | Default | What it does |
+|---|---|---|
+| `DAILY_TOKEN_BUDGET` | `0` = off (`render.yaml`: `10000000`) | The server's daily ceiling on model tokens, every call counted (planning, steps, verification, claim checks, suggestions, memory; failed calls at their estimate). New work — a plan, a new attempt, a scheduled routine — is refused (HTTP 429, nothing charged) while the rest of the day can't cover one execution's `MAX_TOKENS_PER_EXECUTION`; every model call stops once the ceiling is reached, and a running execution then waits for a person ("Today's AI processing quota is used up": retry after midnight UTC, or cancel for a refund of the work that didn't run). Read from the database every 30 s and kept current in memory between reads, so several processes can overshoot by the calls they make in that window. |
+
+**Worst-case daily spend (render.yaml settings, list prices checked 2026-10-23).** The per-call
+and per-execution caps alone do not bound a day: 150 executions × 400k tokens plus 600 plans ×
+~32k (a plan call with one repair) is ~80M tokens, up to ~$19 (80% input) to ~$48 (all output) a
+day on gpt-oss-120b. With `DAILY_TOKEN_BUDGET=10000000`:
+
+| Cost line | Daily ceiling | How it is bounded |
+|---|---|---|
+| Standard model (Groq gpt-oss-120b / -20b) | ~$2.40 (80% input) – $6.00 (all output) | `DAILY_TOKEN_BUDGET` 10M tokens |
+| Premium model (gpt-5.5), when a key is set | €2 | `PREMIUM_DAILY_BUDGET_EUR`, from priced usage |
+| Web search (Tavily basic, pay-as-you-go) | $0.24 | `SEARCH_DAILY_BUDGET` 30 calls × $0.008 (free monthly credits not deducted) |
+| Hosting (Render free web service; your Neon and Vercel plans) | not configured | `fixedMonthlyEur` in `PROVIDER_PRICING` once you know the plans |
+
+So a day of model and search spend tops out at about €7.60 (≈$8.50) with the premium route on and
+about €5.60 ($6.24) without it (1 USD = 0.8925 EUR); a month at roughly €230 / €170 in the worst case. Typical use is
+far lower (a run is estimated at ~100–150k tokens: ~$0.03–0.05 on gpt-oss-120b). These are
+ceilings from list prices, not invoices: free-tier allowances, Groq's own per-day limits and
+taxes are not modelled. Real figures: the owner dashboard's Unit economics panel.
+
 Premium model route (optional; same values on the API and a standalone worker). `render.yaml`
 sets `PREMIUM_MODEL=gpt-5.5`, `PREMIUM_REASONING_EFFORT=low` and `PREMIUM_DAILY_BUDGET_EUR=2`; the
 route stays **off** until `PREMIUM_API_KEY` is set:

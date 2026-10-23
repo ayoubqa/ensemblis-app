@@ -1,5 +1,7 @@
 // Budget protections around the engine (credits are charged in billing.ts).
 //
+//   - The server-wide daily token budget (ai/dailyBudget.ts) refuses new work
+//     that today's remaining budget could not finish.
 //   - Planning costs a model call but no credits, so an organization that
 //     can't afford even the cheapest possible plan is refused BEFORE the
 //     planner runs (no provider spend for work that could never start).
@@ -15,6 +17,7 @@ import { HttpError } from "../lib/http";
 import { formatCredits } from "../billing/credits";
 import { CAPABILITIES, VERIFICATION_COST_CENTS } from "../org/registry";
 import type { OrgContext } from "../org/organization";
+import { assertDailyTokenBudgetForNewWork } from "../ai/dailyBudget";
 
 /**
  * The cheapest plan the planner can produce: framing + the cheapest work
@@ -28,6 +31,8 @@ export function minimumPlanCost(): number {
 
 /** 402 before planning when the paying wallet can't afford any plan at all. */
 export async function assertCanAffordPlanning(org: Pick<OrgContext, "walletUserId" | "userId">): Promise<void> {
+  // The server's daily token budget comes first: no plan starts that couldn't be finished today.
+  await assertDailyTokenBudgetForNewWork();
   const wallet = await prisma.user.findUnique({ where: { id: org.walletUserId }, select: { credits: true } });
   if (!wallet) throw new HttpError(401, "This account no longer exists. Please sign in again.");
   const min = minimumPlanCost();

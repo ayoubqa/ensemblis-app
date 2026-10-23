@@ -172,6 +172,8 @@ export async function adminOverview(now = new Date()) {
       tokensInToday: llmTokensToday._sum.tokensIn ?? 0,
       tokensOutToday: llmTokensToday._sum.tokensOut ?? 0,
       tokensLast14d: bucketByDay(days, llmRows, (r) => r.createdAt, (r) => r.tokensIn + r.tokensOut),
+      /** DAILY_TOKEN_BUDGET (0 = no daily ceiling). */
+      dailyTokenBudget: config.dailyTokenBudget,
       premium: await premiumStatus(),
     },
     search: { providerLabel: searchProviderLabel(), callsToday: searchToday, callsThisMonth: searchMonth, dailyBudget: config.search.dailyBudget },

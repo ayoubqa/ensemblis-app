@@ -155,6 +155,13 @@ services:
       # execution fails and is refunded in full.
       - key: MAX_TOKENS_PER_EXECUTION
         value: "400000"
+      # The server's daily ceiling on model tokens, all calls together (planning, steps, verification,
+      # suggestions, memory). Without it the caps above multiply out to ~80M tokens/day (150 executions
+      # x 400k + 600 plans): up to ~$19-48/day on gpt-oss-120b. 10M tokens is ~65 executions of ~150k
+      # and caps a day at ~$2.40 (input-heavy) to $6 (all output). New work is refused when the rest of
+      # the day can't finish one execution; every call stops at the ceiling. See DEPLOYMENT.md §2.
+      - key: DAILY_TOKEN_BUDGET
+        value: "10000000"
 
       # --- guest trial ("try without an account") ---
       - key: GUEST_TRIAL_ENABLED

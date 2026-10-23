@@ -978,6 +978,8 @@ export interface AdminOverview {
     tokensInToday: number;
     tokensOutToday: number;
     tokensLast14d: DayCount[];
+    /** DAILY_TOKEN_BUDGET (0 = no daily ceiling). */
+    dailyTokenBudget?: number;
     /** The optional premium model route (server-side configuration). */
     premium?:
       | { configured: false }
