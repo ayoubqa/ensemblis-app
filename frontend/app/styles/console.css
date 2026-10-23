@@ -3370,3 +3370,15 @@ a.cs-life-i:focus-visible {
   font-size: 13px;
   color: var(--muted);
 }
+
+/* "Was this result useful?" under the outcome judgment. */
+.cs-fb-form {
+  display: flex;
+  flex-basis: 100%;
+  gap: 8px;
+  min-width: 0;
+}
+.cs-fb-form .f {
+  flex: 1;
+  min-width: 0;
+}

@@ -10,7 +10,8 @@ import { ah, HttpError, parse } from "../lib/http";
 import { requireOrg, type OrgRequest } from "../org/organization";
 import { cancelForOrg } from "../engine/lifecycle";
 import { emitNow } from "../engine/events";
-import { FULL_EXECUTION_INCLUDE, toPublicEvent, toPublicExecution, type FullExecution } from "../engine/serialize";
+import { FEEDBACK_METRIC, FULL_EXECUTION_INCLUDE, toPublicEvent, toPublicExecution, toPublicFeedback, type FullExecution } from "../engine/serialize";
+import { log } from "../lib/log";
 import { streamExecution } from "./stream";
 
 const router = Router();
@@ -76,6 +77,32 @@ router.post(
     }
     const updated = await prisma.execution.findUniqueOrThrow({ where: { id: ex.id }, select: { shareToken: true } });
     res.json({ shareToken: updated.shareToken });
+  })
+);
+
+const feedbackSchema = z.object({
+  useful: z.boolean(),
+  comment: z.string().trim().max(500).optional(),
+});
+
+// "Was this result useful?" — one answer per execution (a new answer replaces the earlier one).
+// Stored as a value record (FEEDBACK_METRIC) for the owner's validation metrics; never logged with its text.
+router.post(
+  "/:id/feedback",
+  ah<OrgRequest>(async (req, res) => {
+    const body = parse(feedbackSchema, req.body);
+    const ex = await own(req, req.params.id);
+    if (!["COMPLETED", "FAILED", "CANCELLED"].includes(ex.status)) throw new HttpError(409, "You can rate the result once the execution has finished.");
+    const saved = await prisma.$transaction(async (tx) => {
+      // Serialise answers for this execution, so two at once can't both insert (one answer per execution).
+      await tx.$executeRaw`SELECT 1 FROM "Execution" WHERE "id" = ${ex.id} FOR UPDATE`;
+      await tx.valueRecord.deleteMany({ where: { executionId: ex.id, metric: FEEDBACK_METRIC } });
+      return tx.valueRecord.create({
+        data: { orgId: ex.orgId, executionId: ex.id, objectiveId: ex.objectiveId, metric: FEEDBACK_METRIC, value: body.useful ? 1 : 0, unit: "boolean", note: body.comment ?? "" },
+      });
+    });
+    log.info("product.feedback", { executionId: ex.id, orgId: ex.orgId, useful: body.useful, withComment: !!body.comment });
+    res.json({ feedback: toPublicFeedback(saved) });
   })
 );
 

@@ -160,6 +160,75 @@ export function OutcomePanel({ objective, execution, onExecution, readOnly = fal
         </div>
       </div>
       )}
+
+      {!readOnly && <FeedbackBlock execution={execution} />}
+    </div>
+  );
+}
+
+/** "Was this result useful?" — a yes/no with an optional comment, for the team building Ensemblis. */
+function FeedbackBlock({ execution }: { execution: Execution }) {
+  const toast = useToast();
+  const [saved, setSaved] = useState(execution.feedback ?? null);
+  const [choice, setChoice] = useState<boolean | null>(execution.feedback?.useful ?? null);
+  const [comment, setComment] = useState(execution.feedback?.comment ?? "");
+  const [busy, setBusy] = useState(false);
+  const send = async (useful: boolean, text: string) => {
+    setBusy(true);
+    try {
+      const r = await api.sendFeedback(execution.id, useful, text.trim() || undefined);
+      setSaved(r.feedback);
+      toast("Thanks — feedback saved");
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const dirty = choice !== null && (saved?.useful !== choice || (saved?.comment ?? "") !== comment.trim());
+  return (
+    <div className="cs-judge cs-fb" role="group" aria-labelledby={`fb-${execution.id}`} data-testid="result-feedback">
+      <div className="cs-judge-tt">
+        <p id={`fb-${execution.id}`} className="cs-judge-l">
+          Was this result useful?
+        </p>
+        <p className="cs-judge-h">{saved ? `You said ${saved.useful ? "it was useful" : "it wasn't useful"}. You can change your answer.` : "Your answer goes to the team building Ensemblis — not into the report."}</p>
+      </div>
+      <div className="cs-seg">
+        {([
+          [true, "Useful"],
+          [false, "Not useful"],
+        ] as const).map(([v, label]) => (
+          <button key={label} type="button" className={choice === v ? "on" : undefined} aria-pressed={choice === v} onClick={() => setChoice(v)} disabled={busy}>
+            {choice === v && <Icon name="check" size={13} />}
+            {label}
+          </button>
+        ))}
+      </div>
+      {choice !== null && (
+        <form
+          className="cs-fb-form"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void send(choice, comment);
+          }}
+        >
+          <label className="sr-only" htmlFor={`fb-c-${execution.id}`}>
+            Comment (optional)
+          </label>
+          <input
+            id={`fb-c-${execution.id}`}
+            className="f"
+            maxLength={500}
+            placeholder={choice ? "What made it useful? (optional)" : "What was missing? (optional)"}
+            value={comment}
+            onChange={(e) => setComment(e.target.value)}
+          />
+          <button type="submit" className="btn p sm" disabled={busy || !dirty} aria-busy={busy}>
+            {saved ? "Update" : "Send"}
+          </button>
+        </form>
+      )}
     </div>
   );
 }

@@ -478,6 +478,8 @@ export interface Execution extends ExecutionSummary {
   verificationHistory?: VerificationRound[];
   usage?: ExecutionUsage;
   workLedger?: WorkLedger;
+  /** The person's latest "was this useful?" answer, or null. */
+  feedback?: { useful: boolean; comment: string | null; at: string } | null;
   measurements: OutcomeMeasurement[];
   approvals: Approval[];
   exceptions: ExceptionItem[];
@@ -921,6 +923,32 @@ export interface AdminEconomics {
   excludedCosts: string[];
 }
 
+/** Market-validation metrics (owner dashboard). Operator accounts are excluded; rates are percentages or null. */
+export interface AdminValidation {
+  days: number;
+  since: string;
+  excludedOperatorAccounts: number;
+  activation: {
+    signups: number;
+    definedObjective: number;
+    ranExecution: number;
+    completedResult: number;
+    verifiedResult: number;
+    cameBack: number;
+    rates: { definedObjective: number | null; completedResult: number | null; verifiedResult: number | null; cameBack: number | null };
+    medianHoursToFirstResult: number | null;
+  };
+  guestTrials: number;
+  executions: { started: number; completed: number; failed: number; cancelled: number; blocked: number; inProgress: number; completionRate: number | null };
+  resultStates: Record<ResultState, number>;
+  outcomes: { measured: Record<OutcomeStatus, number>; confirmedByPerson: number; confirmed: Record<OutcomeStatus, number>; agreementRate: number | null };
+  credits: { consumedNet: number; perCompletedExecution: number | null };
+  variableCost: { eurMicros: number; complete: boolean; perCompletedExecutionEurMicros: number | null };
+  failures: { executionsFailed: number; stepFailures: number; exceptionsByKind: Record<string, number> };
+  repeat: { activeAccounts: number; ranOnSeveralDays: number; returningAccounts: number };
+  feedback: { responses: number; useful: number; notUseful: number; usefulRate: number | null; recentComments: { at: string; useful: boolean; comment: string }[] };
+}
+
 export interface AdminOverview {
   generatedAt: string;
   users: { total: number; guests: number; organizations: number; signupsLast14d: DayCount[] };
@@ -1086,6 +1114,11 @@ export const api = {
   cancelExecution: (id: string) => request<{ execution: Execution }>(`/api/executions/${encodeURIComponent(id)}/cancel`, { method: "POST" }),
   shareExecution: (id: string, enabled: boolean) =>
     request<{ shareToken: string | null }>(`/api/executions/${encodeURIComponent(id)}/share`, { method: "POST", body: json({ enabled }) }),
+  sendFeedback: (id: string, useful: boolean, comment?: string) =>
+    request<{ feedback: { useful: boolean; comment: string | null; at: string } }>(`/api/executions/${encodeURIComponent(id)}/feedback`, {
+      method: "POST",
+      body: json({ useful, ...(comment ? { comment } : {}) }),
+    }),
   confirmOutcome: (id: string, status: Exclude<OutcomeStatus, "UNKNOWN">, note?: string) =>
     request<{ execution: Execution }>(`/api/executions/${encodeURIComponent(id)}/outcome`, { method: "POST", body: json({ status, note }) }),
 
@@ -1155,4 +1188,5 @@ export const api = {
   // Owner dashboard (verified ADMIN_EMAILS only)
   adminOverview: () => request<AdminOverview>("/api/admin/overview"),
   adminEconomics: (days = 30) => request<AdminEconomics>(`/api/admin/economics?days=${days}`),
+  adminValidation: (days = 30) => request<AdminValidation>(`/api/admin/validation?days=${days}`),
 };
