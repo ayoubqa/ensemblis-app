@@ -466,6 +466,9 @@ What to check and set, in this order:
    `-pooler` — removing `-pooler` from the pooled host name gives the same address). Add it in Render as `DIRECT_URL` (keep `DATABASE_URL` as it is, or
    replace it with the same direct string). The `[migrate]` log then says
    `connecting with DIRECT_URL`; a pooled connection logs a `WARNING` instead.
+   Copy it from the **same Neon branch and database** as `DATABASE_URL` (not the
+   backup branch): the migrator refuses a `DIRECT_URL` whose host (ignoring `-pooler`)
+   or database name differs, because it would migrate a database the app does not use.
 2. **Look for a holder** (read-only; run in Neon's SQL editor):
    ```sql
    SELECT a.pid, a.state, a.application_name, now() - a.state_change AS in_state_for, left(a.query, 80) AS query

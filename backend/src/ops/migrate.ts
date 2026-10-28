@@ -73,7 +73,33 @@ export function resolveMigrationTarget(env: NodeJS.ProcessEnv = process.env): Mi
     throw new Error(`${source} must start with postgresql:// (found "${parsed.protocol}//").`);
   }
   const pooled = /-pooler(\.|$)/i.test(parsed.hostname) || parsed.searchParams.get("pgbouncer") === "true";
+  if (direct) assertSameDatabase(env, parsed);
   return { url, source, pooled };
+}
+
+/**
+ * DIRECT_URL is copied by hand. One copied from another Neon branch (a backup, say) would migrate a database the
+ * app does not use, and the boot would then see "nothing pending" there and start the API on an unmigrated one.
+ * A pooled and a direct string for the same branch differ only by "-pooler" in the host.
+ */
+function assertSameDatabase(env: NodeJS.ProcessEnv, direct: URL) {
+  const appUrl = env.DATABASE_URL?.trim();
+  if (!appUrl || env.MIGRATE_ALLOW_DIFFERENT_TARGET === "1") return;
+  let app: URL;
+  try {
+    app = new URL(appUrl);
+  } catch {
+    return; // the API will refuse to start on its own
+  }
+  const host = (u: URL) => u.hostname.toLowerCase().replace(/-pooler(?=\.|$)/, "");
+  const differs = [host(app) !== host(direct) && "host", app.pathname !== direct.pathname && "database name"].filter(Boolean);
+  if (differs.length) {
+    throw new Error(
+      `DIRECT_URL and DATABASE_URL differ in the ${differs.join(" and ")}, so migrations would run on a database the app does not use. ` +
+        'A pooled and a direct Neon string for the same branch differ only by "-pooler" in the host: check that DIRECT_URL was copied from the same branch and database as DATABASE_URL ' +
+        "(not a backup branch). Set MIGRATE_ALLOW_DIFFERENT_TARGET=1 only if the difference is intended. Nothing was changed."
+    );
+  }
 }
 
 // ------------------------------------------------------------ prisma CLI runner

@@ -81,6 +81,21 @@ describe("resolveMigrationTarget", () => {
     expect(resolveMigrationTarget({ DATABASE_URL: "postgresql://u:p@db.example.com:6432/app?pgbouncer=true" }).pooled).toBe(true);
     expect(resolveMigrationTarget({ DATABASE_URL: "postgresql://u:p@ep-x.c-5.eu-central-1.aws.neon.tech/app?sslmode=require" }).pooled).toBe(false);
   });
+  it("accepts the direct string of the same Neon endpoint and database, pooled or not", () => {
+    const env = { DATABASE_URL: "postgresql://u:p@ep-wild-x-pooler.c-5.eu-central-1.aws.neon.tech/neondb?sslmode=require", DIRECT_URL: "postgresql://u:p@ep-wild-x.c-5.eu-central-1.aws.neon.tech/neondb?sslmode=require" };
+    expect(resolveMigrationTarget(env)).toMatchObject({ source: "DIRECT_URL", pooled: false });
+    expect(resolveMigrationTarget({ ...env, DIRECT_URL: env.DATABASE_URL }).pooled).toBe(true); // identical strings are fine too
+  });
+  it("refuses a DIRECT_URL for another endpoint (e.g. a backup branch) or another database — migrations would hit the wrong one", () => {
+    const app = "postgresql://u:p@ep-wild-x-pooler.c-5.eu-central-1.aws.neon.tech/neondb";
+    expect(() => resolveMigrationTarget({ DATABASE_URL: app, DIRECT_URL: "postgresql://u:p@ep-backup-y.c-5.eu-central-1.aws.neon.tech/neondb" })).toThrow(/differ in the host.*backup branch/s);
+    expect(() => resolveMigrationTarget({ DATABASE_URL: app, DIRECT_URL: "postgresql://u:p@ep-wild-x.c-5.eu-central-1.aws.neon.tech/otherdb" })).toThrow(/differ in the database name/);
+    expect(() => resolveMigrationTarget({ DATABASE_URL: app, DIRECT_URL: "postgresql://u:p@ep-other.example.com/otherdb" })).toThrow(/host and database name/);
+    // an intended difference needs an explicit opt-in
+    expect(resolveMigrationTarget({ DATABASE_URL: app, DIRECT_URL: "postgresql://u:p@ep-backup-y.example.com/neondb", MIGRATE_ALLOW_DIFFERENT_TARGET: "1" }).source).toBe("DIRECT_URL");
+    // nothing to compare against
+    expect(resolveMigrationTarget({ DIRECT_URL: "postgresql://u:p@ep-backup-y.example.com/neondb" }).source).toBe("DIRECT_URL");
+  });
   it("fails clearly without leaking the connection string", () => {
     expect(() => resolveMigrationTarget({})).toThrow(/DATABASE_URL is not set/);
     expect(() => resolveMigrationTarget({ DIRECT_URL: "this is not a url, pw=hunter2-secret" })).toThrow(/DIRECT_URL is not a valid/);

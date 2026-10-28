@@ -238,13 +238,25 @@ describe("boot migrator", { timeout: 120_000 }, () => {
 
   it("DIRECT_URL is the connection used for migrations (DATABASE_URL may be a pooler) and is never printed", async () => {
     const url = await freshDb("ensemblis_test_m_direct");
-    // DATABASE_URL points nowhere: only DIRECT_URL can have been used.
-    const r = await migrate("postgresql://nobody:never-printed-pw@127.0.0.1:1/nowhere", { DIRECT_URL: url });
+    // Same endpoint and database, but DATABASE_URL carries a password the server rejects: only DIRECT_URL can have been used.
+    const wrongPassword = new URL(url);
+    wrongPassword.password = "never-printed-pw";
+    const r = await migrate(wrongPassword.toString(), { DIRECT_URL: url });
     expect(r.code, r.out).toBe(0);
     expect(r.out).toMatch(/connecting with DIRECT_URL/);
     expect(r.out).not.toMatch(/never-printed-pw|ensemblis:ensemblis@/);
     expect(await appliedMigrationCount(url)).toBeGreaterThan(1);
     noDrift(url);
+  });
+
+  it("a DIRECT_URL that points at a different database is refused before anything is touched", async () => {
+    const appDb = await freshDb("ensemblis_test_m_appdb");
+    const otherDb = await freshDb("ensemblis_test_m_otherdb");
+    const r = await migrate(appDb, { DIRECT_URL: otherDb });
+    expect(r.code).toBe(1);
+    expect(r.out).toMatch(/differ in the database name/);
+    expect(await appliedMigrationCount(appDb)).toBe(0);
+    expect(await appliedMigrationCount(otherDb)).toBe(0);
   });
 
   it("an invalid DIRECT_URL stops the boot with a clear message that does not echo the value", async () => {
