@@ -59,7 +59,8 @@ applies only if you add a standalone worker:
 
 | Variable | API | Worker | Notes |
 |---|---|---|---|
-| `DATABASE_URL` | ✔ | ✔ | Neon **direct** (non-pooled) URL with `?sslmode=require`; same value on both |
+| `DATABASE_URL` | ✔ | ✔ | Neon **direct** (non-pooled) URL with `?sslmode=require`; same value on both. If you must use the pooled (`-pooler`) URL here, also set `DIRECT_URL` |
+| `DIRECT_URL` | ✔ | – | optional: the **direct** (non-pooled) Neon URL, used only by the boot-time migration step (`dist/ops/migrate.js`). Needed whenever `DATABASE_URL` is a pooler; see §8 |
 | `OPENAI_API_KEY` | ✔ | ✔ | Groq key (the worker makes almost all model calls) |
 | `APP_URL` | ✔ | ✔ | frontend URL, no trailing slash — used in email and share links |
 | `CORS_ORIGIN` | ✔ | – | frontend URL(s), comma-separated |
@@ -433,6 +434,53 @@ schema can't be identified (v4 tables without any migration history). Its log
 lines start with `[migrate]`. Legacy v3 tasks still running at deploy time are
 left alone for 15 minutes (a v3 instance may still finish them), then failed
 and refunded.
+
+**Nothing to apply = no lock.** On every boot the migrator reads
+`_prisma_migrations`. If every migration in this release is already recorded as
+applied, it logs `no pending migrations — skipping prisma migrate deploy` and
+starts the API without running `prisma migrate deploy` at all. Restarts,
+environment-variable changes and code-only deploys therefore never depend on
+Prisma's migration lock. When something *is* pending, `migrate deploy` runs
+with its lock exactly as before (the lock is never disabled).
+
+### Deploy fails with `P1002` ("Timed out trying to acquire a postgres advisory lock")
+
+`prisma migrate deploy` takes a session-level Postgres advisory lock (key
+`72707369`) and gives up after 10 seconds (a fixed Prisma limit). It means some
+other session holds that lock, or the connection cannot hold one reliably.
+
+What the migrator does about it: if migrations are pending it retries a lock
+timeout or a dropped connection (`MIGRATE_MAX_ATTEMPTS`, default 5;
+`MIGRATE_RETRY_DELAY_MS`, default 10000, growing per attempt), re-reading what is
+still pending before each try. After the last attempt it exits 1 with a message,
+so **the new version does not replace the running one** (Render keeps serving the
+previous instance; environment-variable changes only take effect after a deploy
+succeeds).
+
+What to check and set, in this order:
+
+1. **Use a direct connection for migrations.** On Neon, `DATABASE_URL` hosts that
+   contain `-pooler` go through PgBouncer in transaction mode, which does not keep
+   session-level locks reliably. In Neon: *Connect* → turn **Connection pooling
+   off** → copy that string (it has the same user and password; the host has no
+   `-pooler` — removing `-pooler` from the pooled host name gives the same address). Add it in Render as `DIRECT_URL` (keep `DATABASE_URL` as it is, or
+   replace it with the same direct string). The `[migrate]` log then says
+   `connecting with DIRECT_URL`; a pooled connection logs a `WARNING` instead.
+   Copy it from the **same Neon branch and database** as `DATABASE_URL` (not the
+   backup branch): the migrator refuses a `DIRECT_URL` whose host (ignoring `-pooler`)
+   or database name differs, because it would migrate a database the app does not use.
+2. **Look for a holder** (read-only; run in Neon's SQL editor):
+   ```sql
+   SELECT a.pid, a.state, a.application_name, now() - a.state_change AS in_state_for, left(a.query, 80) AS query
+   FROM pg_locks l JOIN pg_stat_activity a ON a.pid = l.pid
+   WHERE l.locktype = 'advisory' AND l.objid = 72707369 AND l.granted;
+   ```
+   No rows: nothing holds it now — redeploy. A row: the holder is another running
+   deploy (wait for it to finish) or a session left over from an earlier one. Do
+   not terminate a session unless you know it is stale and no deploy is running;
+   a Neon compute that has auto-suspended drops all sessions by itself.
+3. **One deploy at a time.** Changing an environment variable in Render starts a
+   deploy; two edits in quick succession start two. Wait for the first to finish.
 
 ## 9. Recovery checks you can run anytime
 

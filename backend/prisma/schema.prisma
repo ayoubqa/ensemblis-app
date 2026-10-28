@@ -20,7 +20,10 @@ generator client {
 }
 
 // DATABASE_URL: on Neon use the *direct* (non-pooled) connection string with
-// `?sslmode=require` — it works for both the app and `prisma db push`.
+// `?sslmode=require` — it works for both the app and `prisma db push`. If it is the
+// pooled ("-pooler") string, set DIRECT_URL too: src/ops/migrate.ts then runs every
+// migration step on that connection (no `directUrl` here, so a missing DIRECT_URL
+// never breaks the other Prisma commands).
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
