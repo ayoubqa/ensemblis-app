@@ -3,13 +3,20 @@
 // JSON-LD and the visible entity definitions — keep them identical (GEO/AIO).
 import type { Metadata } from "next";
 
-/** Absolute site origin for canonical URLs, sitemap and Open Graph. */
-function resolveSiteUrl(): string {
-  const explicit = process.env.NEXT_PUBLIC_SITE_URL?.trim();
+/** The primary public domain: every canonical URL, sitemap entry and Open Graph URL points here. */
+export const PRIMARY_ORIGIN = "https://www.getensemblis.com";
+
+/**
+ * Absolute site origin for canonical URLs, sitemap and Open Graph.
+ * NEXT_PUBLIC_SITE_URL wins (a domain change needs only that variable). On Vercel the primary domain is used
+ * for production AND previews: Vercel's VERCEL_PROJECT_PRODUCTION_URL is the *shortest* production domain
+ * (getensemblis.com, which redirects), and the deployment is also served on *.vercel.app — canonicals must
+ * name one host. Elsewhere (local builds, tests) it is localhost.
+ */
+export function resolveSiteUrl(env: Record<string, string | undefined> = process.env): string {
+  const explicit = env.NEXT_PUBLIC_SITE_URL?.trim();
   if (explicit) return explicit.replace(/\/+$/, "");
-  // Vercel exposes the production domain at build time (no protocol).
-  const vercel = process.env.VERCEL_PROJECT_PRODUCTION_URL?.trim();
-  if (vercel) return `https://${vercel.replace(/\/+$/, "")}`;
+  if (env.VERCEL_ENV === "production" || env.VERCEL_ENV === "preview") return PRIMARY_ORIGIN;
   return "http://localhost:3000";
 }
 
