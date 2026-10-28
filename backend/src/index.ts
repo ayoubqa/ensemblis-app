@@ -26,6 +26,7 @@ import { publicConfig } from "./public/config";
 import { stripeWebhookHandler } from "./billing/stripe";
 import { ah, errorHandler } from "./lib/http";
 import { globalLimiter } from "./lib/rateLimits";
+import { noteRejectedOrigin } from "./lib/cors";
 import { log } from "./lib/log";
 import { aiProviderLabel } from "./ai/llmProvider";
 import { maintenance } from "./engine/maintenance";
@@ -44,7 +45,9 @@ app.use(
     origin: (origin, cb) => {
       // No Origin header = same-origin, curl, health checks: allow.
       if (!origin) return cb(null, true);
-      cb(null, config.corsOrigins.includes(origin.replace(/\/+$/, "")));
+      const allowed = config.corsOrigins.includes(origin.replace(/\/+$/, ""));
+      if (!allowed) noteRejectedOrigin(origin);
+      cb(null, allowed);
     },
     credentials: true,
   })
@@ -126,7 +129,7 @@ async function start() {
   for (const w of productionConfigWarnings()) console.warn(`[config] WARNING: ${w}`);
 
   const server = app.listen(port, () => {
-    log.info("api.listening", { port, ai: aiProviderLabel(), embeddedWorker: embeddedWorkerEnabled() });
+    log.info("api.listening", { port, ai: aiProviderLabel(), embeddedWorker: embeddedWorkerEnabled(), corsOrigins: config.corsOrigins });
     console.log(
       `Optional services — search: ${config.search.provider}, email: ${config.email.enabled ? "on" : "off"}, payments: ${config.stripe.enabled ? "on" : "off"}, guest trial: ${config.guest.enabled ? "on" : "off"}`
     );

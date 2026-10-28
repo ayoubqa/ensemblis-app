@@ -436,6 +436,24 @@ and refunded.
 
 ## 9. Recovery checks you can run anytime
 
+### Login or sign-up says "Can't reach the Ensemblis server"
+
+That message means the browser's request failed **before any response arrived** — a wrong password, a
+rejected invite code or a server error each show their own message instead. `/health` staying green says
+nothing about it: it is not a cross-origin browser call. Open the browser's developer tools (F12) on the
+failing page, try again, and read the **Console**:
+
+| The console says | Cause | Fix |
+|---|---|---|
+| `Access to fetch at '…' from origin 'https://www.example.com' has been blocked by CORS policy` | The API's `CORS_ORIGIN` doesn't list the exact origin the site is served from (a new custom domain, or `www` vs the bare domain — they are different origins). The login `POST` never reaches the API; only the preflight does. The API log shows `cors.origin_rejected` with the origin. | Render → `ensemblis-api` → Environment → `CORS_ORIGIN`: add every origin, comma-separated, e.g. `https://www.example.com,https://example.com,https://<project>.vercel.app` (scheme and host only, no path). Save; the service restarts. |
+| `net::ERR_CONNECTION_REFUSED` to `http://localhost:4000/…`, or the page itself says the server address "was not set when the site was built" | `NEXT_PUBLIC_API_URL` was empty for that Vercel build, so the site calls localhost. It is baked in at build time. | Vercel → Settings → Environment Variables: set `NEXT_PUBLIC_API_URL` (Production) to the API's `https://…onrender.com` address, no trailing slash, then **redeploy** (a new build, not just a restart). |
+| `Mixed Content` / "insecure (http://) server address" | `NEXT_PUBLIC_API_URL` starts with `http://`. | Use the `https://` address and redeploy. |
+| `net::ERR_NAME_NOT_RESOLVED` or a timeout on the API host | The API address is misspelt, or the Render free instance is still waking (allow a minute and retry). | Check `NEXT_PUBLIC_API_URL` against the Render service URL. |
+
+The API logs every origin it refuses once (`cors.origin_rejected`) and lists the allowed origins at start
+(`api.listening` → `corsOrigins`), so Render's log answers "does the site's request even get in?".
+
+
 ```bash
 cd backend && npm run build
 npm run check:worker-restart   # kills the worker mid-step (SIGKILL and SIGTERM) and checks recovery
