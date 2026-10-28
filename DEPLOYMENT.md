@@ -63,7 +63,7 @@ applies only if you add a standalone worker:
 | `DIRECT_URL` | ✔ | – | optional: the **direct** (non-pooled) Neon URL, used only by the boot-time migration step (`dist/ops/migrate.js`). Needed whenever `DATABASE_URL` is a pooler; see §8 |
 | `OPENAI_API_KEY` | ✔ | ✔ | Groq key (the worker makes almost all model calls) |
 | `APP_URL` | ✔ | ✔ | frontend URL, no trailing slash — used in email and share links |
-| `CORS_ORIGIN` | ✔ | – | frontend URL(s), comma-separated |
+| `CORS_ORIGIN` | ✔ | – | every origin the frontend is served from, exact `https://host` form, comma-separated, e.g. `https://www.example.com,https://example.com,https://<project>.vercel.app` (`www` and the bare domain are different origins; no wildcards, no spaces; malformed entries are ignored and logged on start) |
 | `ADMIN_EMAILS` | ✔ | – | operators; must also verify their email (see §6) |
 | `TAVILY_API_KEY` | ✔ | ✔ | web search — **required for research briefs**; without it search falls back to Wikipedia only (briefs are labelled limited evidence) |
 | `RESEND_API_KEY`, `EMAIL_FROM` | ✔ | ✔ | optional email: verification, notifications, password reset |
@@ -483,6 +483,27 @@ What to check and set, in this order:
    deploy; two edits in quick succession start two. Wait for the first to finish.
 
 ## 9. Recovery checks you can run anytime
+
+### Login or sign-up says "Can't reach the Ensemblis server"
+
+That message means the browser's request failed **before any response arrived** — a wrong password, a
+rejected invite code or a server error each show their own message instead. `/health` staying green says
+nothing about it: it is not a cross-origin browser call. When the page can tell that the server *is*
+answering (a simple request to `/health/live` succeeds) it says "The Ensemblis server is running but
+didn't accept the request from this site (…)" instead, which points straight at `CORS_ORIGIN`. Open the
+browser's developer tools (F12) on the failing page, try again, and read the **Console**:
+
+| The console says | Cause | Fix |
+|---|---|---|
+| `Access to fetch at '…' from origin 'https://www.example.com' has been blocked by CORS policy` | The API's `CORS_ORIGIN` doesn't list the exact origin the site is served from (a new custom domain, or `www` vs the bare domain — they are different origins). The login `POST` never reaches the API; only the preflight does. The API log shows `cors.origin_rejected` with the origin. | Render → `ensemblis-api` → Environment → `CORS_ORIGIN`: add every origin, comma-separated, e.g. `https://www.example.com,https://example.com,https://<project>.vercel.app` (scheme and host only, no path, no spaces, no `*`). Save. **The change only takes effect when the deploy it starts succeeds** — if that deploy fails (see §8, P1002) the old value keeps running. Also set `APP_URL` to the one address people should land on (emails and share links use it). |
+| *(API log, no browser symptom)* `[config] WARNING: CORS_ORIGIN entry "https//www.example.com" is IGNORED: not a valid origin … Did you mean "https://www.example.com"?` | One entry is malformed (here the colon after `https` is missing) and can never match, so that site is blocked while the others work. The API ignores such entries, and wildcards, and says so on every start. | Correct that entry in `CORS_ORIGIN` exactly as the log suggests. |
+| `net::ERR_CONNECTION_REFUSED` to `http://localhost:4000/…`, or the page itself says the server address "was not set when the site was built" | `NEXT_PUBLIC_API_URL` was empty for that Vercel build, so the site calls localhost. It is baked in at build time. | Vercel → Settings → Environment Variables: set `NEXT_PUBLIC_API_URL` (Production) to the API's `https://…onrender.com` address, no trailing slash, then **redeploy** (a new build, not just a restart). |
+| `Mixed Content` / "insecure (http://) server address" | `NEXT_PUBLIC_API_URL` starts with `http://`. | Use the `https://` address and redeploy. |
+| `net::ERR_NAME_NOT_RESOLVED` or a timeout on the API host | The API address is misspelt, or the Render free instance is still waking (allow a minute and retry). | Check `NEXT_PUBLIC_API_URL` against the Render service URL. |
+
+The API logs every origin it refuses once (`cors.origin_rejected`) and lists the allowed origins at start
+(`api.listening` → `corsOrigins`), so Render's log answers "does the site's request even get in?".
+
 
 ```bash
 cd backend && npm run build

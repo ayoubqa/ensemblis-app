@@ -67,7 +67,7 @@ services:
       # --- entered by you in the Render dashboard ---
       - key: DATABASE_URL # direct (non-pooled) connection string, with ?sslmode=require
         sync: false
-      - key: CORS_ORIGIN # your frontend URL, e.g. https://ensemblis.vercel.app (comma-separate several)
+      - key: CORS_ORIGIN # EVERY origin the site is served from, exact scheme+host, comma-separated: the Vercel URL AND any custom domain (www and the bare domain are different origins). A missing one makes login say "Can't reach the Ensemblis server".
         sync: false
       - key: APP_URL # your frontend URL — used in emails, share links and Stripe redirects
         sync: false

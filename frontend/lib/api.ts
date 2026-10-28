@@ -13,7 +13,8 @@
 //   Memory           what Ensemblis learned from operations
 // =====================================================================
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000";
+// A trailing slash would turn every request into "//api/…", which the server does not route.
+const API_URL = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000").replace(/\/+$/, "");
 const TOKEN_KEY = "ensemblis_token";
 /** Fired on window when an authenticated request comes back 401 (session ended). */
 export const UNAUTHORIZED_EVENT = "ensemblis:unauthorized";
@@ -949,6 +950,67 @@ export function apiUrl(path: string): string {
   return `${API_URL}${path}`;
 }
 
+export const OFFLINE_MESSAGE = "Can't reach the Ensemblis server. Check your connection and try again.";
+
+/**
+ * The page can tell "the server is there but won't talk to this site" from "no server": a request in
+ * `no-cors` mode needs no CORS permission, so it resolves (opaquely) whenever the server answers at all and
+ * rejects only when nothing answered (offline, DNS, TLS, a server that is down).
+ * Used after a real request has already failed before any response.
+ */
+export async function serverAnswers(apiBase: string, fetchImpl: typeof fetch = fetch, timeoutMs = 5000): Promise<boolean> {
+  if (typeof navigator !== "undefined" && navigator.onLine === false) return false;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    await fetchImpl(`${apiBase}/health/live`, { mode: "no-cors", cache: "no-store", credentials: "omit", signal: controller.signal });
+    return true;
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** The server answered a simple request but the real one never got a readable response: CORS, or a server still starting. */
+export function refusedMessage(pageOrigin: string): string {
+  let host = pageOrigin;
+  try {
+    host = new URL(pageOrigin).host;
+  } catch {
+    /* keep the raw value */
+  }
+  return `The Ensemblis server is running but didn't accept the request from this site (${host}). Wait a minute and try again; if it keeps happening, the site owner needs to allow this address on the server (CORS_ORIGIN).`;
+}
+
+const LOOPBACK = new Set(["localhost", "127.0.0.1", "[::1]"]);
+
+/**
+ * A fetch that fails before any response (the only way request() reaches its catch) has a few causes that
+ * the page itself can recognise: the API address was never set when the site was built (it falls back to
+ * localhost), or it is an http:// address that browsers refuse to call from an https:// page. Anything else
+ * (offline, a server that is down, or a server whose CORS_ORIGIN doesn't list this site) is
+ * indistinguishable from here, so null: the generic message applies and the console says what to check.
+ */
+export function connectionProblem(apiBase: string, pageOrigin: string | null): string | null {
+  if (!pageOrigin) return null;
+  let api: URL;
+  let page: URL;
+  try {
+    api = new URL(apiBase);
+    page = new URL(pageOrigin);
+  } catch {
+    return `This site's server address (${apiBase || "empty"}) isn't a valid web address, so it can't reach its server. The site owner needs to set NEXT_PUBLIC_API_URL to the API's https:// address and redeploy.`;
+  }
+  if (LOOPBACK.has(api.hostname) && !LOOPBACK.has(page.hostname)) {
+    return "This site isn't connected to its server: the server address was not set when the site was built, so it points at localhost. The site owner needs to set NEXT_PUBLIC_API_URL to the API's https:// address and redeploy.";
+  }
+  if (page.protocol === "https:" && api.protocol === "http:" && !LOOPBACK.has(api.hostname)) {
+    return "This site is configured with an insecure (http://) server address, which browsers block on an https:// page. The site owner needs to set NEXT_PUBLIC_API_URL to the API's https:// address and redeploy.";
+  }
+  return null;
+}
+
 // These answer 401 for a wrong password, which says nothing about the session in this browser (a
 // guest who mistypes their real account's password must keep the trial).
 const CREDENTIAL_CHECKS = new Set(["/api/auth/login", "/api/auth/signup", "/api/auth/forgot", "/api/auth/reset"]);
@@ -973,7 +1035,19 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
       },
     });
   } catch {
-    throw new ApiError("Can't reach the Ensemblis server. Check your connection and try again.", 0);
+    const origin = typeof window !== "undefined" ? window.location.origin : null;
+    // For whoever opens the browser console: the page can't tell CORS from a server that is down, but you can.
+    if (typeof console !== "undefined") {
+      console.error(
+        `[ensemblis] ${options.method ?? "GET"} ${apiUrl(path)} failed before any response arrived (page origin: ${origin ?? "unknown"}). ` +
+          `If the console also says "blocked by CORS policy", add ${origin ?? "this site's origin"} to CORS_ORIGIN on the API server; ` +
+          "otherwise check that the API is up and that NEXT_PUBLIC_API_URL is its https:// address."
+      );
+    }
+    // Distinguish "the site was built wrong" (no probe needed), "the server answers but refused this site" and "no server".
+    const buildProblem = connectionProblem(API_URL, origin);
+    const reachable = !buildProblem && origin !== null && (await serverAnswers(API_URL));
+    throw new ApiError(buildProblem ?? (reachable && origin ? refusedMessage(origin) : OFFLINE_MESSAGE), 0);
   }
   const data = await res.json().catch(() => ({}));
   if (res.status === 401 && !CREDENTIAL_CHECKS.has(path) && getToken() === token) {
