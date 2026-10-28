@@ -40,14 +40,47 @@ function v3Database(url: string) {
             INSERT INTO "Task"(id,"userId",title,description,status,"shareToken") VALUES ('t1','u1','Old report','d','COMPLETED','tok_legacy_0123456789');`);
 }
 
-function migrate(url: string): Promise<{ code: number; out: string }> {
+function migrate(url: string, extraEnv: Record<string, string> = {}): Promise<{ code: number; out: string }> {
   return new Promise((resolve) => {
-    const p = spawn(process.execPath, [tsx, "src/ops/migrate.ts"], { cwd: root, env: { ...process.env, DATABASE_URL: url } });
+    const p = spawn(process.execPath, [tsx, "src/ops/migrate.ts"], { cwd: root, env: { ...process.env, DATABASE_URL: url, ...extraEnv } });
     let out = "";
     p.stdout.on("data", (d) => (out += d));
     p.stderr.on("data", (d) => (out += d));
     p.on("exit", (code) => resolve({ code: code ?? 1, out }));
   });
+}
+
+/** Prisma's own migration lock (`pg_advisory_lock(72707369)`). A transaction-level lock on the same key conflicts with it. */
+async function holdMigrationLock(url: string, maxMs: number) {
+  const holder = new PrismaClient({ datasources: { db: { url } } });
+  let release!: () => void;
+  const released = new Promise<void>((resolve) => (release = resolve));
+  let acquired!: () => void;
+  const ready = new Promise<void>((resolve) => (acquired = resolve));
+  const done = holder
+    .$transaction(
+      async (tx) => {
+        await tx.$executeRawUnsafe("SELECT pg_advisory_xact_lock(72707369)");
+        acquired();
+        await Promise.race([released, new Promise((resolve) => setTimeout(resolve, maxMs))]);
+      },
+      { timeout: maxMs + 30_000, maxWait: 30_000 }
+    )
+    .finally(() => holder.$disconnect());
+  await ready;
+  return { release: () => { release(); return done; } };
+}
+
+async function appliedMigrationCount(url: string): Promise<number> {
+  const p = new PrismaClient({ datasources: { db: { url } } });
+  try {
+    const t = await p.$queryRawUnsafe<{ n: boolean }[]>(`SELECT to_regclass('public."_prisma_migrations"') IS NOT NULL AS n`);
+    if (!t[0]?.n) return 0;
+    const r = await p.$queryRawUnsafe<{ n: bigint }[]>(`SELECT count(*) AS n FROM "_prisma_migrations" WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL`);
+    return Number(r[0].n);
+  } finally {
+    await p.$disconnect();
+  }
 }
 
 function noDrift(url: string) {
@@ -147,6 +180,79 @@ describe("boot migrator", { timeout: 120_000 }, () => {
       { id: "e2_ai_assessed", outcomeStatus: "PARTIALLY_ACHIEVED", confirmedOutcomeStatus: null },
       { id: "e3_confirmed_since", outcomeStatus: "ACHIEVED", confirmedOutcomeStatus: "NOT_ACHIEVED" },
     ]);
+  });
+
+  // ---- the production incident: Render deploys failed with P1002 ("Timed out trying to acquire a postgres
+  // advisory lock") although the database was already up to date.
+  it("an up-to-date database boots without touching Prisma's lock, even while another session holds it", async () => {
+    const url = await freshDb("ensemblis_test_m_uptodate");
+    const first = await migrate(url);
+    expect(first.code, first.out).toBe(0);
+    const before = await appliedMigrationCount(url);
+    expect(before).toBeGreaterThan(1);
+
+    const lock = await holdMigrationLock(url, 60_000);
+    try {
+      const r = await migrate(url);
+      expect(r.code, r.out).toBe(0);
+      expect(r.out).toMatch(/no pending migrations/);
+      expect(r.out).not.toMatch(/P1002|advisory lock.*timed out|FAILED/i);
+    } finally {
+      await lock.release();
+    }
+    expect(await appliedMigrationCount(url)).toBe(before);
+    noDrift(url);
+  });
+
+  it("with migrations pending, a lock held longer than Prisma's 10 s timeout is retried and then applied", async () => {
+    const url = await freshDb("ensemblis_test_m_lockretry");
+    const lock = await holdMigrationLock(url, 14_000);
+    const r = await migrate(url, { MIGRATE_RETRY_DELAY_MS: "500", MIGRATE_MAX_ATTEMPTS: "4" });
+    await lock.release();
+    expect(r.code, r.out).toBe(0);
+    expect(r.out).toMatch(/could not get Prisma's migration lock in time/);
+    expect(r.out).toMatch(/attempt 2 of 4/);
+    expect(r.out).toMatch(/\[migrate\] done/);
+    noDrift(url);
+  });
+
+  it("with migrations pending and the lock never freed, it fails clearly after the configured attempts and applies nothing", async () => {
+    const url = await freshDb("ensemblis_test_m_lockfail");
+    const lock = await holdMigrationLock(url, 60_000);
+    let r;
+    try {
+      r = await migrate(url, { MIGRATE_MAX_ATTEMPTS: "1" });
+    } finally {
+      await lock.release();
+    }
+    expect(r.code, r.out).toBe(1);
+    expect(r.out).toMatch(/\[migrate\] FAILED: .*after 1 attempt/);
+    expect(r.out).toMatch(/DIRECT_URL/);
+    expect(r.out).toMatch(/API was not started/);
+    expect(await appliedMigrationCount(url)).toBe(0);
+    // Once the lock is free the next boot succeeds: nothing was left half-done.
+    const again = await migrate(url);
+    expect(again.code, again.out).toBe(0);
+    noDrift(url);
+  });
+
+  it("DIRECT_URL is the connection used for migrations (DATABASE_URL may be a pooler) and is never printed", async () => {
+    const url = await freshDb("ensemblis_test_m_direct");
+    // DATABASE_URL points nowhere: only DIRECT_URL can have been used.
+    const r = await migrate("postgresql://nobody:never-printed-pw@127.0.0.1:1/nowhere", { DIRECT_URL: url });
+    expect(r.code, r.out).toBe(0);
+    expect(r.out).toMatch(/connecting with DIRECT_URL/);
+    expect(r.out).not.toMatch(/never-printed-pw|ensemblis:ensemblis@/);
+    expect(await appliedMigrationCount(url)).toBeGreaterThan(1);
+    noDrift(url);
+  });
+
+  it("an invalid DIRECT_URL stops the boot with a clear message that does not echo the value", async () => {
+    const url = await freshDb("ensemblis_test_m_baddirect");
+    const r = await migrate(url, { DIRECT_URL: "mysql://user:leaked-pw@db.example.com/app" });
+    expect(r.code).toBe(1);
+    expect(r.out).toMatch(/DIRECT_URL must start with postgresql/);
+    expect(r.out).not.toMatch(/leaked-pw/);
   });
 
   it("refuses to guess when v4 tables exist without any migration history", async () => {
