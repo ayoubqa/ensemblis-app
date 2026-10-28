@@ -1,0 +1,56 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 470" role="img" aria-labelledby="t d">
+  <title id="t">The AI Performance Funnel, with hypothetical numbers</title>
+  <desc id="d">Four stages measured on 200 sampled answers: the prompt set (200 answers, 100%), visibility (45% of answers mention the brand), recommendation (27% recommend it) and first position (9% name it first). Recommendation conversion is 27 divided by 45, or 60%. First-position conversion is 9 divided by 27, or 33%.</desc>
+  <defs>
+    <pattern id="dots" width="24" height="24" patternUnits="userSpaceOnUse"><circle cx="1.5" cy="1.5" r="1.1" fill="#8fa0b4" fill-opacity="0.14"/></pattern>
+  </defs>
+  <rect width="960" height="470" rx="14" fill="#07111f"/>
+  <rect width="960" height="470" rx="14" fill="url(#dots)"/>
+  <text x="40" y="46" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" font-weight="600" letter-spacing="1.6" fill="#8fa0b4">AI PERFORMANCE FUNNEL · HYPOTHETICAL EXAMPLE · 40 PROMPTS × 5 RUNS</text>
+
+  <!-- vertical trace connecting the stages -->
+  <path d="M318 112 V376" stroke="#2b8cff" stroke-opacity="0.5" stroke-width="2" stroke-dasharray="4 6"/>
+
+  <!-- stage 0: prompt set -->
+  <g font-family="Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif">
+    <text x="40" y="106" font-size="18" font-weight="700" fill="#f6f8fb">Prompt coverage</text>
+    <text x="40" y="128" font-size="13.5" fill="#a3b1c2">The buyer questions you measure</text>
+    <circle cx="318" cy="112" r="7" fill="#07111f" stroke="#8fa0b4" stroke-width="3"/>
+    <rect x="340" y="92" width="440" height="40" rx="6" fill="#233552"/>
+    <text x="796" y="118" font-size="15" fill="#f6f8fb">200 answers</text>
+
+    <!-- stage 1: visibility -->
+    <text x="40" y="194" font-size="18" font-weight="700" fill="#f6f8fb">Visibility</text>
+    <text x="40" y="216" font-size="13.5" fill="#a3b1c2">Answers that mention you</text>
+    <circle cx="318" cy="200" r="7" fill="#07111f" stroke="#2b8cff" stroke-width="3"/>
+    <rect x="340" y="180" width="198" height="40" rx="6" fill="#2b8cff" fill-opacity="0.45"/>
+    <text x="554" y="206" font-size="15" fill="#f6f8fb"><tspan font-weight="700">45%</tspan> · 90 answers</text>
+
+    <!-- stage 2: recommendation -->
+    <text x="40" y="282" font-size="18" font-weight="700" fill="#f6f8fb">Recommendation</text>
+    <text x="40" y="304" font-size="13.5" fill="#a3b1c2">Answers that recommend you</text>
+    <circle cx="318" cy="288" r="7" fill="#07111f" stroke="#2b8cff" stroke-width="3"/>
+    <rect x="340" y="268" width="119" height="40" rx="6" fill="#2b8cff"/>
+    <text x="475" y="294" font-size="15" fill="#f6f8fb"><tspan font-weight="700">27%</tspan> · 54 answers</text>
+
+    <!-- stage 3: first position -->
+    <text x="40" y="370" font-size="18" font-weight="700" fill="#f6f8fb">First position</text>
+    <text x="40" y="392" font-size="13.5" fill="#a3b1c2">Answers that name you first</text>
+    <circle cx="318" cy="376" r="9" fill="#3ccf91"/>
+    <path d="M313 376 l3.5 3.5 l6 -7" fill="none" stroke="#07111f" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>
+    <rect x="340" y="356" width="40" height="40" rx="6" fill="#3ccf91"/>
+    <text x="396" y="382" font-size="15" fill="#f6f8fb"><tspan font-weight="700">9%</tspan> · 18 answers</text>
+  </g>
+
+  <!-- conversions -->
+  <g font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13.5">
+    <path d="M700 214 h20 v82 h-20" fill="none" stroke="#f2b33d" stroke-width="2"/>
+    <text x="730" y="250" fill="#f2b33d" font-weight="700">Recommendation</text>
+    <text x="730" y="268" fill="#f2b33d" font-weight="700">conversion</text>
+    <text x="730" y="288" fill="#f6f8fb">27 ÷ 45 = 60%</text>
+    <path d="M620 302 h20 v82 h-20" fill="none" stroke="#3ccf91" stroke-width="2"/>
+    <text x="650" y="338" fill="#3ccf91" font-weight="700">First-position conversion</text>
+    <text x="650" y="358" fill="#f6f8fb">9 ÷ 27 = 33%</text>
+  </g>
+  <text x="40" y="440" font-family="Inter, system-ui, sans-serif" font-size="13" fill="#8fa0b4">Rates are shares of all sampled answers. Hypothetical numbers, for illustration only.</text>
+</svg>
