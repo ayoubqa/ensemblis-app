@@ -11,3 +11,15 @@ export const inter = localFont({
   display: "swap",
   fallback: ["system-ui", "-apple-system", "Segoe UI", "Roboto", "Helvetica", "Arial", "sans-serif"],
 });
+
+// Newsreader (variable, latin; SIL OFL 1.1), self-hosted from @fontsource-variable/newsreader: the editorial
+// serif for display headings on the public site and long-form reading on the Journal. Inter stays the UI face.
+export const newsreader = localFont({
+  src: [
+    { path: "../node_modules/@fontsource-variable/newsreader/files/newsreader-latin-wght-normal.woff2", weight: "200 800", style: "normal" },
+    { path: "../node_modules/@fontsource-variable/newsreader/files/newsreader-latin-wght-italic.woff2", weight: "200 800", style: "italic" },
+  ],
+  variable: "--font-newsreader",
+  display: "swap",
+  fallback: ["Georgia", "Cambria", "Times New Roman", "serif"],
+});

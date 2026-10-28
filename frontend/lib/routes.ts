@@ -7,6 +7,11 @@ export const ROUTES = {
   /** The full public explanation page (footer, palette). */
   howItWorksPage: "/how-it-works",
   trust: "/#trust",
+  useCases: "/use-cases",
+  pricing: "/pricing",
+  /** Request access while sign-up is invite-only (or a short path to sign-up when it isn't). */
+  access: "/access",
+  blog: "/blog",
   dashboard: "/dashboard",
   objectives: "/objectives",
   newObjective: "/objectives/new",
