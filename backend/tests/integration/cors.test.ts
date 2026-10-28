@@ -2,11 +2,12 @@
 // Access-Control-Allow-Origin header, the browser refuses the response, and the page only sees a failed
 // fetch ("Can't reach the Ensemblis server") while /health stays green. These tests pin that behaviour
 // and the log line that makes it visible on the server.
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { config } from "../../src/config";
 import { log } from "../../src/lib/log";
 import { resetRejectedOriginsForTests } from "../../src/lib/cors";
-import { api } from "../helpers";
+import { parseCorsOrigins } from "../../src/lib/corsOrigins";
+import { api, createUser } from "../helpers";
 
 const ALLOWED = "http://localhost:3000"; // the test default (CORS_ORIGIN unset)
 const CUSTOM_DOMAIN = "https://www.getensemblis.com";
@@ -60,5 +61,86 @@ describe("CORS allow-list", () => {
     for (let i = 0; i < 80; i++) await api().get("/health/live").set("Origin", `https://site-${i}.test`);
     expect(warn.mock.calls.length).toBeLessThanOrEqual(50);
     warn.mockRestore();
+  });
+});
+
+// The production domains. CORS_ORIGIN is applied through the same parser config.ts uses at boot.
+describe("production origins", () => {
+  const VERCEL = "https://ensemblis-app.vercel.app";
+  const WWW = "https://www.getensemblis.com";
+  const APEX = "https://getensemblis.com";
+  const INCIDENT = `${VERCEL},https//www.getensemblis.com`; // what Render held: the colon is missing in the second entry
+  const CORRECTED = `${WWW},${APEX},${VERCEL}`;
+
+  let original: string[];
+  beforeEach(() => {
+    resetRejectedOriginsForTests();
+    original = [...config.corsOrigins];
+    vi.spyOn(log, "warn").mockImplementation(() => undefined);
+  });
+  afterEach(() => {
+    config.corsOrigins.splice(0, config.corsOrigins.length, ...original);
+    vi.restoreAllMocks();
+  });
+  const useCorsOrigin = (value: string) => config.corsOrigins.splice(0, config.corsOrigins.length, ...parseCorsOrigins(value).origins);
+  const preflight = (origin: string) =>
+    api().options("/api/auth/login").set("Origin", origin).set("Access-Control-Request-Method", "POST").set("Access-Control-Request-Headers", "authorization,content-type");
+
+  it("with the value that was live, the Vercel origin works and www is refused (the reported symptom)", async () => {
+    useCorsOrigin(INCIDENT);
+    expect(config.corsOrigins).toEqual([VERCEL]);
+    expect((await preflight(VERCEL)).headers["access-control-allow-origin"]).toBe(VERCEL);
+    expect((await preflight(WWW)).headers["access-control-allow-origin"]).toBeUndefined();
+    expect((await preflight(APEX)).headers["access-control-allow-origin"]).toBeUndefined();
+  });
+
+  it.each([WWW, APEX, VERCEL])("with the corrected value, %s passes the preflight with credentials and the headers the app sends", async (origin) => {
+    useCorsOrigin(CORRECTED);
+    const res = await preflight(origin);
+    expect(res.status).toBe(204);
+    expect(res.headers["access-control-allow-origin"]).toBe(origin);
+    expect(res.headers["access-control-allow-credentials"]).toBe("true");
+    expect(res.headers["access-control-allow-methods"]).toMatch(/POST/);
+    expect(res.headers["access-control-allow-headers"]?.toLowerCase()).toMatch(/authorization/);
+    expect(res.headers["access-control-allow-headers"]?.toLowerCase()).toMatch(/content-type/);
+    expect(res.headers["vary"]).toMatch(/Origin/i);
+  });
+
+  it.each([WWW, APEX, VERCEL])("a real login from %s gets a token the browser is allowed to read; a wrong password is a readable 401, not a network failure", async (origin) => {
+    useCorsOrigin(CORRECTED);
+    const { user } = await createUser({ email: `login-${Date.now()}@example.com` });
+    const ok = await api().post("/api/auth/login").set("Origin", origin).send({ email: user.email, password: "password123" });
+    expect(ok.status).toBe(200);
+    expect(ok.body.token).toBeTruthy();
+    expect(ok.headers["access-control-allow-origin"]).toBe(origin);
+    const bad = await api().post("/api/auth/login").set("Origin", origin).send({ email: user.email, password: "not-the-password" });
+    expect(bad.status).toBe(401);
+    expect(bad.headers["access-control-allow-origin"]).toBe(origin);
+  });
+
+  it("refuses look-alikes: other schemes and ports, suffix and prefix tricks, the opaque null origin, an unrelated site", async () => {
+    useCorsOrigin(CORRECTED);
+    for (const origin of [
+      "http://www.getensemblis.com", // wrong scheme
+      "https://www.getensemblis.com:8443", // wrong port
+      "https://www.getensemblis.com.evil.test", // suffix
+      "https://evilwww.getensemblis.com", // prefix
+      "https://sub.getensemblis.com", // a subdomain that was never listed
+      "https://ensemblis-app.vercel.app.evil.test",
+      "null", // sandboxed iframes and file:// pages
+      "https://example.com",
+    ]) {
+      const res = await preflight(origin);
+      expect(res.headers["access-control-allow-origin"], origin).toBeUndefined();
+      expect(res.headers["access-control-allow-credentials"], origin).toBeUndefined();
+    }
+  });
+
+  it("never answers with a wildcard, even when CORS_ORIGIN asks for one", async () => {
+    useCorsOrigin(`*,https://*.vercel.app,${WWW}`);
+    expect(config.corsOrigins).toEqual([WWW]);
+    const res = await preflight("https://anything.vercel.app");
+    expect(res.headers["access-control-allow-origin"]).toBeUndefined();
+    expect((await preflight(WWW)).headers["access-control-allow-origin"]).toBe(WWW);
   });
 });

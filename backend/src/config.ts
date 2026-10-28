@@ -5,6 +5,7 @@
 import "dotenv/config";
 import { isIP } from "node:net";
 import { isPublicAddress } from "./research/netGuard";
+import { describeCorsIssues, parseCorsOrigins } from "./lib/corsOrigins";
 
 function int(name: string, fallback: number, min = 0): number {
   const raw = process.env[name];
@@ -34,10 +35,10 @@ export function mockAIForbidden(): boolean {
   return isProduction || !!(process.env.RENDER || process.env.FLY_APP_NAME || process.env.RAILWAY_ENVIRONMENT || process.env.DYNO);
 }
 
-const corsOrigins = (process.env.CORS_ORIGIN || "http://localhost:3000")
-  .split(",")
-  .map((s) => s.trim().replace(/\/+$/, ""))
-  .filter(Boolean);
+// Entries that cannot be a browser origin (e.g. `https//www.example.com`, a wildcard) are ignored and reported on boot
+// (corsConfigWarnings), instead of sitting in the list where they could never match.
+const corsParsed = parseCorsOrigins(process.env.CORS_ORIGIN);
+const corsOrigins = corsParsed.origins;
 
 const searchProvider = ((): "tavily" | "wikipedia" | "off" => {
   const raw = process.env.SEARCH_PROVIDER?.trim().toLowerCase();
@@ -108,7 +109,7 @@ export const config = {
     return process.env.RENDER ? ["cf-connecting-ip", "true-client-ip"] : [];
   })(),
 
-  // Exact origins, comma-separated; trailing slashes are ignored.
+  // Exact origins (scheme://host[:port]), comma-separated; normalised and validated by lib/corsOrigins.ts.
   corsOrigins,
 
   // ---------------------------------------------------------------- v3
@@ -273,6 +274,11 @@ export function productionConfigProblems(role: "api" | "worker" = "api"): string
     problems.push("DATABASE_URL is missing. Set it to your Postgres connection string (Neon: include ?sslmode=require).");
   }
   return problems;
+}
+
+/** Problems with the CORS_ORIGIN value (ignored or adjusted entries), in every environment. Logged on API boot. */
+export function corsConfigWarnings(): string[] {
+  return describeCorsIssues(corsParsed);
 }
 
 /** Non-fatal production warnings, logged on boot. */

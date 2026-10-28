@@ -2,7 +2,7 @@ import "dotenv/config";
 import express from "express";
 import cors from "cors";
 import helmet from "helmet";
-import { config, isProduction, productionConfigProblems, productionConfigWarnings } from "./config";
+import { config, corsConfigWarnings, isProduction, productionConfigProblems, productionConfigWarnings } from "./config";
 import { prisma } from "./db";
 
 import authRoutes from "./auth/routes";
@@ -127,6 +127,7 @@ async function start() {
     process.exit(1);
   }
   for (const w of productionConfigWarnings()) console.warn(`[config] WARNING: ${w}`);
+  for (const w of corsConfigWarnings()) console.warn(`[config] WARNING: ${w}`);
 
   const server = app.listen(port, () => {
     log.info("api.listening", { port, ai: aiProviderLabel(), embeddedWorker: embeddedWorkerEnabled(), corsOrigins: config.corsOrigins });
