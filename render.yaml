@@ -38,7 +38,12 @@ services:
     # --include=dev: TypeScript and type packages are devDependencies, and
     # NODE_ENV=production would otherwise make npm skip them.
     buildCommand: npm ci --include=dev && npm run build
-    # migrate deploy (never `db push`), then start the API.
+    # migrate deploy (never `db push`), then start the API. When no migration is pending the
+    # migrator skips `migrate deploy` (and Prisma's advisory lock) entirely.
+    # Optional env var, deliberately not declared below (a new `sync: false` key would make the
+    # next Blueprint sync ask for a value): DIRECT_URL = the direct, non-pooled Neon connection
+    # string, used only by the migration step. Add it in the dashboard if DATABASE_URL is a
+    # "-pooler" URL; Prisma's migration lock does not work reliably through a pooler (DEPLOYMENT.md §8).
     startCommand: npm run start:render
     # /health checks the database and reports queue health; /health/live is a plain liveness probe.
     healthCheckPath: /health
