@@ -3,19 +3,21 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { Icon } from "@/components/Icon";
+import { StartLink } from "@/components/site/StartLink";
 import { useAuth } from "@/lib/auth-context";
 import { useConfig } from "@/lib/config";
 import { ROUTES } from "@/lib/routes";
 import { TrialModal } from "./TrialModal";
 
 /**
- * The landing page's calls to action. The primary label is the same signed in
- * or out (only its destination changes), so nothing shifts when auth resolves.
- * `/?trial=1` (linked from the login page) opens the no-account trial.
+ * The line under the hero's buttons — the one thing that depends on who is looking:
+ *   signed in → back to the workspace · invite-only beta → how access works · trial on → try without an account
+ *   otherwise → log in.
+ * `/?trial=1` (linked from the login page) still opens the no-account trial when the deployment offers it.
  */
-export function HeroActions() {
+export function HeroNote() {
   const { user, loading } = useAuth();
-  const { config } = useConfig();
+  const { config, loaded } = useConfig();
   const [trial, setTrial] = useState(false);
 
   useEffect(() => {
@@ -24,30 +26,36 @@ export function HeroActions() {
 
   return (
     <>
-      <div className="mk-ctas">
-        <Link href={user ? ROUTES.newObjective : ROUTES.signup} className="btn p lg">
-          Define an outcome
-          <Icon name="arrow" />
-        </Link>
-        <a href="#how" className="btn lg mk-btn-quiet">
-          See how it works
-        </a>
-      </div>
-      <p className="mk-cta-note" aria-live="polite">
-        {loading ? (
-          " "
+      <p className="st-cta-note" aria-live="polite">
+        {loading || !loaded ? (
+          " "
         ) : user ? (
-          <Link href={ROUTES.dashboard} className="mk-textlink">
+          <Link href={ROUTES.dashboard} className="st-textlink">
             Open your workspace <Icon name="chev" size={14} />
           </Link>
         ) : config.guestTrialEnabled ? (
-          <button type="button" className="mk-textlink" onClick={() => setTrial(true)}>
+          <button type="button" className="st-textlink st-linkbtn" onClick={() => setTrial(true)}>
             Or try it without an account <Icon name="chev" size={14} />
           </button>
+        ) : config.inviteRequired ? (
+          <>
+            Private beta:{" "}
+            <Link href={ROUTES.access} className="st-textlink">
+              request access
+            </Link>
+            , or{" "}
+            <Link href={ROUTES.signup} className="st-textlink">
+              use your invite code
+            </Link>
+            .
+          </>
         ) : (
-          <Link href={ROUTES.login} className="mk-textlink">
-            Already using Ensemblis? Log in <Icon name="chev" size={14} />
-          </Link>
+          <>
+            Already using Ensemblis?{" "}
+            <Link href={ROUTES.login} className="st-textlink">
+              Log in
+            </Link>
+          </>
         )}
       </p>
       <TrialModal open={trial} onClose={() => setTrial(false)} />
@@ -56,13 +64,12 @@ export function HeroActions() {
 }
 
 export function FinalActions({ secondary = { href: "/how-it-works", label: "Explore Ensemblis" } }: { secondary?: { href: string; label: string } }) {
-  const { user } = useAuth();
   return (
     <div className="mk-ctas mk-ctas-center">
-      <Link href={user ? ROUTES.newObjective : ROUTES.signup} className="btn p lg">
-        Define an outcome
+      <StartLink from="final-actions">
+        Get started
         <Icon name="arrow" />
-      </Link>
+      </StartLink>
       <Link href={secondary.href} className="btn lg mk-btn-quiet">
         {secondary.label}
       </Link>

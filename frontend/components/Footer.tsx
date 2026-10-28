@@ -5,12 +5,14 @@ import { useAuth } from "@/lib/auth-context";
 import { ROUTES } from "@/lib/routes";
 import { Icon } from "./Icon";
 import { Lockup } from "./Logo";
+import { useStartHref } from "@/components/site/StartLink";
 
 type Col = { title: string; links: [string, string][] };
 
 /** Site footer: brand lockup, one "Footer" navigation with three columns, legal line. Rendered once by the root layout. */
-export function Footer() {
+export function Footer({ journal = false }: { journal?: boolean }) {
   const { user } = useAuth();
+  const startHref = useStartHref();
   const isGuest = !!user?.isGuest;
   const year = new Date().getFullYear();
 
@@ -49,22 +51,25 @@ export function Footer() {
         {
           title: "Product",
           links: [
+            ["Use cases", ROUTES.useCases],
             ["How it works", ROUTES.howItWorksPage],
-            ["Control & trust", ROUTES.trust],
+            ["Pricing", ROUTES.pricing],
+            ...(journal ? ([["Journal", ROUTES.blog]] as [string, string][]) : []),
           ],
         },
         {
           title: "Account",
           links: [
-            ["Get started", ROUTES.signup],
+            ["Get started", startHref],
             ["Log in", ROUTES.login],
           ],
         },
         {
-          title: "Legal",
+          title: "Trust",
           links: [
             ["Privacy Policy", ROUTES.privacy],
             ["Terms of Use", ROUTES.terms],
+            ["Editorial standards", "/blog/editorial-standards"],
           ],
         },
       ];

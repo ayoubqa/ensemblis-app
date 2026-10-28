@@ -1,206 +1,158 @@
-// The Ensemblis landing page: one story, eleven sections, dark navy for the
-// story and light surfaces for reading. Server-rendered; only the calls to
-// action are client islands (they depend on the session). Section ids
-// "how" and "trust" are linked from the header, footer and command palette.
+// The Ensemblis homepage, rebuilt around the five questions a first-time visitor needs answered fast:
+// what is it · what do I get · who is it for · why trust it · what do I do next. Server-rendered; only the
+// session-dependent calls to action and the live beta facts are client islands. The deep product walkthrough
+// lives on /how-it-works. Every claim is true of the product today (see content.ts and lib/offer.ts).
 import Link from "next/link";
 import { Icon } from "@/components/Icon";
-import { Briefing, ContextLayer, EvidenceLayer, ExecutionTrace, Lifecycle, OperatingLayer, OrgChart, ToolSprawl, ToolsToOutcome } from "@/components/marketing/Visuals";
-import { EXAMPLE_OBJECTIVES } from "@/lib/data";
+import { PostItem } from "@/components/blog/Parts";
+import { BetaFacts } from "@/components/site/BetaFacts";
+import { ExecutionLedger } from "@/components/site/ExecutionLedger";
+import { ReportAnatomy } from "@/components/site/ReportAnatomy";
+import { StartLink } from "@/components/site/StartLink";
+import type { Post } from "@/lib/blog/posts";
+import { BLOG } from "@/lib/blog/seo";
+import { PLAN_COST, TEAM_NAMES, USE_CASES, capabilitiesFor } from "@/lib/offer";
 import { SITE } from "@/lib/site";
-import { FinalActions, HeroActions } from "./Actions";
-import { ANSWER_VS_OUTCOME, CONTEXT_FIELDS, FAQ, MANUAL_WORK, MEMORY_KINDS, STORY, TRUST } from "./content";
+import { HeroNote } from "./Actions";
+import { EXAMPLE, FAQ, TRUST } from "./content";
 
-function SectionHead({ id, eyebrow, title, lead, center = false }: { id?: string; eyebrow: string; title: React.ReactNode; lead?: React.ReactNode; center?: boolean }) {
+function Head({ id, kicker, title, lead, center = false }: { id: string; kicker: string; title: React.ReactNode; lead?: React.ReactNode; center?: boolean }) {
   return (
-    <header className={center ? "mk-head mk-head-center" : "mk-head"}>
-      <p className="eyebrow">{eyebrow}</p>
+    <header className={center ? "st-head st-head-c" : "st-head"}>
+      <p className="st-kicker">
+        <span className="st-node" aria-hidden="true" />
+        {kicker}
+      </p>
       <h2 id={id}>{title}</h2>
-      {lead && <p className="mk-lead">{lead}</p>}
+      {lead && <p className="st-lead">{lead}</p>}
     </header>
   );
 }
 
-export function Home() {
+const HOW = [
+  { n: "01", t: "Describe the outcome", b: "The result you need, how success will be judged, a deadline and a budget — in plain language." },
+  { n: "02", t: "Approve the plan and its cost", b: "Each step has an owner and a price in credits. Nothing runs, and nothing is charged, until you approve — or pre-approve a budget." },
+  { n: "03", t: "Watch the work happen", b: "Specialists research and analyse with read-only tools. Evidence is numbered as it is found; missing information comes back to you as a question." },
+  { n: "04", t: "Get a verified result", b: "A verification gate checks the work before it is called done; each success criterion is measured; failed or unstarted work is refunded." },
+];
+
+export function Home({ latest = [] }: { latest?: Post[] }) {
   return (
-    <div className="mk">
-      {/* 1 — Hero */}
-      <section className="mk-hero dk" aria-labelledby="mk-h1">
-        <div className="mk-hero-bg" aria-hidden="true" />
-        <div className="wrap mk-hero-grid">
-          <div className="mk-hero-copy">
-            <p className="eyebrow">{SITE.positioning.replace(/\.$/, "")}</p>
-            <h1 id="mk-h1">
-              Describe the outcome. <span className="mk-grad">We do the work.</span>
-            </h1>
-            <p className="mk-sub">{SITE.supporting}</p>
-            <HeroActions />
-            <ul className="mk-assure" aria-label="Built in">
-              <li>
-                <Icon name="check" size={14} />
-                You approve the plan — or pre-approve a budget
-              </li>
-              <li>
-                <Icon name="shield" size={14} />
-                Every result verified against evidence
-              </li>
-              <li>
-                <Icon name="lock" size={14} />
-                Read-only by design
-              </li>
-            </ul>
-          </div>
-          <OperatingLayer />
-        </div>
-      </section>
-
-      {/* 2 — The problem */}
-      <section className="mk-sec lt" aria-labelledby="mk-problem">
-        <div className="wrap mk-split">
-          <div>
-            <SectionHead
-              id="mk-problem"
-              eyebrow="The problem"
-              title="More software. Still more work."
-              lead="Businesses have more tools than ever — CRM, project management, spreadsheets, analytics, communication, knowledge bases. Yet people still spend hours on the work between them:"
-            />
-            <ul className="mk-ticks">
-              {MANUAL_WORK.map((m) => (
-                <li key={m}>{m}</li>
-              ))}
-            </ul>
-            <p className="mk-punch">
-              The problem isn&apos;t a lack of software. <b>It&apos;s the gap between having tools and getting the work done.</b>
+    <div className="st">
+      {/* 1 — What it is */}
+      <section className="st-hero dk" aria-labelledby="st-h1">
+        <div className="wrap st-hero-grid">
+          <div className="st-hero-copy">
+            <p className="st-kicker">
+              <span className="st-node" aria-hidden="true" />
+              AI research &amp; analysis for business
             </p>
+            <h1 id="st-h1">
+              Describe the outcome.
+              <br />
+              <em>We do the work.</em>
+            </h1>
+            <p className="st-sub">
+              Ensemblis turns a business question into a decision-ready result. It plans the research and analysis, shows you the cost before anything
+              runs, and checks every claim against cited evidence before calling it done.
+            </p>
+            <div className="st-ctas">
+              <StartLink from="home-hero">
+                Get started
+                <Icon name="arrow" />
+              </StartLink>
+              <a href="#output" className="btn lg st-btn-quiet">
+                See what you get
+              </a>
+            </div>
+            <HeroNote />
+            <ul className="st-proof" aria-label="How every objective runs">
+              <li>Plan and cost before work runs</li>
+              <li>Numbered, cited evidence</li>
+              <li>Five-check verification gate</li>
+              <li>Read-only by design</li>
+            </ul>
           </div>
-          <ToolSprawl />
+          <ExecutionLedger objective="Recommend the three highest-potential European markets for our expansion next year." criteria={EXAMPLE.criteria} />
         </div>
       </section>
 
-      {/* 3 — The shift */}
-      <section className="mk-sec dk mk-glow" aria-labelledby="mk-shift">
+      {/* 2 — What you get */}
+      <section className="st-sec" id="output" aria-labelledby="st-output">
         <div className="wrap">
-          <SectionHead
-            id="mk-shift"
-            eyebrow="The shift"
-            title="From tools to outcomes."
-            lead="Traditional software asks people to operate tools. Ensemblis starts with the business outcome — and works back to the plan, the work and the proof."
+          <Head
+            id="st-output"
+            kicker="What you get"
+            title="Not an answer to read. A result you can check."
+            lead="Every objective ends in the same kind of document: it answers the question first, shows the evidence behind each claim, measures your success criteria and says what it could not establish."
           />
-          <ToolsToOutcome />
-          <div className="mk-versus">
-            <div>
-              <span className="mk-k">Operating tools</span>
-              <p>You open the apps, gather the data, do the analysis, write it up and hope it&apos;s right.</p>
-            </div>
-            <div className="on">
-              <span className="mk-k">Describing outcomes</span>
-              <p>You state the result and how it will be judged, approve the plan, and review a verified outcome with its evidence.</p>
-            </div>
-          </div>
+          <ReportAnatomy />
         </div>
       </section>
 
-      {/* 4 — How Ensemblis works */}
-      <section className="mk-sec lt" id="how" aria-labelledby="mk-how">
+      {/* 3 — Who it's for / what you can hand off */}
+      <section className="st-sec st-sec-alt" id="use-cases" aria-labelledby="st-uses">
         <div className="wrap">
-          <SectionHead
-            id="mk-how"
-            eyebrow="How Ensemblis works"
-            title="From objective to verified outcome."
-            lead="One operating loop for every objective — with you in control at the moments that matter."
+          <Head
+            id="st-uses"
+            kicker="What you can hand off today"
+            title="Research and analysis, across four teams."
+            lead="Built for founders and small teams who need work they can check: questions answerable from the public web, your own documents and what you tell Ensemblis about your company."
           />
-          <Lifecycle />
-          <p className="mk-more">
-            <Link href="/how-it-works" className="mk-textlink">
-              Read the full walkthrough: plans, approvals, exceptions, verification and memory <Icon name="chev" size={14} />
+          <ul className="st-uses">
+            {USE_CASES.map((u) => (
+              <li key={u.id}>
+                <p className="st-uses-team">{TEAM_NAMES[u.team]}</p>
+                <h3>
+                  <Link href={`/use-cases#${u.id}`}>{u.title}</Link>
+                </h3>
+                <p className="st-uses-ex">&ldquo;{u.examples[0].objective}&rdquo;</p>
+                <p className="st-uses-caps">{capabilitiesFor(u.team).map((c) => c.name).join(" · ")}</p>
+              </li>
+            ))}
+          </ul>
+          <p className="st-more">
+            <Link href="/use-cases" className="st-textlink">
+              Every use case, with example objectives and what each delivers →
             </Link>
           </p>
         </div>
       </section>
 
-      {/* 5 — Chief of Staff */}
-      <section className="mk-sec dk" aria-labelledby="mk-cos">
-        <div className="wrap mk-split mk-split-rev">
-          <div>
-            <SectionHead
-              id="mk-cos"
-              eyebrow="Chief of Staff"
-              title="One objective. One operating layer."
-              lead="The Chief of Staff understands the objective, your company context, your constraints and your success criteria — then coordinates the work required to achieve the outcome."
-            />
-            <ul className="mk-points">
-              <li>
-                <b>Frames the objective</b> with what it knows about your company.
-              </li>
-              <li>
-                <b>Builds a short plan</b>, assigns every step to an owner and estimates the cost.
-              </li>
-              <li>
-                <b>Asks instead of guessing</b> when information the result depends on is missing.
-              </li>
-              <li>
-                <b>Synthesises the work</b> into one recommendation against your criteria.
-              </li>
-            </ul>
-          </div>
-          <Briefing />
-        </div>
-      </section>
-
-      {/* 6 — AI Team */}
-      <section className="mk-sec lt" aria-labelledby="mk-team">
+      {/* 4 — How it works */}
+      <section className="st-sec" id="how" aria-labelledby="st-how">
         <div className="wrap">
-          <SectionHead
-            id="mk-team"
-            eyebrow="AI Team"
-            title="An AI organization built around your business."
-            lead="Not a collection of chatbots — an organization. The Chief of Staff plans and assigns. Each executive owns a set of capabilities, and specialists carry them out using only the tools they are allowed."
-          />
-          <OrgChart />
+          <Head id="st-how" kicker="How it works" title="You stay in control at the moments that matter." />
+          <ol className="st-steps">
+            {HOW.map((s) => (
+              <li key={s.n}>
+                <span className="st-steps-n">{s.n}</span>
+                <h3>{s.t}</h3>
+                <p>{s.b}</p>
+              </li>
+            ))}
+          </ol>
+          <p className="st-more">
+            <Link href="/how-it-works" className="st-textlink">
+              The full walkthrough: plans, approvals, exceptions, verification and memory →
+            </Link>
+          </p>
         </div>
       </section>
 
-      {/* 7 — Execution */}
-      <section className="mk-sec dk mk-glow" aria-labelledby="mk-exec">
-        <div className="wrap mk-split">
-          <div>
-            <SectionHead
-              id="mk-exec"
-              eyebrow="Execution"
-              title="From plan to execution."
-              lead="Every objective moves through the same accountable lifecycle. You can watch each step as it happens, and the record stays — even if you close the tab."
-            />
-            <ul className="mk-points">
-              <li>
-                <b>Live progress</b> for every step, rebuilt from a persistent activity log.
-              </li>
-              <li>
-                <b>Approvals and exceptions</b> bring a decision to you only when one is needed.
-              </li>
-              <li>
-                <b>Recovery built in</b> — work interrupted mid-step resumes, and work that never started is refunded.
-              </li>
-            </ul>
-          </div>
-          <ExecutionTrace />
-        </div>
-      </section>
-
-      {/* 8 — Trust / verification */}
-      <section className="mk-sec lt" id="trust" aria-labelledby="mk-trust">
+      {/* 5 — Why trust it */}
+      <section className="st-sec st-sec-alt" id="trust" aria-labelledby="st-trust">
         <div className="wrap">
-          <SectionHead
-            id="mk-trust"
-            eyebrow="Verification & evidence"
-            title="AI that shows its work."
-            lead="Ensemblis doesn't just generate text. Every important result is grounded in evidence, checked by a verification gate and measured against the success criteria you set."
+          <Head
+            id="st-trust"
+            kicker="Control and trust"
+            title="Built so you can rely on it — and see when you shouldn't."
+            lead="AI-generated work can contain mistakes. Ensemblis is designed to make them visible: every important claim is grounded in evidence, checked, and measured against criteria you set."
           />
-          <EvidenceLayer />
-          <ul className="mk-trust">
+          <ul className="st-trust">
             {TRUST.map((t) => (
               <li key={t.title}>
-                <span className="mk-ico" aria-hidden="true">
-                  <Icon name={t.icon} size={17} />
-                </span>
+                <Icon name={t.icon} size={18} />
                 <h3>{t.title}</h3>
                 <p>{t.body}</p>
               </li>
@@ -209,103 +161,97 @@ export function Home() {
         </div>
       </section>
 
-      {/* 9 — Company Context */}
-      <section className="mk-sec dk" aria-labelledby="mk-ctx">
-        <div className="wrap mk-split">
+      {/* 6 — What it costs */}
+      <section className="st-sec" id="pricing" aria-labelledby="st-price">
+        <div className="wrap st-price">
           <div>
-            <SectionHead
-              id="mk-ctx"
-              eyebrow="Company Context"
-              title="AI that understands your business."
-              lead="Tell Ensemblis about your company once. Every plan and every step works from the same context — so the work is about your business, not an average one."
+            <Head
+              id="st-price"
+              kicker="Pricing"
+              title="Know the cost before anything runs."
+              lead={
+                <>
+                  Work is priced step by step in credits. An objective uses <b>{PLAN_COST.min.toLocaleString("en-US")}–{PLAN_COST.max.toLocaleString("en-US")} credits</b>,
+                  verification included, and you approve the total first.
+                </>
+              }
             />
-            <ul className="mk-points">
-              <li>
-                <b>Company profile</b>: what you do, products, business model, customers, markets and goals.
-              </li>
-              <li>
-                <b>Website and documents</b> become evidence the AI Team can cite.
-              </li>
-              <li>
-                <b>Organizational memory</b> keeps preferences, decisions and lessons from one objective to the next — you can edit or remove any of it.
-              </li>
-            </ul>
-          </div>
-          <ContextLayer fields={CONTEXT_FIELDS} memory={MEMORY_KINDS} />
-        </div>
-      </section>
-
-      {/* 10 — Outcomes */}
-      <section className="mk-sec lt" aria-labelledby="mk-outcomes">
-        <div className="wrap">
-          <SectionHead
-            id="mk-outcomes"
-            eyebrow="Outcomes"
-            title={
-              <>
-                The output isn&apos;t an answer.
-                <br />
-                It&apos;s an outcome.
-              </>
-            }
-            lead="An AI response gives you something to read. Ensemblis gives you completed business work you can check, decide on and build on."
-          />
-          <div className="mk-compare" role="table" aria-label="An AI response compared with an Ensemblis outcome">
-            <div className="mk-compare-row mk-compare-head" role="row">
-              <span role="columnheader">An AI response</span>
-              <span role="columnheader">An Ensemblis outcome</span>
-            </div>
-            {ANSWER_VS_OUTCOME.map((r) => (
-              <div className="mk-compare-row" role="row" key={r.answer}>
-                <span role="cell">
-                  <Icon name="x" size={14} />
-                  {r.answer}
-                </span>
-                <span role="cell">
-                  <Icon name="check" size={14} />
-                  {r.outcome}
-                </span>
-              </div>
-            ))}
-          </div>
-          <h3 className="mk-subhead">Objectives you can delegate</h3>
-          <ul className="mk-examples">
-            {EXAMPLE_OBJECTIVES.map((e) => (
-              <li key={e.label}>
-                <span className="mk-k">{e.label}</span>
-                <p>{e.statement}</p>
-                <ul>
-                  {e.criteria.map((c) => (
-                    <li key={c}>{c}</li>
-                  ))}
-                </ul>
-              </li>
-            ))}
-          </ul>
-          <p className="mk-note">Examples of objectives and success criteria — not customer results.</p>
-        </div>
-      </section>
-
-      {/* GEO: direct, self-contained answers */}
-      <section className="mk-sec lt mk-faq-sec" aria-labelledby="mk-faq">
-        <div className="wrap mk-faq-grid">
-          <div>
-            <SectionHead id="mk-faq" eyebrow="Questions" title="Ensemblis, in plain terms." />
-            <p className="mk-def">{SITE.definition}</p>
-            <p className="mk-flow" aria-label="The Ensemblis lifecycle">
-              {STORY.map((s, i) => (
-                <span key={s.key}>
-                  {s.title}
-                  {i < STORY.length - 1 && <Icon name="chev" size={12} />}
-                </span>
-              ))}
+            <p className="st-more">
+              <Link href="/pricing" className="st-textlink">
+                The full price list and how credits work →
+              </Link>
             </p>
           </div>
-          <div className="mk-faq">
+          <div className="st-price-card">
+            <p className="st-lg-k">Private beta</p>
+            <BetaFacts />
+          </div>
+        </div>
+      </section>
+
+      {/* 7 — Fit */}
+      <section className="st-sec st-sec-alt" aria-labelledby="st-fit">
+        <div className="wrap">
+          <Head id="st-fit" kicker="Is it right for you?" title="A good fit — and not yet a fit." />
+          <div className="st-fit">
+            <div>
+              <h3>
+                <Icon name="check" size={16} /> A good fit when
+              </h3>
+              <ul>
+                <li>You need research or analysis you can show to someone else, with its sources.</li>
+                <li>The answer can come from the public web, your own documents and what you know about your company.</li>
+                <li>You want to approve the plan and the cost before work starts.</li>
+                <li>A clear &ldquo;we couldn&apos;t establish this&rdquo; is more useful to you than a confident guess.</li>
+              </ul>
+            </div>
+            <div>
+              <h3>
+                <Icon name="x" size={16} /> Not yet a fit when
+              </h3>
+              <ul>
+                <li>You need actions taken in your systems: sending, publishing, buying. Ensemblis is read-only.</li>
+                <li>The data lives in tools Ensemblis can&apos;t reach — it has no CRM or analytics integrations yet.</li>
+                <li>You need legal, financial or medical advice.</li>
+                <li>The result must be right without anyone reviewing it.</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* 8 — Journal (only once something is published) */}
+      {latest.length > 0 && (
+        <section className="st-sec" aria-labelledby="st-journal">
+          <div className="wrap">
+            <Head id="st-journal" kicker="From the Journal" title="Search, AI answers and evidence-backed growth." />
+            <div className="ed-list ed-list-3">
+              {latest.map((p) => (
+                <PostItem key={p.slug} post={p} />
+              ))}
+            </div>
+            <p className="st-more">
+              <Link href={BLOG.path} className="st-textlink">
+                Read the Journal →
+              </Link>
+            </p>
+          </div>
+        </section>
+      )}
+
+      {/* 9 — Questions */}
+      <section className="st-sec st-sec-alt" aria-labelledby="st-faq">
+        <div className="wrap st-faq-grid">
+          <div>
+            <Head id="st-faq" kicker="Questions" title="Ensemblis, in plain terms." />
+            <p className="st-def">{SITE.definition}</p>
+          </div>
+          <div className="st-faq">
             {FAQ.map((f) => (
               <details key={f.q}>
                 <summary>
                   <h3>{f.q}</h3>
+                  <Icon name="plus" size={16} />
                 </summary>
                 <p>{f.a}</p>
               </details>
@@ -314,13 +260,20 @@ export function Home() {
         </div>
       </section>
 
-      {/* 11 — Final CTA */}
-      <section className="mk-final dk" aria-labelledby="mk-final">
-        <div className="mk-hero-bg" aria-hidden="true" />
+      {/* 10 — Next step */}
+      <section className="st-final dk" aria-labelledby="st-final-h">
         <div className="wrap">
-          <h2 id="mk-final">What outcome should your business stop doing manually?</h2>
-          <p className="mk-lead">Describe it once. Ensemblis plans it, executes it, verifies it — and shows you the evidence.</p>
-          <FinalActions />
+          <h2 id="st-final-h">What should your business stop researching by hand?</h2>
+          <p className="st-lead">Describe it once. Approve the plan. Review a verified result with its evidence.</p>
+          <div className="st-ctas st-ctas-c">
+            <StartLink from="home-final">
+              Get started
+              <Icon name="arrow" />
+            </StartLink>
+            <Link href="/use-cases" className="btn lg st-btn-quiet">
+              Explore use cases
+            </Link>
+          </div>
         </div>
       </section>
     </div>

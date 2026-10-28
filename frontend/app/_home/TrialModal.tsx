@@ -11,6 +11,7 @@ import { useConfig } from "@/lib/config";
 import { errorText } from "@/lib/errors";
 import { credits } from "@/lib/format";
 import { ROUTES } from "@/lib/routes";
+import { track } from "@/lib/analytics";
 
 /**
  * "Try without signing up": consent (+ Turnstile when configured) →
@@ -36,6 +37,7 @@ export function TrialModal({ open, onClose }: { open: boolean; onClose: () => vo
     try {
       const { token, user } = await api.guestStart({ acceptedTerms: true, ...(tsToken ? { turnstileToken: tsToken } : {}) });
       signIn(token, user);
+      track("trial_started");
       onClose();
       router.push(ROUTES.newObjective);
     } catch (err) {
