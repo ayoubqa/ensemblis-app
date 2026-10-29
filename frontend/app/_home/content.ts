@@ -97,13 +97,20 @@ export const EXAMPLE = {
 /** The verification gate's checks (backend/src/engine/verification/checks.ts). */
 export const VERIFICATION_CHECKS = ["Objective alignment", "Evidence support", "Success criteria coverage", "Completeness", "Internal consistency"];
 
-export const TRUST: { icon: IconName; title: string; body: string }[] = [
-  { icon: "check", title: "You approve before anything is spent", body: "Every plan arrives with its estimated cost. Execution starts only after your approval — or automatically within a budget you set." },
-  { icon: "link", title: "Numbered, cited evidence", body: "Web sources, your documents and your Company Context are numbered and cited, so you can see what supports each conclusion." },
-  { icon: "shield", title: "A real verification gate", body: "Claims are checked against the cited evidence and every success criterion is assessed. Results that fail are revised or escalated — never quietly passed." },
-  { icon: "alert", title: "Exceptions, not guesses", body: "When information is missing or a step fails, Ensemblis stops and tells you what happened, why it matters and what it needs from you." },
-  { icon: "lock", title: "Read-only by design", body: "The AI Team researches, analyses, drafts and recommends. It never sends email, publishes, changes your systems or spends money on its own." },
-  { icon: "redo", title: "Refunds for work that didn't run", body: "You see the cost before work starts. Work that fails or never starts is refunded automatically, and each organization's data stays isolated." },
+/** Trust, as a control timeline: what protects you before work runs, while it runs, and before it's called done. */
+export const TRUST_PHASES: { key: "before" | "during" | "after"; label: string; sub: string }[] = [
+  { key: "before", label: "Before anything runs", sub: "You decide what happens and what it may cost." },
+  { key: "during", label: "While it works", sub: "Everything is sourced, and gaps come back to you." },
+  { key: "after", label: "Before it's called done", sub: "The result is checked, and failures cost nothing." },
+];
+
+export const TRUST: { phase: "before" | "during" | "after"; icon: IconName; title: string; body: string }[] = [
+  { phase: "before", icon: "check", title: "You approve before anything is spent", body: "Every plan arrives with its estimated cost. Execution starts only after your approval — or automatically within a budget you set." },
+  { phase: "before", icon: "lock", title: "Read-only by design", body: "The AI Team researches, analyses, drafts and recommends. It never sends email, publishes, changes your systems or spends money on its own." },
+  { phase: "during", icon: "link", title: "Numbered, cited evidence", body: "Web sources, your documents and your Company Context are numbered and cited, so you can see what supports each conclusion." },
+  { phase: "during", icon: "alert", title: "Exceptions, not guesses", body: "When information is missing or a step fails, Ensemblis stops and tells you what happened, why it matters and what it needs from you." },
+  { phase: "after", icon: "shield", title: "A real verification gate", body: "Claims are checked against the cited evidence and every success criterion is assessed. Results that fail are revised or escalated — never quietly passed." },
+  { phase: "after", icon: "redo", title: "Refunds for work that didn't run", body: "You see the cost before work starts. Work that fails or never starts is refunded automatically, and each organization's data stays isolated." },
 ];
 
 /** Company Context, as captured on the Company Context page. */

@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { api, type CompanyContext, type ContextPayload, type MemoryItem } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
@@ -7,6 +8,7 @@ import { useConfig } from "@/lib/config";
 import { ACCEPT, detectKind, extractFile, ExtractError, unsupportedReason } from "@/lib/extract";
 import { num, plural, relativeTime } from "@/lib/format";
 import { EmptyState, Icon, Modal, PageHead, PageSkeleton, RequireAuth, Tag, useToast } from "@/components";
+import { ROUTES } from "@/lib/routes";
 
 export default function ContextPage() {
   return (
@@ -53,11 +55,16 @@ function CompanyContextView() {
   const [saving, setSaving] = useState(false);
   const [savedAt, setSavedAt] = useState<number | null>(null);
   const [memory, setMemory] = useState<MemoryItem[] | null>(null);
+  // A brand-new organization lands here straight after sign-up. Decided once, on first load, so the
+  // first-run note stays put (and turns into "next step") while the visitor fills the form in.
+  const [firstRun, setFirstRun] = useState<boolean | null>(null);
 
   const load = useCallback(async () => {
     setFailed(null);
     try {
       const d = await api.getContext();
+      // Only the company name (taken from sign-up) on file, no website read, no documents: nothing has been added yet.
+      setFirstRun((f) => f ?? (d.completeness.filled <= 1 && !d.context.websiteFetchedAt && d.documents.length === 0));
       setData(d);
       setForm(d.context);
     } catch (e) {
@@ -121,6 +128,23 @@ function CompanyContextView() {
         title="What Ensemblis knows about your business"
         sub="Stable knowledge every objective uses automatically, so you never repeat it. Documents and your website are read as evidence the AI Team can cite, and passed to the AI as untrusted data, not as instructions."
       />
+
+      {firstRun && (
+        <aside className="op-firstrun" aria-labelledby="h-firstrun" data-testid="context-first-run">
+          <div>
+            <h2 id="h-firstrun">{savedAt ? "Saved. Now put it to work." : "Optional — but it makes every answer sharper."}</h2>
+            <p>
+              {savedAt
+                ? "Your first outcome will use what you just added. Describe a question you'd otherwise research by hand; you'll see the plan and its cost before anything runs."
+                : "Two lines about what you do and who buys from you are enough to start. Or skip this and define your first outcome now — the Chief of Staff asks for what it needs, and you can come back here any time."}
+            </p>
+          </div>
+          <Link href={ROUTES.newObjective} className={savedAt ? "btn p" : "btn"} data-testid="context-skip">
+            {savedAt ? "Define your first outcome" : "Skip for now — define your first outcome"}
+            <Icon name="arrow" />
+          </Link>
+        </aside>
+      )}
 
       <nav className="op-glance" aria-label="Company Context at a glance">
         <a href="#profile" className={filled < total ? "op-kpi is-warn" : "op-kpi"}>

@@ -2,6 +2,7 @@ import Link from "next/link";
 import { JsonLd } from "@/components/JsonLd";
 import { Icon } from "@/components/Icon";
 import { StartLink } from "@/components/site/StartLink";
+import { UseCaseArt } from "@/components/site/UseCaseArt";
 import { TEAM_NAMES, USE_CASES, capabilitiesFor } from "@/lib/offer";
 import { breadcrumbJsonLd, pageMetadata } from "@/lib/site";
 
@@ -49,6 +50,7 @@ export default function UseCasesPage() {
               <p className="st-uc-for">
                 <b>Usually asked by:</b> {u.for}
               </p>
+              <UseCaseArt team={u.team} />
             </header>
 
             <div className="st-uc-body">

@@ -1,11 +1,12 @@
 "use client";
 
 import Link from "next/link";
+import { useState } from "react";
 import { Icon } from "@/components/Icon";
 import { TrackedLink } from "@/components/site/TrackedLink";
 import { useAuth } from "@/lib/auth-context";
 import { useConfig } from "@/lib/config";
-import { mailto } from "@/lib/contact";
+import { CONTACT_EMAIL, mailto } from "@/lib/contact";
 import { ROUTES } from "@/lib/routes";
 
 const TEMPLATE = `Hello,
@@ -18,6 +19,38 @@ My role:
 The first outcome I'd hand to Ensemblis:
 
 Thanks!`;
+
+/**
+ * The address and the template as plain text, with copy buttons: a mailto link does nothing for the many
+ * people whose email lives in a browser tab, so they must be able to write from wherever they read mail.
+ */
+function CopyRequest() {
+  const [copied, setCopied] = useState<"" | "address" | "template">("");
+  const copy = async (what: "address" | "template") => {
+    try {
+      await navigator.clipboard.writeText(what === "address" ? CONTACT_EMAIL : TEMPLATE);
+      setCopied(what);
+      setTimeout(() => setCopied(""), 2000);
+    } catch {
+      /* clipboard unavailable: the address is on screen to select by hand */
+    }
+  };
+  return (
+    <div className="st-access-copy">
+      <p>
+        Email app didn&apos;t open? Write to <b className="st-access-addr">{CONTACT_EMAIL}</b> from wherever you read your mail.
+      </p>
+      <div className="st-access-copy-btns" aria-live="polite">
+        <button type="button" className="btn sm" onClick={() => copy("address")}>
+          {copied === "address" ? "Address copied" : "Copy address"}
+        </button>
+        <button type="button" className="btn sm" onClick={() => copy("template")}>
+          {copied === "template" ? "Template copied" : "Copy the template"}
+        </button>
+      </div>
+    </div>
+  );
+}
 
 /** The live part of /access: what to do next depends on whether sign-up needs an invite right now. */
 export function AccessPanel() {
@@ -73,6 +106,8 @@ export function AccessPanel() {
           <TrackedLink href={request} event="access_request_click" props={{ from: "access-page" }} className="btn p lg">
             Request access by email <Icon name="mail" />
           </TrackedLink>
+          <CopyRequest />
+          <p className="st-access-next">Invites are sent by email, with a code to create your account.</p>
         </>
       ) : (
         <p className="st-access-missing">

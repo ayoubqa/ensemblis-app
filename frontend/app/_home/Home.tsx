@@ -8,13 +8,15 @@ import { PostItem } from "@/components/blog/Parts";
 import { BetaFacts } from "@/components/site/BetaFacts";
 import { ExecutionLedger } from "@/components/site/ExecutionLedger";
 import { ReportAnatomy } from "@/components/site/ReportAnatomy";
+import { ProductShots } from "@/components/site/ProductShots";
 import { StartLink } from "@/components/site/StartLink";
+import { UseCaseArt } from "@/components/site/UseCaseArt";
 import type { Post } from "@/lib/blog/posts";
 import { BLOG } from "@/lib/blog/seo";
 import { PLAN_COST, TEAM_NAMES, USE_CASES, capabilitiesFor } from "@/lib/offer";
 import { SITE } from "@/lib/site";
 import { HeroNote } from "./Actions";
-import { EXAMPLE, FAQ, TRUST } from "./content";
+import { EXAMPLE, FAQ, TRUST, TRUST_PHASES } from "./content";
 
 function Head({ id, kicker, title, lead, center = false }: { id: string; kicker: string; title: React.ReactNode; lead?: React.ReactNode; center?: boolean }) {
   return (
@@ -102,6 +104,7 @@ export function Home({ latest = [] }: { latest?: Post[] }) {
           <ul className="st-uses">
             {USE_CASES.map((u) => (
               <li key={u.id}>
+                <UseCaseArt team={u.team} />
                 <p className="st-uses-team">{TEAM_NAMES[u.team]}</p>
                 <h3>
                   <Link href={`/use-cases#${u.id}`}>{u.title}</Link>
@@ -132,6 +135,7 @@ export function Home({ latest = [] }: { latest?: Post[] }) {
               </li>
             ))}
           </ol>
+          <ProductShots />
           <p className="st-more">
             <Link href="/how-it-works" className="st-textlink">
               The full walkthrough: plans, approvals, exceptions, verification and memory →
@@ -149,15 +153,26 @@ export function Home({ latest = [] }: { latest?: Post[] }) {
             title="Built so you can rely on it — and see when you shouldn't."
             lead="AI-generated work can contain mistakes. Ensemblis is designed to make them visible: every important claim is grounded in evidence, checked, and measured against criteria you set."
           />
-          <ul className="st-trust">
-            {TRUST.map((t) => (
-              <li key={t.title}>
-                <Icon name={t.icon} size={18} />
-                <h3>{t.title}</h3>
-                <p>{t.body}</p>
+          <ol className="st-ctl">
+            {TRUST_PHASES.map((ph) => (
+              <li key={ph.key} className={`st-ctl-${ph.key}`}>
+                <p className="st-ctl-k">
+                  <span className="st-ctl-dot" aria-hidden="true" />
+                  {ph.label}
+                </p>
+                <p className="st-ctl-sub">{ph.sub}</p>
+                <ul className="st-trust">
+                  {TRUST.filter((t) => t.phase === ph.key).map((t) => (
+                    <li key={t.title}>
+                      <Icon name={t.icon} size={18} />
+                      <h3>{t.title}</h3>
+                      <p>{t.body}</p>
+                    </li>
+                  ))}
+                </ul>
               </li>
             ))}
-          </ul>
+          </ol>
         </div>
       </section>
 
@@ -224,7 +239,7 @@ export function Home({ latest = [] }: { latest?: Post[] }) {
       {latest.length > 0 && (
         <section className="st-sec" aria-labelledby="st-journal">
           <div className="wrap">
-            <Head id="st-journal" kicker="From the Journal" title="Search, AI answers and evidence-backed growth." />
+            <Head id="st-journal" kicker="From the Journal" title="Practical, sourced writing on AI, strategy and growth." />
             <div className="ed-list ed-list-3">
               {latest.map((p) => (
                 <PostItem key={p.slug} post={p} />
