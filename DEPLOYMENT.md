@@ -134,6 +134,48 @@ start with it when `NODE_ENV=production` **or** on Render (`RENDER` is set) —
 and on Render the API also refuses a missing or placeholder `JWT_SECRET` even
 if `NODE_ENV` was forgotten. The provider refuses the mock again at call time.
 
+### 2a. Turning on live web search (Tavily)
+
+Production searches Wikipedia only until `TAVILY_API_KEY` is set. Every such research step is labelled
+*degraded*. The production smoke reports it as `WARN web search provider — Wikipedia`.
+
+**Cost.**
+- Tavily docs (checked 2026-10-29) list the free plan as 1,000 API credits per month, with no card, reset on the
+  1st. A **basic** search costs 1 credit.
+- This code always sends `search_depth: "basic"`. The docs say an unset depth can be raised to advanced
+  (2 credits); setting basic avoids that.
+- Pay-as-you-go beyond the plan is $0.008 per credit.
+- A run makes 3–8 searches (worst case about 17). The 20-task validation needs about 60–160.
+- `SEARCH_DAILY_BUDGET` (30 in `render.yaml`) caps searches per UTC day. Past it, research falls back to Wikipedia
+  and is labelled degraded.
+
+**Steps.** These are the owner's actions. Never paste a key into chat, a commit or a log.
+1. Create the Tavily account on the free plan. Buying a plan is not needed for validation.
+2. Optional: check the key locally. This costs 1 credit, spends no model tokens and prints only a count:
+   ```bash
+   read -rs TAVILY_API_KEY && curl -s https://api.tavily.com/search \
+     -H "Authorization: Bearer $TAVILY_API_KEY" -H "Content-Type: application/json" \
+     -d '{"query":"key check","search_depth":"basic","max_results":1}' \
+     | python3 -c 'import sys,json; d=json.load(sys.stdin); print("results:", len(d["results"])) if "results" in d else print("error:", d.get("detail") or d)'
+   ```
+3. Recommended before production: in GitHub, go to *Settings → Secrets and variables → Actions*. Add
+   `SMOKE_TAVILY_API_KEY` and `SMOKE_OPENAI_API_KEY` (the Groq key). Then run *Actions → Real-model smoke*
+   (scenarios `E,A,D`) once its spend is approved.
+   - It runs on a disposable Postgres inside the job (`ensemblis_smoke`). The script refuses any database whose
+     name lacks "smoke".
+   - It reads no production secret or URL.
+   - The report artifact lists the search provider used, every search, tokens, the recorded cost and the time per
+     execution.
+4. In Render, go to *ensemblis-api → Environment* and set `TAVILY_API_KEY`. It is already declared
+   (`sync: false`), and Render redeploys on save. Leave `SEARCH_PROVIDER` unset: with a key it means Tavily.
+5. Verify with *Actions → Production smoke → Run workflow*. Expect
+   `PASS web search uses the live provider — Tavily web search`. The API's boot log no longer warns "Web research
+   uses Wikipedia only".
+6. Proof of real use needs a real run. The Evidence panel then shows sources "via Tavily", and the step's research
+   status is `ok`.
+
+**Rollback:** delete the variable. Search returns to Wikipedia, still labelled degraded.
+
 ## 3. Before merging: rehearse on a copy of production (recommended, ~10 min)
 
 1. In Neon, create a **branch** of the production database (e.g. `pre-v4`).
