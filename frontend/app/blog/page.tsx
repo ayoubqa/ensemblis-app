@@ -123,6 +123,8 @@ export default function BlogHome() {
           <p>
             Claims link to their sources. Each article lists what it relies on and when it was checked, says what is fact, estimate or opinion,
             and is approved by a person before publication. Drafts may be prepared with AI assistance — that is never a reason to skip the checks.
+            Every article is labelled: <b>Ideas</b> and <b>How-to</b> articles stand on their own; <b>In practice, with Ensemblis</b> marks the
+            ones that show our product at work.
           </p>
           <p className="ed-std-links">
             <Link href={BLOG.standardsPath}>Editorial standards</Link>

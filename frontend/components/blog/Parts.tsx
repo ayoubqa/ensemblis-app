@@ -1,7 +1,7 @@
 // Small server components shared by the Journal pages.
 import Link from "next/link";
 import { authorByKey } from "@/lib/blog/authors";
-import { categoryByKey } from "@/lib/blog/taxonomy";
+import { LAYER_LABEL, categoryByKey } from "@/lib/blog/taxonomy";
 import { categoryPath, postPath } from "@/lib/blog/seo";
 import { formatDate, postState, type Post, type PostState } from "@/lib/blog/posts";
 import type { Heading } from "@/lib/blog/markdown";
@@ -59,6 +59,7 @@ export function Meta({ post }: { post: Post }) {
         </span>
       )}
       <span>{post.readingMinutes} min read</span>
+      <span className={`ed-layer ed-layer-${post.layer}`}>{LAYER_LABEL[post.layer]}</span>
     </p>
   );
 }

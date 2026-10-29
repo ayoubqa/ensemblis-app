@@ -2625,3 +2625,173 @@ a.ed-cat:hover {
     row-gap: 32px;
   }
 }
+
+/* ---------- homepage: the cycle every objective runs ---------- */
+.st-cycle-wrap {
+  margin: 0 0 64px;
+  padding: 26px 28px 22px;
+  border: 1px solid var(--line2);
+  border-radius: 16px;
+  background-color: var(--surface);
+  background-image: var(--st-dots);
+  background-size: 22px 22px;
+}
+.st-cycle-k {
+  margin: 0 0 18px;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--subtle);
+}
+.st-cycle {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 0 16px;
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.st-cycle::before {
+  content: "";
+  position: absolute;
+  left: 7px;
+  right: 7px;
+  top: 7px;
+  height: 2px;
+  background: linear-gradient(90deg, var(--accent), var(--accent) 70%, var(--ok));
+  transform-origin: left center;
+}
+.st-cycle li {
+  position: relative;
+  padding-top: 30px;
+  min-width: 0;
+}
+.st-cycle li::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 2px solid var(--accent);
+  background: var(--surface);
+}
+.st-cycle li:last-child::before {
+  border-color: var(--ok);
+  background: var(--ok);
+}
+.st-cycle b {
+  display: block;
+  margin: 0 0 4px;
+  font-size: 15px;
+  color: var(--ink-strong);
+}
+.st-cycle span {
+  display: block;
+  font-size: 13.5px;
+  line-height: 1.45;
+  color: var(--muted);
+}
+@media (prefers-reduced-motion: no-preference) {
+  @supports (animation-timeline: view()) {
+    .st-cycle::before {
+      animation: st-draw-x linear both;
+      animation-timeline: view();
+      animation-range: entry 10% cover 35%;
+    }
+  }
+}
+@media (max-width: 960px) {
+  .st-cycle {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .st-cycle::before {
+    left: 7px;
+    right: auto;
+    top: 8px;
+    bottom: 8px;
+    width: 2px;
+    height: auto;
+    background: linear-gradient(180deg, var(--accent), var(--accent) 70%, var(--ok));
+    transform-origin: center top;
+  }
+  .st-cycle li {
+    padding: 0 0 14px 32px;
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    @supports (animation-timeline: view()) {
+      .st-cycle::before {
+        animation-name: st-draw-y;
+      }
+    }
+  }
+}
+
+/* ---------- homepage: Ensemblis or a general AI assistant ---------- */
+.st-choose {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 24px;
+}
+.st-choose > div {
+  padding: 26px 28px;
+  border: 1px solid var(--line2);
+  border-radius: 16px;
+}
+.st-choose .st-choose-us {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--line2));
+  background: color-mix(in srgb, var(--accent) 6%, var(--surface));
+}
+.st-choose h3 {
+  margin: 0 0 14px;
+  font-size: 17px;
+  color: var(--ink-strong);
+}
+.st-choose ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: 10px;
+}
+.st-choose li {
+  position: relative;
+  padding-left: 20px;
+  line-height: 1.55;
+  color: var(--muted);
+}
+.st-choose li::before {
+  content: "";
+  position: absolute;
+  left: 2px;
+  top: 0.62em;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  border: 1.5px solid var(--subtle);
+}
+.st-choose-us li::before {
+  border-color: var(--accent);
+  background: var(--accent);
+}
+@media (max-width: 760px) {
+  .st-choose {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* ---------- Journal: editorial layer label ---------- */
+.ed-layer {
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.ed-layer-product {
+  color: var(--accent);
+}

@@ -70,3 +70,10 @@ export const categoryByKey = (key: string): Category | undefined => CATEGORIES.f
 export type Layer = "discovery" | "problem" | "product";
 export const LAYERS: readonly Layer[] = ["discovery", "problem", "product"];
 export const DEFAULT_LAYER: Layer = "problem";
+
+/** Shown on every article card and header, so readers always know when an article is about our product. */
+export const LAYER_LABEL: Record<Layer, string> = {
+  discovery: "Ideas",
+  problem: "How-to",
+  product: "In practice, with Ensemblis",
+};

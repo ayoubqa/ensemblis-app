@@ -135,6 +135,37 @@ export const ANSWER_VS_OUTCOME: { answer: string; outcome: string }[] = [
   { answer: "Forgotten next time", outcome: "Learnings kept in your organization's memory" },
 ];
 
+/**
+ * The lifecycle every objective runs today — the "operating layer" made concrete. Each stage exists in the product
+ * (define outcome, Company Context + Chief of Staff plan, AI Team steps, numbered evidence, verification gate,
+ * per-criterion measurement, memory learnings); see /how-it-works.
+ */
+export const LIFECYCLE: { t: string; b: string }[] = [
+  { t: "Objective", b: "The result you need and how it will be judged" },
+  { t: "Context & plan", b: "Your Company Context, a plan with owners and a price" },
+  { t: "Execution", b: "Specialists research and analyse, read-only" },
+  { t: "Evidence", b: "Every source numbered as it is found" },
+  { t: "Verification", b: "Five checks before anything is called done" },
+  { t: "Measurement", b: "Each success criterion: met, partly met or not" },
+  { t: "Learning", b: "Lessons proposed for next time; you decide what stays" },
+];
+
+/** When a general-purpose AI assistant is the better tool, and when Ensemblis is — no claims about other products. */
+export const CHOOSE: { assistant: string[]; ensemblis: string[] } = {
+  assistant: [
+    "You need a quick answer, an idea or a first draft",
+    "You will check the result yourself anyway",
+    "Being wrong costs little",
+    "The question fits in one prompt",
+  ],
+  ensemblis: [
+    "The result will be shared, defended or acted on",
+    "You need to see the evidence behind each claim",
+    "You want the plan and its cost approved before work runs",
+    "You want it checked against criteria you set — and gaps stated, not guessed",
+  ],
+};
+
 /** Visible FAQ — also emitted as FAQPage JSON-LD (only because it is shown on the page). Every answer is
  *  true of the product today; prices mirror lib/offer.ts (test-enforced against the backend). */
 export const FAQ: { q: string; a: string }[] = [
@@ -145,6 +176,10 @@ export const FAQ: { q: string; a: string }[] = [
   {
     q: "What do I get at the end?",
     a: "A decision-ready result: an executive summary that answers your objective, the findings, a recommendation, each success criterion measured as met, partially met or not met, the numbered evidence behind every claim, a verification report, and the limitations a person should check. You can export it as PDF or Word or share a read-only link.",
+  },
+  {
+    q: "How is Ensemblis different from ChatGPT or another AI assistant?",
+    a: "General assistants are excellent for quick answers and drafts, and some cite their sources. Ensemblis is built for work you will act on: you set success criteria first, approve a plan and its cost before anything runs, every claim is numbered to its evidence, a verification step checks the result against your criteria and says what it could not establish, and the work stops to ask when information is missing instead of guessing. If a quick answer is all you need, a general assistant is faster and cheaper.",
   },
   {
     q: "Who is Ensemblis for?",
