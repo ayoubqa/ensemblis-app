@@ -13,6 +13,9 @@ The backend has its own runbook in `DEPLOYMENT.md`; this covers the public site 
 4. **Vercel deploys `main` to production.** A merge on GitHub is not a deployment: wait for it.
 5. **Post-deployment check.** The same workflow runs on the push to `main`: it waits until production serves that
    commit (the `<meta name="ensemblis-release">` tag carries the short commit SHA), then runs every check against it.
+   It also waits for the API to run the last commit that changed `backend/` (Render deploys the API only when
+   `backend/` changes; `/health/live` reports `release` from `RENDER_GIT_COMMIT`). If the API is still on an older
+   commit after the wait, that is a warning to check the Render deploy, not a failure of the website release.
 
 ## What the production smoke check verifies (read-only)
 

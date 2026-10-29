@@ -3,6 +3,7 @@
 //
 //   node frontend/scripts/smoke-production.mjs
 //   SITE=https://www.getensemblis.com API=https://ensemblis-api.onrender.com EXPECT_RELEASE=<sha> WAIT_SECONDS=900 node …
+//   EXPECT_API_RELEASE=<sha of the last commit that changed backend/>: also wait for Render to run it (a WARN if it doesn't).
 //
 // FAIL (exit 1) = a safety gate or a regression: an unpublished article reachable, a wrong canonical, the API down,
 // CORS refusing the site, sign-up no longer invite-only, the AI provider not configured.
@@ -16,6 +17,7 @@ import { fileURLToPath } from "node:url";
 const SITE = (process.env.SITE || "https://www.getensemblis.com").replace(/\/+$/, "");
 const API = (process.env.API || "https://ensemblis-api.onrender.com").replace(/\/+$/, "");
 const EXPECT_RELEASE = (process.env.EXPECT_RELEASE || "").trim().slice(0, 7);
+const EXPECT_API_RELEASE = (process.env.EXPECT_API_RELEASE || "").trim().slice(0, 7);
 const WAIT_SECONDS = Number(process.env.WAIT_SECONDS || 0);
 const EXPECT_INVITE = process.env.EXPECT_INVITE !== "0";
 
@@ -129,10 +131,34 @@ async function site() {
   else fail("robots.txt", `HTTP ${robots.status}`);
 }
 
+const apiReleaseOf = (text) => {
+  try {
+    const r = JSON.parse(text).release;
+    return typeof r === "string" && r ? r : null;
+  } catch {
+    return null;
+  }
+};
+
+/** Which commit the API runs (RENDER_GIT_COMMIT, from /health/live). Render deploys the API only when backend/ changes. */
+async function apiRelease(first) {
+  let live = apiReleaseOf(first.text);
+  if (!EXPECT_API_RELEASE) return pass("API release", live ?? "not reported (a build from before /health/live reported it)");
+  const deadline = Date.now() + WAIT_SECONDS * 1000;
+  while (!(live && live.startsWith(EXPECT_API_RELEASE)) && Date.now() < deadline) {
+    console.log(`....  waiting for the API to run ${EXPECT_API_RELEASE} (live: ${live ?? "not reported"})`);
+    await new Promise((r) => setTimeout(r, 20_000));
+    live = apiReleaseOf((await get(`${API}/health/live?smoke=${Date.now()}`, {}, 1)).text);
+  }
+  if (live && live.startsWith(EXPECT_API_RELEASE)) pass("API runs the expected release", live);
+  else warn("API runs the expected release", `still ${live ?? "not reported"} after ${WAIT_SECONDS}s, expected ${EXPECT_API_RELEASE} — check the Render deploy (auto-deploy, build logs)`);
+}
+
 async function api() {
   const live = await get(`${API}/health/live`);
   if (live.status === 200) pass("API is up (/health/live)");
   else return fail("API is up (/health/live)", `HTTP ${live.status}${live.error ? ` (${live.error})` : ""}`);
+  await apiRelease(live);
 
   const ready = await get(`${API}/health`);
   let health = null;

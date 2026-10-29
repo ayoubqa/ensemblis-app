@@ -57,8 +57,9 @@ app.use(
 // registered before any JSON parser — and before the global rate limiter.
 app.post("/api/billing/stripe/webhook", express.raw({ type: "application/json", limit: "1mb" }), ah(stripeWebhookHandler));
 
-// Liveness: the process is up.
-app.get("/health/live", (_req, res) => res.json({ ok: true }));
+// Liveness: the process is up, and which commit it runs (Render sets RENDER_GIT_COMMIT), so the
+// production smoke can tell whether a backend change is live (docs/growth/08-release.md).
+app.get("/health/live", (_req, res) => res.json({ ok: true, release: process.env.RENDER_GIT_COMMIT?.trim().slice(0, 7) || null }));
 // Readiness (Render health check): the database answers; queue lag is reported.
 app.get(
   "/health",
