@@ -36,6 +36,7 @@ import { DEFAULT_CRITERIA, planObjective, type Plan, type PlanBlockedKind } from
 import { titleFor } from "./objectives";
 import { formatCredits, refundExecution } from "./billing";
 import { tokenCeilingReached } from "./budget";
+import { costLimitReached } from "./costGuard";
 import { verifyExecution } from "./verification/service";
 import type { ModelAssessment } from "./verification/checks";
 import type { Prisma } from "@prisma/client";
@@ -411,7 +412,8 @@ async function advancePhase(ex: Execution): Promise<TickResult> {
 }
 
 async function runOneStep(ex: Execution, step: ExecutionStep, steps: ExecutionStep[]): Promise<TickResult> {
-  const ceiling = await tokenCeilingReached(ex.id);
+  // Both budgets are checked before anything more is spent: tokens, then money (the remaining plan included).
+  const ceiling = (await tokenCeilingReached(ex.id)) ?? (await costLimitReached(ex, steps, "step"));
   if (ceiling) {
     await failExecution(ex.id, ceiling);
     return {};
@@ -624,7 +626,7 @@ async function verifyPhase(ex: Execution): Promise<TickResult> {
     return {};
   }
 
-  const ceiling = await tokenCeilingReached(ex.id);
+  const ceiling = (await tokenCeilingReached(ex.id)) ?? (await costLimitReached(ex, [], "verification"));
   if (ceiling) {
     await failExecution(ex.id, ceiling);
     return {};

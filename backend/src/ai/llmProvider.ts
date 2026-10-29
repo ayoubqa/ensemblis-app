@@ -585,7 +585,7 @@ async function runWithOpenAI(systemPrompt: string, userContent: string, opts: LL
   const baseUrl = openaiBaseUrl();
   const model = openaiModel(opts.model ?? "main");
   // Reasoning models (gpt-oss, o-series) spend part of this budget "thinking" before answering.
-  const maxTokens = opts.maxTokens || Number(process.env.OPENAI_MAX_TOKENS) || 8192;
+  const maxTokens = opts.maxTokens || defaultMaxOutputTokens("openai");
   const reasoningEffort = process.env.OPENAI_REASONING_EFFORT?.trim() || "";
   const requestBody = JSON.stringify(
     openaiRequestBody({ baseUrl, model, system: systemPrompt, user: userContent, maxTokens, temperature: opts.temperature, reasoningEffort })
@@ -807,7 +807,7 @@ async function runWithAnthropic(systemPrompt: string, userContent: string, opts:
     const stream = anthropic.messages.stream(
       {
         model,
-        max_tokens: opts.maxTokens || 4096,
+        max_tokens: opts.maxTokens || defaultMaxOutputTokens("anthropic"),
         system: systemPrompt,
         messages: [{ role: "user", content: userContent }],
         ...(opts.temperature !== undefined ? { temperature: opts.temperature } : {}),
@@ -965,6 +965,12 @@ export function aiConfigProblem(): string | null {
     return "The AI provider isn't configured: ANTHROPIC_API_KEY is missing on the server.";
   }
   return null;
+}
+
+/** The output-token cap of a call that sets none (OPENAI_MAX_TOKENS, 8192 by default; 4096 for Claude). Ollama uses the model's own limit. */
+export function defaultMaxOutputTokens(provider: string): number {
+  if (provider === "anthropic") return 4096;
+  return Number(process.env.OPENAI_MAX_TOKENS) || 8192;
 }
 
 /** The provider and model a call of this tier would use right now (as runLLM records them). */
