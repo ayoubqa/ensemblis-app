@@ -384,8 +384,15 @@ export interface ResearchNotice {
 export const WIKIPEDIA_ONLY_NOTICE =
   "Only Wikipedia was searched — no live web search ran — so the external sources are encyclopedia summaries, not current web pages. Company, market and prospect facts may be missing or out of date.";
 
+/** The sentence exports carry when a result's research was Wikipedia-only, so the limit travels with the file. */
+export const WIKIPEDIA_ONLY_EXPORT_NOTE = "Evidence limit: only Wikipedia was searched (no live web search), so its external sources are encyclopedia summaries.";
+
 /** Wikipedia alone answered this step's searches (servers without a Tavily key; recorded "ok" before they were marked degraded). */
 const wikipediaOnly = (r: ExecutionStep["research"] | undefined) => !!r?.providers.length && r.providers.every((p) => p === "wikipedia");
+
+/** Some step that wasn't skipped got its external evidence from Wikipedia alone. */
+export const usedWikipediaOnly = (steps: (Pick<ExecutionStep, "status"> & Partial<Pick<ExecutionStep, "research">>)[]) =>
+  steps.some((s) => s.status !== "SKIPPED" && wikipediaOnly(s.research));
 
 /**
  * One sentence on whether web research ran and how it went, from each step's research outcome

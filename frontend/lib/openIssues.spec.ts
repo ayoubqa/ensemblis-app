@@ -19,6 +19,7 @@ import {
   usedCustomSearch,
   usedMockAI,
   WIKIPEDIA_ONLY_NOTICE,
+  usedWikipediaOnly,
   verificationStopped,
 } from "./openIssues";
 
@@ -422,6 +423,8 @@ describe("researchNotice", () => {
     expect(researchNotice([{ title: "Scan", status: "COMPLETED", researchStatus: "degraded", research: wiki }], web, true)).toEqual({ tone: "warn", text: WIKIPEDIA_ONLY_NOTICE });
     // Recorded "ok" by servers from before Wikipedia-only research was marked degraded.
     expect(researchNotice([{ title: "Scan", status: "COMPLETED", researchStatus: "ok", research: wiki }], web, true)).toEqual({ tone: "warn", text: WIKIPEDIA_ONLY_NOTICE });
+    expect(usedWikipediaOnly([{ status: "COMPLETED", research: wiki }])).toBe(true);
+    expect(usedWikipediaOnly([{ status: "SKIPPED", research: wiki }])).toBe(false);
     // Live web research: nothing to say.
     expect(researchNotice([{ title: "Scan", status: "COMPLETED", researchStatus: "ok", research: { providers: ["tavily"], queries: ["q"], attempts: [attempt("tavily", true, 200)] } }], web, true)).toBeNull();
   });
