@@ -1,0 +1,42 @@
+name: Production smoke
+
+# Read-only checks against the live site and API (frontend/scripts/smoke-production.mjs): no sign-in, no writes,
+# no paid calls, no secrets printed.
+#   - pull request to main: checks production as it is now — the baseline a release starts from.
+#   - push to main: waits until Vercel serves that commit (the ensemblis-release meta tag), then checks it.
+#   - manual: run any time from the Actions tab.
+on:
+  pull_request:
+    branches: [main]
+    paths: ["frontend/**", ".github/workflows/production-smoke.yml"]
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      expect_release:
+        description: "Wait until this commit (SHA) is live before checking (optional)"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-smoke-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  smoke:
+    name: Production — public safety gates and API health
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Check production (read-only)
+        env:
+          EXPECT_RELEASE: ${{ github.event_name == 'push' && github.sha || inputs.expect_release }}
+          WAIT_SECONDS: ${{ github.event_name == 'push' && '900' || '600' }}
+        run: node frontend/scripts/smoke-production.mjs

@@ -25,6 +25,8 @@ import { OG_IMAGE, SITE } from "@/lib/site";
 import { visiblePosts } from "@/lib/blog/posts";
 import { SiteAnalytics } from "@/components/site/SiteAnalytics";
 
+const RELEASE = (process.env.VERCEL_GIT_COMMIT_SHA || "").slice(0, 7);
+
 // Favicons come from the official brand pack via the app/ file conventions
 // (app/favicon.ico, app/icon.png, app/apple-icon.png); see public/brand/README.md.
 export const metadata: Metadata = {
@@ -55,6 +57,9 @@ export const metadata: Metadata = {
     ...(process.env.NEXT_PUBLIC_GOOGLE_SITE_VERIFICATION ? { google: process.env.NEXT_PUBLIC_GOOGLE_SITE_VERIFICATION } : {}),
     ...(process.env.NEXT_PUBLIC_BING_SITE_VERIFICATION ? { other: { "msvalidate.01": process.env.NEXT_PUBLIC_BING_SITE_VERIFICATION } } : {}),
   },
+  // Which commit is live (Vercel's build-time commit, short form): lets the production smoke check confirm a release
+  // has rolled out before testing it (frontend/scripts/smoke-production.mjs). Absent outside Vercel.
+  ...(RELEASE ? { other: { "ensemblis-release": RELEASE } } : {}),
 };
 
 export const viewport: Viewport = {

@@ -9,6 +9,7 @@
 | [funnel.sql](./funnel.sql) | Read-only activation funnel query for Neon |
 | [05-next-steps.md](./05-next-steps.md) | What the founder needs to do, what comes next, and what not to build yet |
 | [06-customer-hypotheses.md](./06-customer-hypotheses.md) | Two customer segments as hypotheses, one marketing asset, and the fastest way to learn |
+| [08-release.md](./08-release.md) | How a website change reaches production, the read-only production smoke check, and rollback |
 
 Code map: public pages in `frontend/app/{page,use-cases,pricing,access,blog}`, shared facts in
 `frontend/lib/offer.ts` (mirrors the backend price list; test-enforced), the Journal engine in
