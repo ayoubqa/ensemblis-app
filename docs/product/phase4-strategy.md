@@ -501,3 +501,84 @@ enforcement points, the ops CLI, and tests for each scenario in §F. No Stripe y
   2026). Confirm on Anthropic's pricing page.
 - Groq gpt-oss and Tavily prices: PR #4's `PROVIDER_PRICING` table (checked 23 Oct 2026 on the providers' own
   pages); Tavily credits per search, secondary.
+
+---
+
+## Addendum, stage 1 (29 Oct 2026): what was built, and the decisions that remain
+
+### Built and tested, not merged: PR #16
+
+The changes are tested in CI and locally only. Nothing here has run in production.
+
+- **A monetary limit per run** (`engine/costGuard.ts`).
+  - The limit is the smaller of 30% of the run's price (`MAX_COST_SHARE_OF_PRICE`) and an optional euro cap.
+  - It covers everything the run has spent plus a pessimistic estimate of the remaining plan.
+  - It is checked before each step attempt and before verification. A run that would pass it stops before
+    spending more, and is refunded.
+  - It is inert until `PROVIDER_PRICING` is set; unpriced models are reported, not guessed.
+- **The real-model smoke run records its cost** (list prices for the test run only) and the time per execution.
+- **`CLAUDE.md`** (project map, commands, rules) and a runbook for turning on live search
+  (`DEPLOYMENT.md` §2a).
+
+### Facts established in this stage
+
+- **Tavily** [E, Tavily docs found by search on 29 Oct; the pages could not be fetched from the sandbox]: free
+  1,000 credits per month, no card. Basic search costs 1 credit, advanced 2. Pay-as-you-go is $0.008 per credit.
+  Plans start at $30 for 4,000 credits. The code always requests `basic` [R].
+- **The real-model smoke workflow cannot touch production** [R]:
+  - a Postgres service container inside the job;
+  - a script that refuses any database name without "smoke";
+  - a local API;
+  - only `SMOKE_*` secrets; no production URL or `DATABASE_URL`.
+- **PRs #4–#7 can be rebased**: they conflict with `main` only in `backend/src/index.ts` and
+  `backend/src/config.ts`, from Phase 3's edits [R: `git merge-tree`].
+
+### Multi-provider routing: reuse PR #4, then generalise
+
+- PR #4's premium route is the right first step. It already has:
+  - purpose-based use (plan, step, verify);
+  - fallback before any output;
+  - pauses on key, quota and rate-limit errors;
+  - a daily euro budget;
+  - "only when priced";
+  - tests against stubs.
+- Rebase it rather than build a rival layer. Then generalise its OpenAI-only route into the per-purpose
+  `MODEL_ROUTES` of §D, and upgrade the Anthropic adapter (current SDK and model IDs) as a separate change.
+- **Selective escalation, the only multi-model use proposed before the benchmark:** every step runs on the
+  standard route. The **one automatic revision after a failed verification** runs on the stronger route. That
+  escalation is triggered by a defined, deterministic quality signal (the verification gate), bounded (1 revision
+  per run, `MAX_AUTO_REVISIONS`), and limited by the monetary guard.
+
+### Using fewer tokens without lowering quality
+
+Ranked by measured value; nothing ships without its measurement.
+
+| Optimisation | Expected benefit | Cost | Risk | Measure |
+|---|---|---|---|---|
+| A stable shared prefix (trust and honesty rules, objective, company context) **before** the per-capability instructions, so provider prompt caches hit across a run's 6–8 calls | Cached input is billed at a discount: 50% on Groq gpt-oss, about 10% of the input price on OpenAI and Anthropic [E]. Near zero in absolute terms on Groq; real on frontier models | Small (prompt order) | Prompt order can change outputs | `UsageEvent.cachedTokensIn` before and after; benchmark quality on the frozen task set |
+| Company context: send only the profile fields a capability uses. Today the whole profile (up to ~22k characters if every field is full) goes to every step with the `company_context` tool [R] | Fewer input tokens on context-heavy accounts | Small to medium | Losing context a step needed | Input tokens per step; scorecard accuracy |
+| Search-result cache per organisation (same normalised query within N hours) | Fewer Tavily calls on repeated or recurring runs | Medium | Stale results; isolation (keep it per organisation) | Search calls per run; freshness checks |
+| Skip the memory-learning call (fast tier, 1 per run [R]) when the run produced nothing new | 1 cheap call per run | Small | Missed learning | Memory items per run |
+
+Already in place [R]:
+- the deterministic verification checks (`checks.ts`) run before any model check;
+- the model claim check covers at most 20 claims;
+- retries are bounded:
+  - 3 attempts per step;
+  - 1 structured-output repair;
+  - 1 automatic revision;
+  - 1 retry when the verifier could not run;
+  - 1 Tavily retry;
+- circuit breakers stop calls to a provider that has rejected the key;
+- a retried step reuses its earlier research.
+
+### Development tools
+
+| Tool | Problem it solves | Cost | Permissions | Duplicates? | Recommendation |
+|---|---|---|---|---|---|
+| GitHub (CI, PRs, logs) through the existing integration | Releases and diagnosis | — | Repo | — | Keep (in use) |
+| Playwright (local runs; MCP plugin now connected) | UI checks and the production browser smoke | — | — | — | Keep; add visual snapshots only for the 3 money pages if regressions appear |
+| Current-docs lookup (context7 MCP) | Stale API knowledge (Tavily, Anthropic, OpenAI, Prisma, Next.js) | Free tier [unverified] | Network allow-list | No | Allow `mcp.context7.com` and `docs.tavily.com` in the environment's network settings. Both failed to connect from this sandbox. |
+| Error monitoring (e.g. Sentry) | Production errors are visible only in Render logs | Free developer tier [unverified] | A DSN as an environment variable | No | Add once real users run tasks; needs your account and approval |
+| Session-start hook (Postgres up, dependencies installed) | Each cloud session restarts Postgres by hand | — | Repo settings | No | Small; do it next time tests are run |
+| `CLAUDE.md` | Repeated exploration and explanation | — | — | — | Done (PR #16) |
