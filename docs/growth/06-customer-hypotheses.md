@@ -69,7 +69,8 @@ For four weeks, instead of waiting for traffic:
    their result, fix output quality before any marketing; if several return unprompted and accept the price, put
    that segment's use case first on the homepage and in the editorial plan.
 
-This doubles as the only honest quality check available: the first real runs show whether the output is good
+How to score each task — accuracy, sources, verification, cost, time saved, willingness to act and pay — is in
+[`07-validation-plan.md`](./07-validation-plan.md). This doubles as the only honest quality check available: the first real runs show whether the output is good
 enough to sell, and they produce the genuine examples the two product-led articles (#12, #16) need.
 
 ## What not to build yet

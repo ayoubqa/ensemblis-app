@@ -2,7 +2,14 @@
 
 ## Essential before launch (founder — each takes minutes)
 
-1. **Set `NEXT_PUBLIC_CONTACT_EMAIL` in Vercel (Production) and redeploy.** It powers the request-access email,
+0. **Turn on live web search for the API.** The production smoke check (29 October 2026) found the API's web search
+   falling back to **Wikipedia** — the live provider isn't configured on Render. Market, competitor and account
+   research then draw on Wikipedia only, which will make real output look thin. Set `TAVILY_API_KEY` on the Render API
+   service (`DEPLOYMENT.md` lists it as required for research briefs; without it the product labels briefs "limited
+   evidence"). Tavily is a paid service with its own pricing — your decision. Then re-run the *Production smoke*
+   workflow: the "web search provider" line should turn into a PASS.
+1. **`NEXT_PUBLIC_CONTACT_EMAIL` in Vercel (Production)** — *verified set on 29 October 2026* by the production
+   smoke check (`/access` offers "Request access by email"; no placeholder on `/privacy`). Keep it set. It powers the request-access email,
    the corrections address and the legal pages; sign-up is invite-only, so without it a visitor without a code
    has no way in. *Could not be checked from here.* How to verify after deploying:
    - open `/access` signed out: it must show **"Request access by email"** and the address with **Copy address**
