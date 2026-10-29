@@ -26,7 +26,12 @@ The backend has its own runbook in `DEPLOYMENT.md`; this covers the public site 
 | Sign-up policy | sign-up is no longer invite-only |
 | AI provider | not configured, or the mock provider is active |
 
-It **warns** (without failing) when `NEXT_PUBLIC_CONTACT_EMAIL` is missing (no way to request access; placeholders
+Then a **browser check** (`frontend/scripts/smoke-production-browser.mjs`, Chromium) opens the home, pricing and
+access pages at desktop and phone widths, plus sign-up, sign-in, the Journal and How it works. It fails on any
+JavaScript error, an estimator that doesn't respond, a missing request-access or invite path, or a page that scrolls
+sideways on a phone. It never submits a form.
+
+The HTTP check **warns** (without failing) when `NEXT_PUBLIC_CONTACT_EMAIL` is missing (no way to request access; placeholders
 on the legal pages) or when web search falls back from the live provider. It never signs in, writes, runs a task or
 prints a secret: everything it reads is public (`/api/config` contains flags and limits only).
 

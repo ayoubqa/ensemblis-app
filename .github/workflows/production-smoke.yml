@@ -1,7 +1,7 @@
 name: Production smoke
 
-# Read-only checks against the live site and API (frontend/scripts/smoke-production.mjs): no sign-in, no writes,
-# no paid calls, no secrets printed.
+# Read-only checks against the live site and API (frontend/scripts/smoke-production.mjs), then the public pages in a
+# browser (smoke-production-browser.mjs): no sign-in, no writes, no paid calls, no secrets printed.
 #   - pull request to main: checks production as it is now — the baseline a release starts from.
 #   - push to main: waits until Vercel serves that commit (the ensemblis-release meta tag), then checks it.
 #   - manual: run any time from the Actions tab.
@@ -35,8 +35,17 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
       - name: Check production (read-only)
         env:
           EXPECT_RELEASE: ${{ github.event_name == 'push' && github.sha || inputs.expect_release }}
           WAIT_SECONDS: ${{ github.event_name == 'push' && '900' || '600' }}
         run: node frontend/scripts/smoke-production.mjs
+      # Then the same site in a real browser: no JavaScript errors, the estimator responds, the access and sign-up
+      # paths render, phone layouts don't scroll sideways. Never signs in or submits anything.
+      - name: Install the browser check
+        working-directory: frontend
+        run: npm ci && npx playwright install --with-deps chromium
+      - name: Check production in a browser (read-only)
+        run: node frontend/scripts/smoke-production-browser.mjs
