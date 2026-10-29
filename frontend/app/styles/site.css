@@ -2658,7 +2658,8 @@ a.ed-cat:hover {
   content: "";
   position: absolute;
   left: 7px;
-  right: 7px;
+  /* End at the last node: it sits at the start of the last of seven columns (gap 16px). */
+  right: calc((100% - 96px) / 7 - 8px);
   top: 7px;
   height: 2px;
   background: linear-gradient(90deg, var(--accent), var(--accent) 70%, var(--ok));
@@ -2709,25 +2710,24 @@ a.ed-cat:hover {
   .st-cycle {
     grid-template-columns: minmax(0, 1fr);
   }
+  /* Stacked: one segment per step, from its node to the next, so the line ends at the last node. */
   .st-cycle::before {
-    left: 7px;
-    right: auto;
-    top: 8px;
-    bottom: 8px;
-    width: 2px;
-    height: auto;
-    background: linear-gradient(180deg, var(--accent), var(--accent) 70%, var(--ok));
-    transform-origin: center top;
+    display: none;
   }
   .st-cycle li {
-    padding: 0 0 14px 32px;
+    padding: 0 0 16px 32px;
   }
-  @media (prefers-reduced-motion: no-preference) {
-    @supports (animation-timeline: view()) {
-      .st-cycle::before {
-        animation-name: st-draw-y;
-      }
-    }
+  .st-cycle li:not(:last-child)::after {
+    content: "";
+    position: absolute;
+    left: 7px;
+    top: 16px;
+    bottom: 0;
+    width: 2px;
+    background: var(--accent);
+  }
+  .st-cycle li:nth-last-child(2)::after {
+    background: linear-gradient(180deg, var(--accent), var(--ok));
   }
 }
 
