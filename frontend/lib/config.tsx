@@ -95,8 +95,8 @@ export function useConfig(): ConfigContextValue {
   return useContext(ConfigContext);
 }
 
-/** Contact address for legal pages (NEXT_PUBLIC_CONTACT_EMAIL, inlined at build time). */
-export const CONTACT_EMAIL = (process.env.NEXT_PUBLIC_CONTACT_EMAIL || "").trim();
+/** Contact address for legal pages (NEXT_PUBLIC_CONTACT_EMAIL, inlined at build time). Defined in lib/contact.ts so server components can read it too. */
+export { CONTACT_EMAIL } from "./contact";
 
 /** Inline "3,000 credits"-style amount of starting credits, from the server config. */
 export function StartingCredits() {

@@ -6,6 +6,7 @@
 // exist, so none appear. Examples are labelled as examples wherever shown.
 import type { IconName } from "@/components/Icon";
 import { SITE } from "@/lib/site";
+import { PLAN_COST, VERIFICATION_CREDITS } from "@/lib/offer";
 
 /** The product story, in the order Ensemblis runs it. */
 export const STORY: { key: string; title: string; body: string }[] = [
@@ -127,34 +128,43 @@ export const ANSWER_VS_OUTCOME: { answer: string; outcome: string }[] = [
   { answer: "Forgotten next time", outcome: "Learnings kept in your organization's memory" },
 ];
 
-/** Visible FAQ — also emitted as FAQPage JSON-LD (only because it is shown on the page). */
+/** Visible FAQ — also emitted as FAQPage JSON-LD (only because it is shown on the page). Every answer is
+ *  true of the product today; prices mirror lib/offer.ts (test-enforced against the backend). */
 export const FAQ: { q: string; a: string }[] = [
   {
     q: "What is Ensemblis?",
-    a: `${SITE.definition} You describe the outcome; a Chief of Staff plans it, an AI Team executes it, and the result is verified against evidence and your success criteria.`,
+    a: `${SITE.definition} You describe the outcome and how it will be judged; Ensemblis plans the research and analysis, runs it after you approve the cost, and checks the result against cited evidence and your success criteria before calling it done.`,
   },
   {
-    q: "What does Ensemblis do?",
-    a: "It coordinates AI-powered planning, execution, verification and evidence around business objectives — research, analysis and recommendations in marketing, sales, finance and operations — and measures whether each success criterion was met.",
+    q: "What do I get at the end?",
+    a: "A decision-ready result: an executive summary that answers your objective, the findings, a recommendation, each success criterion measured as met, partially met or not met, the numbered evidence behind every claim, a verification report, and the limitations a person should check. You can export it as PDF or Word or share a read-only link.",
   },
   {
     q: "Who is Ensemblis for?",
-    a: "Ensemblis is designed for businesses that want AI to execute operational and knowledge work rather than simply provide conversational answers: founders, executives and teams who delegate research, analysis and recommendations and need to trust the result.",
+    a: "Founders and small teams who need research and analysis they can check: markets, competitors, customers, accounts, finances, processes and vendors. It works from public web sources, the documents you upload and what you tell it about your company.",
   },
   {
-    q: "How is Ensemblis different from an AI assistant or chatbot?",
-    a: "Traditional AI assistants primarily generate responses. Ensemblis is designed around business outcomes: it plans the work, asks for your approval, executes it with an AI Team, verifies the result against evidence and measures it against your success criteria.",
+    q: "How much does it cost?",
+    a: `Work is priced in credits, step by step, and the plan shows the total before anything runs. An objective uses ${PLAN_COST.min.toLocaleString("en-US")} to ${PLAN_COST.max.toLocaleString("en-US")} credits depending on how many steps it needs, including the ${VERIFICATION_CREDITS}-credit verification. During the private beta every account starts with free credits and payments are switched off.`,
+  },
+  {
+    q: "How do I get access?",
+    a: "Ensemblis is in a private beta. When sign-up needs an invite code, the Get started page lets you request access by email; if you have a code, you can create your account straight away.",
+  },
+  {
+    q: "Can I trust the results?",
+    a: "You can check them, which is the point. Every claim cites its evidence, a verification gate checks objective alignment, evidence support, success-criteria coverage, completeness and internal consistency, and limitations are stated. AI-generated work can still contain mistakes, so review the evidence before acting on it.",
   },
   {
     q: "What doesn't Ensemblis do?",
-    a: "The AI Team is read-only by design. It researches, analyses, drafts and recommends; it never sends email, publishes content, changes your systems or spends money on its own. AI-generated work can contain mistakes, which is why every result comes with its evidence and a verification report.",
+    a: "The AI Team is read-only by design. It researches, analyses, drafts and recommends; it never sends email, publishes content, changes your systems or spends money on its own. It does not connect to your CRM or other business tools yet: it works from the web, your uploaded documents and your Company Context. It is not a substitute for legal, financial or medical advice.",
   },
   {
-    q: "How do I stay in control?",
-    a: "You set the success criteria, deadline and budget. You approve each plan and its estimated cost, or allow automatic starts within a budget and approval threshold. When information is missing or something fails, Ensemblis raises an exception instead of guessing.",
+    q: "What happens to my data?",
+    a: "Each organization's objectives, Company Context, documents and memory are isolated from every other organization, and documents are passed to the AI as untrusted data, not as instructions. The Privacy Policy lists who processes what, including the AI model provider.",
   },
   {
-    q: "Is my company's data kept separate?",
-    a: "Yes. Each organization's objectives, Company Context, documents and memory are isolated from every other organization, and documents are passed to the AI as untrusted data, not as instructions.",
+    q: "What if something fails?",
+    a: "Ensemblis stops and raises an exception instead of guessing: what happened, why it matters and what it needs from you. Work that fails or never starts is refunded automatically.",
   },
 ];

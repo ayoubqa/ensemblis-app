@@ -1,14 +1,72 @@
 {
-  "_comment": "Which URLs search engines may index. publicPages = indexable + sitemap. privatePrefixes = signed-in app pages: noindex header (next.config.js) and disallowed in robots.txt. noindexOnly = pages reachable from public links or emails (auth pages, invitations, shared results): noindex header only, NOT disallowed, so crawlers can fetch them and see the noindex.",
+  "_comment": "Which URLs search engines may index. publicPages = indexable + sitemap. privatePrefixes = signed-in app pages: noindex header (next.config.js) and disallowed in robots.txt. noindexOnly = pages reachable from public links or emails (auth pages, invitations, shared results): noindex header only, NOT disallowed, so crawlers can fetch them and see the noindex. The Journal (/blog, articles, topic pages) is added by app/sitemap.ts from content/blog: only public articles, topic pages once they are indexable.",
   "publicPages": [
-    { "path": "/", "changeFrequency": "weekly", "priority": 1 },
-    { "path": "/how-it-works", "changeFrequency": "monthly", "priority": 0.8 },
-    { "path": "/privacy", "changeFrequency": "yearly", "priority": 0.2 },
-    { "path": "/terms", "changeFrequency": "yearly", "priority": 0.2 }
+    {
+      "path": "/",
+      "changeFrequency": "weekly",
+      "priority": 1
+    },
+    {
+      "path": "/how-it-works",
+      "changeFrequency": "monthly",
+      "priority": 0.8
+    },
+    {
+      "path": "/use-cases",
+      "changeFrequency": "monthly",
+      "priority": 0.8
+    },
+    {
+      "path": "/pricing",
+      "changeFrequency": "monthly",
+      "priority": 0.8
+    },
+    {
+      "path": "/access",
+      "changeFrequency": "monthly",
+      "priority": 0.5
+    },
+    {
+      "path": "/blog/editorial-standards",
+      "changeFrequency": "yearly",
+      "priority": 0.3
+    },
+    {
+      "path": "/privacy",
+      "changeFrequency": "yearly",
+      "priority": 0.2
+    },
+    {
+      "path": "/terms",
+      "changeFrequency": "yearly",
+      "priority": 0.2
+    }
   ],
   "privatePrefixes": [
-    "/dashboard", "/objectives", "/new", "/approvals", "/exceptions", "/usage", "/billing", "/context", "/ai-team",
-    "/routines", "/workflows", "/reports", "/settings", "/team", "/admin", "/tasks"
+    "/dashboard",
+    "/objectives",
+    "/new",
+    "/approvals",
+    "/exceptions",
+    "/usage",
+    "/billing",
+    "/context",
+    "/ai-team",
+    "/routines",
+    "/workflows",
+    "/reports",
+    "/settings",
+    "/team",
+    "/admin",
+    "/tasks"
   ],
-  "noindexOnly": ["/r", "/login", "/signup", "/forgot-password", "/reset-password", "/verify-email", "/join"]
+  "noindexOnly": [
+    "/r",
+    "/login",
+    "/signup",
+    "/forgot-password",
+    "/reset-password",
+    "/verify-email",
+    "/join"
+  ]
 }

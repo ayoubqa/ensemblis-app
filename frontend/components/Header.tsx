@@ -8,6 +8,7 @@ import { useAuth } from "@/lib/auth-context";
 import { credits } from "@/lib/format";
 import { useOnClickOutside } from "@/lib/hooks";
 import { ROUTES } from "@/lib/routes";
+import { useStartHref } from "@/components/site/StartLink";
 import { Avatar } from "./Avatar";
 import { Icon, type IconName } from "./Icon";
 import { Logo } from "./Logo";
@@ -27,7 +28,13 @@ const starts = (p: string, ...prefixes: string[]) => prefixes.some((x) => p === 
 const cx = (...c: (string | false | null | undefined)[]) => c.filter(Boolean).join(" ");
 
 /** Signed out: the story, then Log in / Get started (right-hand side). */
-export const PUBLIC_NAV: NavItem[] = [{ href: ROUTES.howItWorksPage, label: "How it works", icon: "layers", match: (p) => p === ROUTES.howItWorksPage }];
+export const PUBLIC_NAV: NavItem[] = [
+  { href: ROUTES.useCases, label: "Use cases", icon: "target", match: (p) => p === ROUTES.useCases },
+  { href: ROUTES.howItWorksPage, label: "How it works", icon: "layers", match: (p) => p === ROUTES.howItWorksPage },
+  { href: ROUTES.pricing, label: "Pricing", icon: "wallet", match: (p) => p === ROUTES.pricing },
+];
+/** Shown once the Journal has a published article (the root layout knows; an empty Journal isn't promoted). */
+export const JOURNAL_NAV: NavItem = { href: ROUTES.blog, label: "Journal", icon: "file", match: (p) => p === ROUTES.blog || p.startsWith(`${ROUTES.blog}/`) };
 
 /** Signed in, primary navigation (desktop). */
 export const SIGNED_NAV: NavItem[] = [
@@ -72,8 +79,10 @@ function AcctLink({ href, icon, children, onSelect, right, current }: { href: st
 
 // ------------------------------------------------------------------ Header
 /** The navy command bar every page lives under (`.dk` whatever the theme). */
-export function Header() {
+export function Header({ journal = false }: { journal?: boolean }) {
   const { user, loading, signOut } = useAuth();
+  const startHref = useStartHref();
+  const publicNav = journal ? [...PUBLIC_NAV, JOURNAL_NAV] : PUBLIC_NAV;
   const pathname = usePathname() || "/";
   const router = useRouter();
   const shell = useShell();
@@ -154,7 +163,7 @@ export function Header() {
 
         <nav className="sh-nav" aria-label="Main">
           <ul className="sh-links">
-            {(user ? SIGNED_NAV : PUBLIC_NAV).map((n) => {
+            {(user ? SIGNED_NAV : publicNav).map((n) => {
               const on = n.match(pathname);
               return (
                 <li key={n.label}>
@@ -348,8 +357,8 @@ export function Header() {
                   Log in
                 </Link>
               )}
-              {!starts(pathname, ROUTES.signup) && (
-                <Link href={ROUTES.signup} className="btn p sm">
+              {!starts(pathname, ROUTES.signup, ROUTES.access) && (
+                <Link href={startHref} className="btn p sm">
                   Get started
                 </Link>
               )}
@@ -373,6 +382,7 @@ const MORE_PATHS = [ROUTES.aiTeam, ROUTES.context, ROUTES.reports, "/tasks", ROU
  */
 export function BottomNav() {
   const { user } = useAuth();
+  const startHref = useStartHref();
   const pathname = usePathname() || "/";
   const { attention } = useShell();
   const [more, setMore] = useState(false);
@@ -381,8 +391,9 @@ export function BottomNav() {
   if (!user) {
     const tabs: Tab[] = [
       { key: "home", href: ROUTES.home, label: "Home", icon: "home", on: pathname === ROUTES.home },
-      { key: "how", href: ROUTES.howItWorksPage, label: "How it works", icon: "layers", on: pathname === ROUTES.howItWorksPage },
-      { key: "start", href: ROUTES.signup, label: "Get started", icon: "arrow", on: starts(pathname, ROUTES.signup) },
+      { key: "uses", href: ROUTES.useCases, label: "Use cases", icon: "target", on: pathname === ROUTES.useCases },
+      { key: "pricing", href: ROUTES.pricing, label: "Pricing", icon: "wallet", on: pathname === ROUTES.pricing },
+      { key: "start", href: startHref, label: "Get started", icon: "arrow", on: starts(pathname, ROUTES.signup, ROUTES.access) },
       { key: "login", href: ROUTES.login, label: "Log in", icon: "user", on: starts(pathname, ROUTES.login) },
     ];
     return (

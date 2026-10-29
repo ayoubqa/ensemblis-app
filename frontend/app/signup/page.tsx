@@ -10,6 +10,7 @@ import { useAuth } from "@/lib/auth-context";
 import { errorText } from "@/lib/errors";
 import { useConfig } from "@/lib/config";
 import { firstName } from "@/lib/format";
+import { track } from "@/lib/analytics";
 import { ROUTES, loginUrl, safeNext } from "@/lib/routes";
 import { AuthHead, AuthLoading, AuthNotice, AuthShell, EMAIL_RE, Field, FormError, PasswordInput, StrengthMeter, authErrorText, useAutoFocus } from "../login/_components/AuthUI";
 
@@ -112,6 +113,7 @@ function SignupForm() {
             ...(tsToken ? { turnstileToken: tsToken } : {}),
           });
       done.current = true;
+      track("signup_completed", { invite: inviteRequired ? "yes" : "no", claim: wasClaim });
       if (wasClaim) setClaimed(true);
       signIn(token, u);
       toast(wasClaim ? `Your trial work is saved — welcome, ${firstName(u.name)}` : `Welcome to Ensemblis, ${firstName(u.name)}`, { icon: "check" });
@@ -251,7 +253,7 @@ function SignupForm() {
           {!pwErr && <StrengthMeter pw={password} id="su-password-strength" />}
         </Field>
         {inviteRequired && (
-          <Field id="su-invite" label="Invite code" error={inviteErr} hint="Access is invite-only for now. Your code came with your invitation.">
+          <Field id="su-invite" label="Invite code" error={inviteErr} hint="Sign-up is invite-only during the private beta. Your code came with your invitation.">
             <input
               id="su-invite"
               className="f"
@@ -270,6 +272,11 @@ function SignupForm() {
               maxLength={120}
             />
           </Field>
+        )}
+        {inviteRequired && (
+          <p className="au-noinvite">
+            No invite code? <Link href={ROUTES.access}>Request access</Link>
+          </p>
         )}
 
         <label htmlFor="su-terms" className="au-check">

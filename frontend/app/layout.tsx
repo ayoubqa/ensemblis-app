@@ -8,7 +8,8 @@ import "./styles/workspace.css";
 import "./styles/console.css";
 import "./styles/operations.css";
 import "./styles/auth.css";
-import { inter } from "./fonts";
+import "./styles/site.css";
+import { inter, newsreader } from "./fonts";
 import { AuthProvider } from "@/lib/auth-context";
 import { ThemeProvider, themeInitScript } from "@/lib/theme";
 import { Header, BottomNav } from "@/components/Header";
@@ -21,6 +22,8 @@ import { GuestBanner } from "@/components/GuestBanner";
 import { ConfigProvider } from "@/lib/config";
 import { demoInitScript } from "@/lib/demo-flags";
 import { OG_IMAGE, SITE } from "@/lib/site";
+import { visiblePosts } from "@/lib/blog/posts";
+import { SiteAnalytics } from "@/components/site/SiteAnalytics";
 
 // Favicons come from the official brand pack via the app/ file conventions
 // (app/favicon.ico, app/icon.png, app/apple-icon.png); see public/brand/README.md.
@@ -47,6 +50,11 @@ export const metadata: Metadata = {
     images: [OG_IMAGE.url],
   },
   formatDetection: { telephone: false },
+  // Search Console / Bing Webmaster Tools ownership (the tokens are public by design). Unset = no tag.
+  verification: {
+    ...(process.env.NEXT_PUBLIC_GOOGLE_SITE_VERIFICATION ? { google: process.env.NEXT_PUBLIC_GOOGLE_SITE_VERIFICATION } : {}),
+    ...(process.env.NEXT_PUBLIC_BING_SITE_VERIFICATION ? { other: { "msvalidate.01": process.env.NEXT_PUBLIC_BING_SITE_VERIFICATION } } : {}),
+  },
 };
 
 export const viewport: Viewport = {
@@ -58,8 +66,10 @@ export const viewport: Viewport = {
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
+  // The Journal is promoted in the navigation only once it has a published article.
+  const journal = visiblePosts().length > 0;
   return (
-    <html lang="en" className={inter.variable} data-theme="dark" suppressHydrationWarning>
+    <html lang="en" className={`${inter.variable} ${newsreader.variable}`} data-theme="dark" suppressHydrationWarning>
       <head>
         {/* Apply the saved theme before first paint (no flash). */}
         <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
@@ -76,11 +86,12 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                   Skip to content
                 </a>
                 <DemoBanner />
-                <Header />
+                <Header journal={journal} />
                 <GuestBanner />
                 <PageTransition>{children}</PageTransition>
-                <Footer />
+                <Footer journal={journal} />
                 <BottomNav />
+                <SiteAnalytics />
               </ShellProvider>
             </ToastProvider>
           </AuthProvider>
