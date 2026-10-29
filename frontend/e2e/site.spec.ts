@@ -3,6 +3,7 @@
 // Reads content/blog itself, so it stays right as articles are added, reviewed and published.
 import { expect, test } from "@playwright/test";
 import { isPublic, readContent } from "../lib/blog/posts";
+import { signUpViaUI, uniqueEmail } from "./helpers";
 
 const content = readContent();
 const publicPosts = content.posts.filter((p) => isPublic(p));
@@ -87,6 +88,17 @@ test.describe("Get started never dead-ends", () => {
   });
 });
 
+test.describe("First run", () => {
+  test("a new account can skip Company Context and go straight to its first outcome", async ({ page }) => {
+    await signUpViaUI(page, { name: "Kai First", company: "First Run Ltd", email: uniqueEmail("firstrun") });
+    const note = page.getByTestId("context-first-run");
+    await expect(note).toBeVisible();
+    await expect(note).toContainText("Optional");
+    await note.getByTestId("context-skip").click();
+    await expect(page).toHaveURL(/\/objectives\/new$/);
+  });
+});
+
 test.describe("Public pages: content and SEO plumbing", () => {
   for (const path of ["/", "/use-cases", "/pricing", "/access", "/how-it-works", "/blog", "/blog/editorial-standards"]) {
     test(`${path}: one h1, a canonical URL, images with alt text`, async ({ page }) => {
@@ -115,6 +127,17 @@ test.describe("Public pages: content and SEO plumbing", () => {
     await expect(list.getByRole("rowheader", { name: "Market Research" })).toBeVisible();
     await expect(list.getByRole("row", { name: /Verification gate/ })).toContainText("150");
     await expect(page.getByRole("heading", { level: 2, name: /800–2,050 credits per objective/ })).toBeVisible();
+  });
+
+  test("the pricing estimator adds up from the price list and never exceeds a plan's five work steps", async ({ page }) => {
+    await page.goto("/pricing");
+    const total = page.getByTestId("estimate-total");
+    await expect(total).toHaveText("1,400"); // "Market entry" = the worked example: 100 + 300 + 300 + 250 + 300 + 150
+    await page.getByRole("button", { name: "Competitor scan" }).click();
+    await expect(total).toHaveText("850"); // 100 + 300 + 300 + 150
+    for (const name of ["Market Research", "Account Research", "Lead Research", "Process Analysis"]) await page.getByLabel(name).check();
+    await expect(page.getByLabel("Unit Economics")).toBeDisabled(); // five work steps chosen: the maximum a plan has
+    await expect(page.locator(".st-est-note")).toContainText("exact total before anything runs");
   });
 
   test("robots.txt still keeps the app out of search and points to the sitemap", async ({ request }) => {

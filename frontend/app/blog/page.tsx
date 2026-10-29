@@ -38,10 +38,10 @@ export default function BlogHome() {
             <span className="st-node" aria-hidden="true" />
             Ensemblis Journal
           </p>
-          <h1 className="ed-hub-title">How businesses get found — and how to know what&apos;s true.</h1>
+          <h1 className="ed-hub-title">Clear thinking for people who run businesses.</h1>
           <p className="ed-hub-lead">
-            Sourced, practical writing on search and AI answers: generative engine optimization without the myths, how to measure visibility
-            honestly, and how to use AI for research you can verify.
+            Practical, sourced writing on putting AI to work, strategy and company building, marketing and growth, search and AI discovery,
+            sales and operations — every important claim linked to where it comes from.
           </p>
           <ul className="ed-topics" aria-label="Topics">
             {topics.map(({ c, posts: inTopic }) => (
@@ -123,6 +123,8 @@ export default function BlogHome() {
           <p>
             Claims link to their sources. Each article lists what it relies on and when it was checked, says what is fact, estimate or opinion,
             and is approved by a person before publication. Drafts may be prepared with AI assistance — that is never a reason to skip the checks.
+            Every article is labelled: <b>Ideas</b> and <b>How-to</b> articles stand on their own; <b>In practice, with Ensemblis</b> marks the
+            ones that show our product at work.
           </p>
           <p className="ed-std-links">
             <Link href={BLOG.standardsPath}>Editorial standards</Link>

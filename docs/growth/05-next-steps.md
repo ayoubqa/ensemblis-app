@@ -2,29 +2,50 @@
 
 ## Essential before launch (founder — each takes minutes)
 
-1. **Set `NEXT_PUBLIC_CONTACT_EMAIL` in Vercel (Production) and redeploy.** It powers the request-access email,
-   the corrections address and the legal pages. Without it, `/access` says requests aren't open online, and the
-   Privacy Policy and Terms show a visible placeholder instead of an address. *Could not be checked from here.*
-2. **Approve or edit the two drafted articles** (`frontend/content/blog/*.md`, status `review`): open every
-   source, confirm the quoted facts, replace the secondary coverage of the SparkToro study with the original,
-   then set `approvedBy`, `factCheckedAt`, `publishedAt` and `status: published`. Until one is published, the
-   Journal stays out of the menu and out of search — by design.
+0. **Turn on live web search for the API.** The production smoke check (29 October 2026) found the API's web search
+   falling back to **Wikipedia** — the live provider isn't configured on Render. Market, competitor and account
+   research then draw on Wikipedia only, which will make real output look thin. Set `TAVILY_API_KEY` on the Render API
+   service (`DEPLOYMENT.md` lists it as required for research briefs; without it the product labels briefs "limited
+   evidence"). Tavily is a paid service with its own pricing — your decision. Then re-run the *Production smoke*
+   workflow: the "web search provider" line should turn into a PASS.
+1. **`NEXT_PUBLIC_CONTACT_EMAIL` in Vercel (Production)** — *verified set on 29 October 2026* by the production
+   smoke check (`/access` offers "Request access by email"; no placeholder on `/privacy`). Keep it set. It powers the request-access email,
+   the corrections address and the legal pages; sign-up is invite-only, so without it a visitor without a code
+   has no way in. *Could not be checked from here.* How to verify after deploying:
+   - open `/access` signed out: it must show **"Request access by email"** and the address with **Copy address**
+     — not "Online requests aren't open yet";
+   - open `/privacy` and `/terms`: no "(set NEXT_PUBLIC_CONTACT_EMAIL)" placeholder;
+   - a production build without it now prints a warning in the Vercel build log ("NEXT_PUBLIC_CONTACT_EMAIL is
+     not set for this production build").
+2. **Approve or edit the three articles in review** (`frontend/content/blog/*.md`): open every source, confirm
+   the facts (each article's `editorNotes` lists what was and wasn't confirmed), then set `approvedBy`,
+   `factCheckedAt`, `publishedAt` and `status: published`. Until one is published, the Journal stays out of the
+   menu and out of search — by design.
 3. **Verify the domain in Google Search Console and Bing Webmaster Tools** and submit the sitemap
    (`04-measurement.md` §1).
 4. **Check the canonical host on a deployed preview:** `curl -s https://<preview>/pricing | grep canonical` should
    show `https://www.getensemblis.com/pricing`. If you ever move the site, set `NEXT_PUBLIC_SITE_URL`.
-5. **Review four wording decisions that are yours:** the homepage title ("Business research and analysis you can
-   verify" instead of "The AI operating layer for business" — the vision line is kept in the definition), the
-   "Not yet a fit" list, the editorial standards (`/blog/editorial-standards`, including "no sponsored articles"),
-   and the ™ on the AI Performance Funnel.
+5. **Review the wording decisions that are yours:** the homepage title, the "Not yet a fit" list, the editorial
+   standards, the ™ on the AI Performance Funnel, and two new lines — "Invites are sent by email, with a code to
+   create your account" on `/access` (no response time is promised; add one only if you will keep it) and the
+   captions on the product screenshots (real interface, test data).
+
+## Learn whether people will use and pay (weeks 1–4)
+
+The plan is in [`06-customer-hypotheses.md`](./06-customer-hypotheses.md): 15–20 concierge runs on production
+with founders and small agencies, three questions afterwards, and a decision bar set in advance. It is also the
+first check of output quality with the real model, and it produces the genuine examples articles #12 and #16 need.
 
 ## Important for early growth (weeks 1–6)
 
-- **Run two real executions for the product-led articles (#8, #16)** with the production model and real web search,
-  and publish them as genuine examples — the single biggest credibility upgrade available. Until then every
-  product visual is labelled as an illustration.
-- **Decide on analytics** (`04-measurement.md` §2): enabling Vercel Web Analytics needs one env var plus a
-  Privacy Policy update you write or approve.
+- **Run two real executions for the product-led articles (#12, #16)** with the production model and real web search,
+  and publish them as genuine examples. The homepage now shows two screenshots of the real interface, captioned
+  as test data; replace them with a real run you're happy to show, using the same captions minus "test data".
+- **Decide on analytics** (`04-measurement.md` §2): one env var plus a Privacy Policy update you write or approve.
+  **Check the Vercel plan first:** custom events (Journal → product clicks, read-to-the-end, sign-ups) are
+  recorded on Pro and above only; Hobby records page views.
+- **The research-brief template** (`06-customer-hypotheses.md`): one page, free, linked from article #3 once
+  it is approved.
 - **Redirect `ensemblis-app.vercel.app` to `www.getensemblis.com`** in Vercel's domain settings (keep
   `CORS_ORIGIN` listing both while sessions migrate). Canonical tags already point search engines to the
   custom domain; the redirect also moves people.
@@ -59,5 +80,7 @@
   Add one only with a real provider and a privacy update.
 - **`llms.txt` and other unproven "GEO" files.** Not a standard; no evidence they affect inclusion. Our
   editorial standards say we don't sell what isn't shown to work — that applies to our own site too.
-- **An "AI visibility tracker" feature.** Tempting given the Journal's topics, but it is a different product.
-  Validate demand through the Journal first (articles #2, #6, #7 measure interest) before building anything.
+- **An "AI visibility tracker" feature.** Tempting given the Journal's search topics, but it is a different product.
+  Validate demand through the Journal first (articles #2, #7, #10 measure interest) before building anything.
+- **Segment landing pages, paid acquisition, or features aimed at the "deep research" objection** — until the
+  concierge runs show which segment returns and where the output is actually better or worse.

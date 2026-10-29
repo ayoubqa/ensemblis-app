@@ -8,9 +8,9 @@ import type { Post } from "./validate";
 export const BLOG = {
   path: "/blog",
   name: "Ensemblis Journal",
-  title: "Ensemblis Journal — AI search, measurement and evidence-backed growth",
+  title: "Ensemblis Journal — practical, sourced writing on AI, strategy and growth",
   description:
-    "Practical, sourced writing on SEO, generative engine optimization, measuring visibility in AI answers, and using AI for business research you can verify.",
+    "Sourced, practical writing for people who run businesses: AI and agents at work, strategy, marketing and growth, search and AI discovery, sales and operations.",
   feedPath: "/blog/feed.xml",
   standardsPath: "/blog/editorial-standards",
 } as const;

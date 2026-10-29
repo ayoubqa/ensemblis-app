@@ -2,6 +2,7 @@ import Link from "next/link";
 import { JsonLd } from "@/components/JsonLd";
 import { Icon } from "@/components/Icon";
 import { BetaFacts } from "@/components/site/BetaFacts";
+import { CostEstimator } from "@/components/site/CostEstimator";
 import { ExecutionLedger } from "@/components/site/ExecutionLedger";
 import { StartLink } from "@/components/site/StartLink";
 import { EXAMPLE } from "@/app/_home/content";
@@ -102,7 +103,24 @@ export default function PricingPage() {
         </div>
       </section>
 
-      <section className="st-sec st-sec-alt" aria-labelledby="pr-example">
+      <section className="st-sec st-sec-alt" id="estimate" aria-labelledby="pr-estimate">
+        <div className="wrap">
+          <header className="st-head">
+            <p className="st-kicker">
+              <span className="st-node" aria-hidden="true" />
+              Estimate a task
+            </p>
+            <h2 id="pr-estimate">What would your question cost?</h2>
+            <p className="st-lead">
+              Pick a typical task or the steps you think it needs. The estimate uses the same price list as the planner; the plan for your
+              actual question shows its exact total before you approve it.
+            </p>
+          </header>
+          <CostEstimator />
+        </div>
+      </section>
+
+      <section className="st-sec" aria-labelledby="pr-example">
         <div className="wrap st-split">
           <header className="st-head">
             <p className="st-kicker">
@@ -121,7 +139,7 @@ export default function PricingPage() {
         </div>
       </section>
 
-      <section className="st-sec" aria-labelledby="pr-list">
+      <section className="st-sec st-sec-alt" aria-labelledby="pr-list">
         <div className="wrap">
           <header className="st-head">
             <p className="st-kicker">
@@ -168,7 +186,7 @@ export default function PricingPage() {
         </div>
       </section>
 
-      <section className="st-sec st-sec-alt" aria-labelledby="pr-faq">
+      <section className="st-sec" aria-labelledby="pr-faq">
         <div className="wrap st-faq-grid">
           <header className="st-head">
             <p className="st-kicker">

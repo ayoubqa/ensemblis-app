@@ -6,10 +6,12 @@
 // It is abstract on purpose: it never pretends to be a product screenshot.
 
 export const ACCENTS: Record<string, string> = {
+  "ai-at-work": "#a9d6ff",
+  strategy: "#f2b33d",
+  "marketing-growth": "#ff8f6b",
   "ai-search": "#2b8cff",
-  measurement: "#3ccf91",
-  "seo-strategy": "#f2b33d",
-  "ai-for-business": "#a9d6ff",
+  "sales-customers": "#3ccf91",
+  operations: "#b9a4ff",
   default: "#2b8cff",
 };
 

@@ -8,13 +8,15 @@ import { PostItem } from "@/components/blog/Parts";
 import { BetaFacts } from "@/components/site/BetaFacts";
 import { ExecutionLedger } from "@/components/site/ExecutionLedger";
 import { ReportAnatomy } from "@/components/site/ReportAnatomy";
+import { ProductShots } from "@/components/site/ProductShots";
 import { StartLink } from "@/components/site/StartLink";
+import { UseCaseArt } from "@/components/site/UseCaseArt";
 import type { Post } from "@/lib/blog/posts";
 import { BLOG } from "@/lib/blog/seo";
 import { PLAN_COST, TEAM_NAMES, USE_CASES, capabilitiesFor } from "@/lib/offer";
 import { SITE } from "@/lib/site";
 import { HeroNote } from "./Actions";
-import { EXAMPLE, FAQ, TRUST } from "./content";
+import { CHOOSE, EXAMPLE, FAQ, LIFECYCLE, TRUST, TRUST_PHASES } from "./content";
 
 function Head({ id, kicker, title, lead, center = false }: { id: string; kicker: string; title: React.ReactNode; lead?: React.ReactNode; center?: boolean }) {
   return (
@@ -45,7 +47,7 @@ export function Home({ latest = [] }: { latest?: Post[] }) {
           <div className="st-hero-copy">
             <p className="st-kicker">
               <span className="st-node" aria-hidden="true" />
-              AI research &amp; analysis for business
+              {SITE.positioning.replace(/\.$/, "")}
             </p>
             <h1 id="st-h1">
               Describe the outcome.
@@ -53,8 +55,8 @@ export function Home({ latest = [] }: { latest?: Post[] }) {
               <em>We do the work.</em>
             </h1>
             <p className="st-sub">
-              Ensemblis turns a business question into a decision-ready result. It plans the research and analysis, shows you the cost before anything
-              runs, and checks every claim against cited evidence before calling it done.
+              Ensemblis turns a business objective into a decision-ready result. Today that means research and analysis: it plans the work, shows you
+              the cost before anything runs, and checks the result against cited evidence before calling it done.
             </p>
             <div className="st-ctas">
               <StartLink from="home-hero">
@@ -102,6 +104,7 @@ export function Home({ latest = [] }: { latest?: Post[] }) {
           <ul className="st-uses">
             {USE_CASES.map((u) => (
               <li key={u.id}>
+                <UseCaseArt team={u.team} />
                 <p className="st-uses-team">{TEAM_NAMES[u.team]}</p>
                 <h3>
                   <Link href={`/use-cases#${u.id}`}>{u.title}</Link>
@@ -123,6 +126,17 @@ export function Home({ latest = [] }: { latest?: Post[] }) {
       <section className="st-sec" id="how" aria-labelledby="st-how">
         <div className="wrap">
           <Head id="st-how" kicker="How it works" title="You stay in control at the moments that matter." />
+          <div className="st-cycle-wrap">
+            <p className="st-cycle-k">Every objective runs the same cycle</p>
+            <ol className="st-cycle" aria-label="The cycle every objective runs">
+              {LIFECYCLE.map((s, i) => (
+                <li key={s.t} style={{ "--i": i } as React.CSSProperties}>
+                  <b>{s.t}</b>
+                  <span>{s.b}</span>
+                </li>
+              ))}
+            </ol>
+          </div>
           <ol className="st-steps">
             {HOW.map((s) => (
               <li key={s.n}>
@@ -132,6 +146,7 @@ export function Home({ latest = [] }: { latest?: Post[] }) {
               </li>
             ))}
           </ol>
+          <ProductShots />
           <p className="st-more">
             <Link href="/how-it-works" className="st-textlink">
               The full walkthrough: plans, approvals, exceptions, verification and memory →
@@ -149,20 +164,61 @@ export function Home({ latest = [] }: { latest?: Post[] }) {
             title="Built so you can rely on it — and see when you shouldn't."
             lead="AI-generated work can contain mistakes. Ensemblis is designed to make them visible: every important claim is grounded in evidence, checked, and measured against criteria you set."
           />
-          <ul className="st-trust">
-            {TRUST.map((t) => (
-              <li key={t.title}>
-                <Icon name={t.icon} size={18} />
-                <h3>{t.title}</h3>
-                <p>{t.body}</p>
+          <ol className="st-ctl">
+            {TRUST_PHASES.map((ph) => (
+              <li key={ph.key} className={`st-ctl-${ph.key}`}>
+                <p className="st-ctl-k">
+                  <span className="st-ctl-dot" aria-hidden="true" />
+                  {ph.label}
+                </p>
+                <p className="st-ctl-sub">{ph.sub}</p>
+                <ul className="st-trust">
+                  {TRUST.filter((t) => t.phase === ph.key).map((t) => (
+                    <li key={t.title}>
+                      <Icon name={t.icon} size={18} />
+                      <h3>{t.title}</h3>
+                      <p>{t.body}</p>
+                    </li>
+                  ))}
+                </ul>
               </li>
             ))}
-          </ul>
+          </ol>
+        </div>
+      </section>
+
+      {/* 5b — The strongest objection, answered without claims about other products */}
+      <section className="st-sec" id="compare" aria-labelledby="st-compare">
+        <div className="wrap">
+          <Head
+            id="st-compare"
+            kicker="Ensemblis or a general AI assistant?"
+            title="Use the right tool for the stakes."
+            lead="General assistants are excellent for quick answers and drafts. Ensemblis takes longer and uses credits because it plans, sources and checks the work — it is built for work someone will act on."
+          />
+          <div className="st-choose">
+            <div>
+              <h3>A general assistant is the better choice when</h3>
+              <ul>
+                {CHOOSE.assistant.map((t) => (
+                  <li key={t}>{t}</li>
+                ))}
+              </ul>
+            </div>
+            <div className="st-choose-us">
+              <h3>Ensemblis is the better choice when</h3>
+              <ul>
+                {CHOOSE.ensemblis.map((t) => (
+                  <li key={t}>{t}</li>
+                ))}
+              </ul>
+            </div>
+          </div>
         </div>
       </section>
 
       {/* 6 — What it costs */}
-      <section className="st-sec" id="pricing" aria-labelledby="st-price">
+      <section className="st-sec st-sec-alt" id="pricing" aria-labelledby="st-price">
         <div className="wrap st-price">
           <div>
             <Head
@@ -190,7 +246,7 @@ export function Home({ latest = [] }: { latest?: Post[] }) {
       </section>
 
       {/* 7 — Fit */}
-      <section className="st-sec st-sec-alt" aria-labelledby="st-fit">
+      <section className="st-sec" aria-labelledby="st-fit">
         <div className="wrap">
           <Head id="st-fit" kicker="Is it right for you?" title="A good fit — and not yet a fit." />
           <div className="st-fit">
@@ -222,9 +278,9 @@ export function Home({ latest = [] }: { latest?: Post[] }) {
 
       {/* 8 — Journal (only once something is published) */}
       {latest.length > 0 && (
-        <section className="st-sec" aria-labelledby="st-journal">
+        <section className="st-sec st-sec-alt" aria-labelledby="st-journal">
           <div className="wrap">
-            <Head id="st-journal" kicker="From the Journal" title="Search, AI answers and evidence-backed growth." />
+            <Head id="st-journal" kicker="From the Journal" title="Practical, sourced writing on AI, strategy and growth." />
             <div className="ed-list ed-list-3">
               {latest.map((p) => (
                 <PostItem key={p.slug} post={p} />
@@ -240,7 +296,8 @@ export function Home({ latest = [] }: { latest?: Post[] }) {
       )}
 
       {/* 9 — Questions */}
-      <section className="st-sec st-sec-alt" aria-labelledby="st-faq">
+      {/* Sections alternate plain / tinted; the Journal row (when shown) takes the tinted slot before the FAQ. */}
+      <section className={latest.length > 0 ? "st-sec" : "st-sec st-sec-alt"} aria-labelledby="st-faq">
         <div className="wrap st-faq-grid">
           <div>
             <Head id="st-faq" kicker="Questions" title="Ensemblis, in plain terms." />

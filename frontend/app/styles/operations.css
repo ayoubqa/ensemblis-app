@@ -86,6 +86,33 @@
   color: var(--muted);
   font-variant-numeric: tabular-nums;
 }
+.op-firstrun {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px 28px;
+  flex-wrap: wrap;
+  margin: 0 0 22px;
+  padding: 18px 22px;
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--line2));
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--accent) 7%, var(--surface));
+}
+.op-firstrun > div {
+  flex: 1 1 360px;
+  min-width: 0;
+}
+.op-firstrun h2 {
+  margin: 0 0 4px;
+  font-size: 16px;
+  color: var(--ink);
+}
+.op-firstrun p {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--muted);
+}
 .op-note {
   margin-top: 14px;
   font-size: 13px;

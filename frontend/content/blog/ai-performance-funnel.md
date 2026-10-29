@@ -5,16 +5,22 @@ summary: "“Are we in ChatGPT?” is the wrong question. A proposed four-stage 
 description: "A proposed framework for measuring brands in AI answers: prompt coverage, visibility, recommendation and first position, with definitions, maths and limits."
 status: review
 author: ensemblis-editorial
-category: measurement
+category: ai-search
+layer: problem
 tags: [geo, measurement, ai-search, metrics, chatgpt-search]
 cta: how-it-works
 related: [what-is-generative-engine-optimization]
 sources:
+  - title: "NEW Research: AIs are highly inconsistent when recommending brands or products; marketers should take care when tracking AI visibility"
+    url: "https://sparktoro.com/blog/new-research-ais-are-highly-inconsistent-when-recommending-brands-or-products-marketers-should-take-care-when-tracking-ai-visibility/"
+    publisher: "SparkToro, with Gumshoe.ai (January 2026)"
+    accessed: "2026-10-28"
+    note: "Title confirmed on SparkToro's January 2026 blog archive; the URL slug comes from secondary citations. Open it to confirm before approval."
   - title: "AI recommendations change with nearly every query (coverage of the SparkToro and Gumshoe study)"
     url: "https://www.searchenginejournal.com/ai-recommendations-change-with-nearly-every-query-sparktoro/566242/"
     publisher: "Search Engine Journal"
     accessed: "2026-10-28"
-    note: "Secondary coverage. Replace with SparkToro's own report before publishing."
+    note: "Independent coverage of the same study."
   - title: "AI features and your website"
     url: "https://developers.google.com/search/docs/appearance/ai-features"
     publisher: "Google Search Central"
@@ -26,9 +32,12 @@ sources:
 editorNotes: >
   Drafted with AI assistance on 2026-10-28. The framework (AI Performance Funnel, Recommendation Conversion) is Ensemblis's own
   proposal and is labelled as such throughout — keep it that way unless and until it is validated. All numbers in the worked example
-  are hypothetical and labelled. Sources were checked through search-result excerpts only: open each before approving, and replace the
-  Search Engine Journal link with SparkToro's original report. Decide whether to keep the ™ on first mention. Then set publishedAt,
-  factCheckedAt and approvedBy.
+  are hypothetical and labelled; the margin-of-error formula is the standard normal approximation for a proportion (45% on 200
+  answers gives ±6.9 points). Source check on 2026-10-28 through search-result excerpts only (the drafting environment cannot open
+  the pages): the SparkToro/Gumshoe method, "fewer than 1 in 100" and the authors' conclusion that appearance rates matter more than
+  position; Google's query fan-out and "responses and links will vary" wording; the GEO paper's visibility definition. Not
+  confirmed: the exact SparkToro URL slug. Before approving: open each source, decide whether to keep the ™ on first mention, then
+  set publishedAt, factCheckedAt and approvedBy.
 ---
 
 “Are we in ChatGPT?” is the question most teams start with, and it is the wrong one. AI answers change from one run of a prompt to the next, differ between products, and depend on how a question is worded. A single screenshot that shows your brand — or doesn't — tells you very little.
@@ -60,7 +69,7 @@ Precise definitions are the whole point. Two teams that use the word “visibili
 > [!DEFINITION]
 > A **prompt set** is a fixed, versioned list of questions a potential buyer might ask an AI answer engine about your category. A **sample** is each prompt run several times, on each engine you care about, with every answer recorded in full.
 
-Run every prompt more than once. In a study by SparkToro and Gumshoe, repeated runs of the same prompt almost never produced the same list of brands — the identical list appeared fewer than one time in a hundred.[^sparktoro] Single runs measure luck.
+Run every prompt more than once. In a study by SparkToro and Gumshoe.ai, volunteers ran the same 12 brand-recommendation prompts nearly 3,000 times through ChatGPT, Claude and Google's AI; for ChatGPT and Google's AI, two answers contained the same list of brands fewer than one time in a hundred.[^sparktoro] Single runs measure luck.
 
 ### Prompt coverage
 
@@ -87,7 +96,7 @@ A recommendation is an answer that presents your brand as an option the reader s
 > [!DEFINITION]
 > **First-position rate** = answers in which your brand is the first recommendation ÷ all sampled answers.
 
-“First” means the first brand recommended in the answer's text or list. Because positions shuffle from run to run, this is only meaningful as a rate over many answers — never as a rank you “hold”.[^sparktoro]
+“First” means the first brand recommended in the answer's text or list. Because positions shuffle from run to run, this is only meaningful as a rate over many answers — never as a rank you “hold”. The SparkToro study's authors reached the same conclusion: across many runs, how often a brand appears can be meaningful; its position in a single answer is not.[^sparktoro]
 
 ### Recommendation Conversion
 
@@ -158,6 +167,6 @@ It is not a ranking, a guarantee or a growth plan. It is a way to ask a better q
 
 Ensemblis does not run AI-visibility measurements. It is built on the same discipline this framework asks for: defined criteria before the work starts, numbered evidence for every claim, and a verification step that says what was and wasn't established. If you want that standard applied to your research and analysis, [see how Ensemblis works](/how-it-works).
 
-[^sparktoro]: Coverage of the SparkToro and Gumshoe study on the consistency of AI brand recommendations, [Search Engine Journal](https://www.searchenginejournal.com/ai-recommendations-change-with-nearly-every-query-sparktoro/566242/). Not peer-reviewed; Gumshoe sells AI-visibility tracking.
+[^sparktoro]: R. Fishkin (SparkToro) and P. O'Donnell (Gumshoe.ai), [NEW Research: AIs are highly inconsistent when recommending brands or products](https://sparktoro.com/blog/new-research-ais-are-highly-inconsistent-when-recommending-brands-or-products-marketers-should-take-care-when-tracking-ai-visibility/), January 2026; see also [Search Engine Journal's coverage](https://www.searchenginejournal.com/ai-recommendations-change-with-nearly-every-query-sparktoro/566242/). Not peer-reviewed; Gumshoe sells AI-visibility tracking.
 [^google]: Google Search Central, [AI features and your website](https://developers.google.com/search/docs/appearance/ai-features).
 [^geo]: Aggarwal, P. et al. *GEO: Generative Engine Optimization.* KDD 2024. [arXiv:2311.09735](https://arxiv.org/abs/2311.09735).

@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import { JsonLd } from "@/components/JsonLd";
 import { ArticleBody } from "@/components/blog/ArticleBody";
-import { ArticleCta, ShareLinks } from "@/components/blog/ArticleCta";
+import { ArticleCta, ReadComplete, ShareLinks } from "@/components/blog/ArticleCta";
 import { Breadcrumbs, CategoryLabel, Meta, PostItem, StateBadge, Toc, TracePlate, accentOf } from "@/components/blog/Parts";
 import { TrackedLink } from "@/components/site/TrackedLink";
 import { authorByKey } from "@/lib/blog/authors";
@@ -59,7 +59,8 @@ export default function ArticlePage({ params }: { params: { slug: string } }) {
   const author = authorByKey(post.author);
   const related = relatedPosts(post, visiblePosts());
   const url = absoluteUrl(postPath(post.slug));
-  const cta = ctaFor({ cta: post.cta ?? undefined, category: post.category });
+  // Discovery articles may carry no product call to action at all (see the layers in lib/blog/taxonomy.ts).
+  const cta = ctaFor(post);
 
   return (
     <article className="ed ed-article" aria-labelledby="ed-title">
@@ -106,6 +107,7 @@ export default function ArticlePage({ params }: { params: { slug: string } }) {
 
         <div className="ed-art-main">
           <ArticleBody markdown={post.body} />
+          <ReadComplete slug={post.slug} layer={post.layer} />
 
           {post.sources.length > 0 && (
             <section className="ed-sources" aria-labelledby="ed-sources-h">
@@ -143,7 +145,7 @@ export default function ArticlePage({ params }: { params: { slug: string } }) {
           )}
 
           <ShareLinks url={url} title={post.title} />
-          <ArticleCta cta={cta} slug={post.slug} />
+          {cta && <ArticleCta cta={cta} slug={post.slug} />}
         </div>
       </div>
 
@@ -157,7 +159,7 @@ export default function ArticlePage({ params }: { params: { slug: string } }) {
               <PostItem key={p.slug} post={p} preview={mode === "preview"} />
             ))}
           </div>
-          {category && (
+          {category && cta && (
             <p className="ed-related-more">
               <TrackedLink href={category.next.href} event="blog_related_click" props={{ slug: post.slug, to: category.next.href }} className="st-textlink">
                 {category.next.label} →

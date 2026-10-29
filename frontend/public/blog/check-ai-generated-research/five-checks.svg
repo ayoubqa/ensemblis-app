@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 600" width="640" height="600" role="img" aria-labelledby="t d">
+  <title id="t">Five checks before you act on AI-generated research</title>
+  <desc id="d">Five checks in order. 1, Fit: does it answer the question you asked? 2, Trace: can each important claim be traced to a source? 3, Source: does the source exist, and does it say that? 4, Gaps: what is missing that could change the conclusion? 5, Coherence: do the numbers, findings and recommendation agree? Only then act. The third check is where fabricated citations are caught.</desc>
+  <defs>
+    <pattern id="dots" width="24" height="24" patternUnits="userSpaceOnUse"><circle cx="1.5" cy="1.5" r="1.1" fill="#8fa0b4" fill-opacity="0.14"/></pattern>
+  </defs>
+  <rect width="640" height="600" rx="14" fill="#07111f"/>
+  <rect width="640" height="600" rx="14" fill="url(#dots)"/>
+  <text x="36" y="48" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" font-weight="600" letter-spacing="1.6" fill="#8fa0b4">FIVE CHECKS · BEFORE YOU ACT</text>
+
+  <path d="M52 104 V500" stroke="#a9d6ff" stroke-opacity="0.55" stroke-width="3"/>
+  <g font-family="Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif">
+    <circle cx="52" cy="104" r="11" fill="#07111f" stroke="#a9d6ff" stroke-width="4"/>
+    <text x="84" y="102" font-size="21" font-weight="700" fill="#f6f8fb">1 · Fit</text>
+    <text x="84" y="127" font-size="15.5" fill="#a3b1c2">Does it answer the question you asked —</text>
+    <text x="84" y="149" font-size="15.5" fill="#a3b1c2">not an easier one next to it?</text>
+
+    <circle cx="52" cy="194" r="8" fill="#07111f" stroke="#a9d6ff" stroke-width="4"/>
+    <text x="84" y="192" font-size="21" font-weight="700" fill="#f6f8fb">2 · Trace</text>
+    <text x="84" y="217" font-size="15.5" fill="#a3b1c2">Can every number, name and date be</text>
+    <text x="84" y="239" font-size="15.5" fill="#a3b1c2">traced to a cited source?</text>
+
+    <!-- the check that catches fabricated citations: highlighted -->
+    <rect x="70" y="262" width="540" height="96" rx="10" fill="#0b1730" stroke="#f2b33d" stroke-opacity="0.7" stroke-width="1.5"/>
+    <circle cx="52" cy="290" r="8" fill="#07111f" stroke="#f2b33d" stroke-width="4"/>
+    <text x="84" y="290" font-size="21" font-weight="700" fill="#f6f8fb">3 · Source</text>
+    <text x="84" y="315" font-size="15.5" fill="#a3b1c2">Open it. Does it exist, and does it say that?</text>
+    <text x="84" y="340" font-size="14.5" font-weight="600" fill="#f2b33d">Fabricated citations are caught here</text>
+
+    <circle cx="52" cy="394" r="8" fill="#07111f" stroke="#a9d6ff" stroke-width="4"/>
+    <text x="84" y="392" font-size="21" font-weight="700" fill="#f6f8fb">4 · Gaps</text>
+    <text x="84" y="417" font-size="15.5" fill="#a3b1c2">What is missing that could change</text>
+    <text x="84" y="439" font-size="15.5" fill="#a3b1c2">the conclusion?</text>
+
+    <circle cx="52" cy="484" r="8" fill="#07111f" stroke="#a9d6ff" stroke-width="4"/>
+    <text x="84" y="482" font-size="21" font-weight="700" fill="#f6f8fb">5 · Coherence</text>
+    <text x="84" y="507" font-size="15.5" fill="#a3b1c2">Do the numbers, findings and</text>
+    <text x="84" y="529" font-size="15.5" fill="#a3b1c2">recommendation agree with each other?</text>
+  </g>
+  <!-- verified end -->
+  <circle cx="52" cy="560" r="17" fill="#3ccf91"/>
+  <path d="M45 560 l5 5 l9 -10" fill="none" stroke="#07111f" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M52 500 V543" stroke="#3ccf91" stroke-width="3"/>
+  <text x="84" y="566" font-family="Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif" font-size="17" font-weight="700" fill="#3ccf91">Then act — in proportion to the stakes</text>
+</svg>

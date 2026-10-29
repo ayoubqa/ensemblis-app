@@ -41,9 +41,10 @@ is the URL: lower-case words joined by hyphens, short and stable. Fill the front
 | `publishedAt` | to publish | `YYYY-MM-DD` or a date-time. |
 | `updatedAt` | no | Only for a meaningful change in substance. |
 | `author` | yes | A key in `lib/blog/authors.ts`. Add real people there — never invented ones. |
-| `category` | yes | `ai-search`, `measurement`, `seo-strategy` or `ai-for-business` (`lib/blog/taxonomy.ts`). |
+| `category` | yes | The section: `ai-at-work`, `strategy`, `marketing-growth`, `ai-search` (Search & AI Discovery), `sales-customers` or `operations` (`lib/blog/taxonomy.ts`). |
+| `layer` | no | Why the article exists: `discovery` (broad ideas — no product CTA), `problem` (practical help — a soft next step; the default) or `product` (a real job done with Ensemblis — try it). |
 | `tags` | no | Up to ~8; used only to pick related articles (tags have no pages). |
-| `cta` | no | `research-brief`, `use-cases`, `how-it-works` or `pricing` — the reader's next step. Default by category. |
+| `cta` | no | `research-brief`, `use-cases`, `how-it-works`, `pricing`, or `none` — overrides the layer's default (discovery: none; product: research-brief; problem: the section's next step). |
 | `related` | no | Slugs to suggest first under "Read next". |
 | `sources` | to publish | Each: `title`, `url` (https), `publisher`, `accessed` (the date someone opened it), optional `note`. |
 | `noSourcesReason` | instead of sources | E.g. an opinion piece. |
@@ -57,7 +58,10 @@ Body: GitHub-flavoured Markdown. Start sections at `##`. Use footnotes for citat
 `[^key]: Source, [link](https://…)` — they render as `[1]`-style markers like the product's evidence numbers.
 Callouts: a blockquote starting with `[!DEFINITION]`, `[!KEY]`, `[!NOTE]`, `[!CAUTION]`, `[!EXAMPLE]` or
 `[!METHOD]`. Images go in `frontend/public/blog/<slug>/` and are referenced as `/blog/<slug>/file.svg`
-with alt text and an optional caption: `![What it shows](/blog/slug/chart.svg "Caption")`. Link to our own
+with alt text and an optional caption: `![What it shows](/blog/slug/chart.svg "Caption")`. Use SVG or PNG:
+the page reads their width and height so the figure's space is reserved before it loads (CI fails if a site
+image is missing or its size can't be read). An SVG should set `width` and `height` or a `viewBox`, and use
+system fonts — web fonts don't load inside an `<img>`. Link to our own
 pages with relative links (`/use-cases`), never with the domain.
 
 Check locally: `cd frontend && npm run content:check` (the same checks run in CI on every pull request).

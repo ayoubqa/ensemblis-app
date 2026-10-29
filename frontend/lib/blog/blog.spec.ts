@@ -165,16 +165,25 @@ describe("visibility", () => {
 describe("related articles and calls to action", () => {
   it("prefers listed related articles, then category and shared tags; never the article itself", () => {
     const main = post({ slug: "main", related: ["listed"], tags: ["geo", "measurement"] });
-    const listed = post({ slug: "listed", category: "ai-for-business", tags: [] });
+    const listed = post({ slug: "listed", category: "ai-at-work", tags: [] });
     const sameCat = post({ slug: "same-cat", tags: [] });
-    const tagged = post({ slug: "tagged", category: "measurement", tags: ["measurement"] });
-    const unrelated = post({ slug: "unrelated", category: "seo-strategy", tags: ["links"] });
+    const tagged = post({ slug: "tagged", category: "marketing-growth", tags: ["measurement"] });
+    const unrelated = post({ slug: "unrelated", category: "operations", tags: ["links"] });
     expect(relatedPosts(main, [main, unrelated, tagged, sameCat, listed]).map((p) => p.slug)).toEqual(["listed", "same-cat", "tagged"]);
   });
-  it("chooses the article's CTA, else the category default", () => {
-    expect(ctaFor({ cta: "pricing", category: "ai-search" }).key).toBe("pricing");
-    expect(ctaFor({ category: "ai-for-business" }).key).toBe("research-brief");
-    expect(ctaFor({ cta: "nonsense", category: "unknown" }).key).toBe("how-it-works");
+  it("chooses the article's CTA, else by editorial layer and section — and sometimes none", () => {
+    expect(ctaFor({ cta: "pricing", category: "ai-search" })?.key).toBe("pricing");
+    expect(ctaFor({ category: "ai-search" })?.key).toBe("use-cases"); // problem layer by default: the section's soft next step
+    expect(ctaFor({ category: "ai-at-work", layer: "product" })?.key).toBe("research-brief");
+    expect(ctaFor({ category: "strategy", layer: "discovery" })).toBeNull(); // not every article sells
+    expect(ctaFor({ cta: "pricing", category: "strategy", layer: "discovery" })?.key).toBe("pricing"); // the editor can still choose one
+    expect(ctaFor({ cta: "none", category: "ai-at-work", layer: "product" })).toBeNull();
+    expect(ctaFor({ cta: "nonsense", category: "unknown" })?.key).toBe("how-it-works");
+  });
+  it("validates the layer and accepts cta: none", () => {
+    expect(post({ slug: "x" }).layer).toBe("problem");
+    expect(check({ ...base, layer: "discovery", cta: "none" }).errors).toEqual([]);
+    expect(check({ ...base, layer: "advertorial" }).errors.join()).toMatch(/layer must be one of discovery, problem, product/);
   });
 });
 
@@ -182,7 +191,7 @@ describe("structured data and feed", () => {
   it("BlogPosting mirrors the page: dates, organization author, sources as citations", () => {
     const p = post({ slug: "what-is-geo", updatedAt: "2026-11-05" });
     const ld = blogPostingJsonLd(p);
-    expect(ld).toMatchObject({ "@type": "BlogPosting", headline: p.title, datePublished: "2026-11-02", dateModified: "2026-11-05", articleSection: "AI Search & GEO", wordCount: p.words });
+    expect(ld).toMatchObject({ "@type": "BlogPosting", headline: p.title, datePublished: "2026-11-02", dateModified: "2026-11-05", articleSection: "Search & AI Discovery", wordCount: p.words });
     expect(ld.author).toMatchObject({ "@type": "Organization", name: "Ensemblis Editorial" });
     expect(ld.citation).toEqual([{ "@type": "CreativeWork", name: base.sources[0].title, url: base.sources[0].url }]);
     expect(JSON.stringify(ld)).not.toMatch(/rating|review/i);
