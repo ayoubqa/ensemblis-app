@@ -8,7 +8,8 @@ import { useAuth } from "@/lib/auth-context";
 import { credits } from "@/lib/format";
 import { useOnClickOutside } from "@/lib/hooks";
 import { ROUTES } from "@/lib/routes";
-import { useStartHref } from "@/components/site/StartLink";
+import { StartLink, useStartHref } from "@/components/site/StartLink";
+import { track } from "@/lib/analytics";
 import { Avatar } from "./Avatar";
 import { Icon, type IconName } from "./Icon";
 import { Logo } from "./Logo";
@@ -81,7 +82,6 @@ function AcctLink({ href, icon, children, onSelect, right, current }: { href: st
 /** The navy command bar every page lives under (`.dk` whatever the theme). */
 export function Header({ journal = false }: { journal?: boolean }) {
   const { user, loading, signOut } = useAuth();
-  const startHref = useStartHref();
   const publicNav = journal ? [...PUBLIC_NAV, JOURNAL_NAV] : PUBLIC_NAV;
   const pathname = usePathname() || "/";
   const router = useRouter();
@@ -358,9 +358,9 @@ export function Header({ journal = false }: { journal?: boolean }) {
                 </Link>
               )}
               {!starts(pathname, ROUTES.signup, ROUTES.access) && (
-                <Link href={startHref} className="btn p sm">
+                <StartLink from="header" className="btn p sm">
                   Get started
-                </Link>
+                </StartLink>
               )}
             </>
           )}
@@ -371,7 +371,7 @@ export function Header({ journal = false }: { journal?: boolean }) {
 }
 
 // ------------------------------------------------------------------ BottomNav
-type Tab = { key: string; href?: string; label: ReactNode; icon: IconName; on: boolean; badge?: { n: number; tone: "warn" | "bad"; sr: string }; primary?: boolean };
+type Tab = { key: string; href?: string; label: ReactNode; icon: IconName; on: boolean; badge?: { n: number; tone: "warn" | "bad"; sr: string }; primary?: boolean; onClick?: () => void };
 
 /** Pages reached from the mobile "More" sheet (it highlights while you are on one). */
 const MORE_PATHS = [ROUTES.aiTeam, ROUTES.context, ROUTES.reports, "/tasks", ROUTES.usage, "/billing", ROUTES.members, ROUTES.settings, ROUTES.admin];
@@ -393,7 +393,14 @@ export function BottomNav() {
       { key: "home", href: ROUTES.home, label: "Home", icon: "home", on: pathname === ROUTES.home },
       { key: "uses", href: ROUTES.useCases, label: "Use cases", icon: "target", on: pathname === ROUTES.useCases },
       { key: "pricing", href: ROUTES.pricing, label: "Pricing", icon: "wallet", on: pathname === ROUTES.pricing },
-      { key: "start", href: startHref, label: "Get started", icon: "arrow", on: starts(pathname, ROUTES.signup, ROUTES.access) },
+      {
+        key: "start",
+        href: startHref,
+        label: "Get started",
+        icon: "arrow",
+        on: starts(pathname, ROUTES.signup, ROUTES.access),
+        onClick: () => track("cta_click", { from: "bottom-nav", to: startHref }),
+      },
       { key: "login", href: ROUTES.login, label: "Log in", icon: "user", on: starts(pathname, ROUTES.login) },
     ];
     return (
@@ -501,7 +508,7 @@ export function BottomNav() {
 
 function BottomTab({ tab }: { tab: Tab }) {
   return (
-    <Link href={tab.href!} className={cx("sh-tab", tab.on && "on", tab.primary && "primary")} aria-current={tab.on ? "page" : undefined}>
+    <Link href={tab.href!} className={cx("sh-tab", tab.on && "on", tab.primary && "primary")} aria-current={tab.on ? "page" : undefined} onClick={tab.onClick}>
       <span className="sh-tab-ico">
         <Icon name={tab.icon} />
         {tab.badge && (
