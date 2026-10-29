@@ -37,7 +37,8 @@ jobs:
           fetch-depth: 0 # to find the last commit that changed backend/ (what Render deploys)
       - name: Last commit that changed the API
         id: api
-        run: echo "sha=$(git log -1 --format=%H -- backend)" >> "$GITHUB_OUTPUT"
+        # --first-parent: main's own history, so a merged PR resolves to its merge commit — the commit Render deploys.
+        run: echo "sha=$(git log -1 --first-parent --format=%H -- backend)" >> "$GITHUB_OUTPUT"
       - uses: actions/setup-node@v4
         with:
           node-version: 22
