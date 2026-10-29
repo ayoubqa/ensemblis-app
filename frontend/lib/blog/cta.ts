@@ -1,7 +1,7 @@
 // The one call to action at the end of an article, chosen per article by the reader's likely next step
-// (frontmatter `cta`), or by category when unset. Every promise here must be true of the product today:
-// Ensemblis researches and analyses with cited evidence and a verification gate. It does NOT measure
-// visibility in AI answer engines — no CTA may suggest it does.
+// (frontmatter `cta`), or by editorial layer and section when unset — and sometimes none at all. Every
+// promise here must be true of the product today: Ensemblis researches and analyses with cited evidence and
+// a verification gate. It does NOT measure visibility in AI answer engines — no CTA may suggest it does.
 
 export interface Cta {
   key: string;
@@ -53,13 +53,28 @@ export const CTAS: Record<string, Cta> = {
   },
 };
 
+/** The soft next step for a problem-solving article, by section. */
 export const DEFAULT_CTA_BY_CATEGORY: Record<string, string> = {
+  "ai-at-work": "how-it-works",
+  strategy: "use-cases",
+  "marketing-growth": "use-cases",
   "ai-search": "use-cases",
-  measurement: "how-it-works",
-  "seo-strategy": "use-cases",
-  "ai-for-business": "research-brief",
+  "sales-customers": "use-cases",
+  operations: "pricing",
 };
 
-export function ctaFor(post: { cta?: string; category: string }): Cta {
-  return CTAS[post.cta ?? ""] ?? CTAS[DEFAULT_CTA_BY_CATEGORY[post.category] ?? "how-it-works"] ?? CTAS["how-it-works"];
+/** Frontmatter value that removes the call to action from an article. */
+export const NO_CTA = "none";
+
+/**
+ * The article's call to action, or null for none. An explicit `cta` always wins (`none` removes it);
+ * otherwise the editorial layer decides: discovery articles carry no product CTA, product articles invite
+ * the reader to try it, and problem-solving articles get their section's soft next step.
+ */
+export function ctaFor(post: { cta?: string | null; category: string; layer?: string | null }): Cta | null {
+  if (post.cta === NO_CTA) return null;
+  if (post.cta && CTAS[post.cta]) return CTAS[post.cta];
+  if (post.layer === "discovery") return null;
+  if (post.layer === "product") return CTAS["research-brief"];
+  return CTAS[DEFAULT_CTA_BY_CATEGORY[post.category] ?? "how-it-works"] ?? CTAS["how-it-works"];
 }

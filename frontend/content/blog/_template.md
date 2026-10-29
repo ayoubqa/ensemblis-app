@@ -3,9 +3,10 @@ title: "A clear, specific title that answers what the reader searched for"
 summary: "One or two sentences that tell the reader exactly what they will learn and why it is trustworthy (50–320 characters)."
 status: draft
 author: ensemblis-editorial
-category: ai-search
-tags: [geo]
-# cta: use-cases            # research-brief | use-cases | how-it-works | pricing
+category: ai-at-work       # ai-at-work | strategy | marketing-growth | ai-search | sales-customers | operations
+layer: problem             # discovery (no product CTA) | problem (soft next step) | product (try it)
+tags: [ai-adoption]
+# cta: use-cases            # research-brief | use-cases | how-it-works | pricing | none — overrides the layer's default
 # related: [another-slug]
 # seoTitle: "Shorter title for search results (max 70)"
 # publishedAt: 2026-11-04   # set by the approving editor

@@ -3,6 +3,7 @@
 // filter drops javascript: and data: links.
 import Link from "next/link";
 import ReactMarkdown, { type Components } from "react-markdown";
+import { localImageSize } from "@/lib/blog/images";
 import { REMARK_PLUGINS } from "@/lib/blog/markdown";
 
 interface HastNode {
@@ -34,11 +35,20 @@ const components: Components = {
     return <p>{children}</p>;
   },
   img({ src, alt, title }) {
+    const url = typeof src === "string" ? src : "";
+    // Intrinsic size reserves the figure's space before it loads; a narrow figure is never stretched past it.
+    const size = localImageSize(url);
     return (
       <figure className="ed-fig">
         {/* Article images are author-supplied files under /public/blog; sized by CSS, lazy below the fold. */}
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={typeof src === "string" ? src : ""} alt={alt ?? ""} loading="lazy" decoding="async" />
+        <img
+          src={url}
+          alt={alt ?? ""}
+          loading="lazy"
+          decoding="async"
+          {...(size ? { width: size.width, height: size.height, style: { maxWidth: size.width } } : {})}
+        />
         {title && <figcaption>{title}</figcaption>}
       </figure>
     );

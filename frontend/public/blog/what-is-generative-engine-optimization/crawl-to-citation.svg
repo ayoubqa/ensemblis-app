@@ -1,0 +1,57 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 680" width="640" height="680" role="img" aria-labelledby="t d">
+  <title id="t">From crawl to citation: where a publisher has leverage</title>
+  <desc id="d">A simplified model in five stages. 1, Crawl: a crawler fetches the page if you let it; you control robots.txt and your CDN's bot rules. 2, Index: the page is stored and eligible to appear; you control whether pages are indexable and snippets allowed. 3, Retrieve: related searches gather candidate sources; you influence this by answering the question early and plainly. 4, Compose: a model writes the answer from some of those sources; you influence this with claims that are easy to check and quote. 5, Cite: some sources are shown as links and the set varies from run to run; this is outside your control, so measure rates over many runs.</desc>
+  <defs>
+    <pattern id="dots" width="24" height="24" patternUnits="userSpaceOnUse"><circle cx="1.5" cy="1.5" r="1.1" fill="#8fa0b4" fill-opacity="0.14"/></pattern>
+  </defs>
+  <rect width="640" height="680" rx="14" fill="#07111f"/>
+  <rect width="640" height="680" rx="14" fill="url(#dots)"/>
+  <text x="36" y="48" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" font-weight="600" letter-spacing="1.6" fill="#8fa0b4">FROM CRAWL TO CITATION · A SIMPLIFIED MODEL</text>
+
+  <!-- the trace: green where you have control, blue where you only influence, faint and dotted where you have none -->
+  <path d="M52 112 V328" stroke="#3ccf91" stroke-width="4"/>
+  <path d="M52 328 V436" stroke="#2b8cff" stroke-width="4"/>
+  <path d="M52 436 V600" stroke="#8fa0b4" stroke-opacity="0.6" stroke-width="3" stroke-dasharray="2 8" stroke-linecap="round"/>
+
+  <g font-family="Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif">
+    <!-- 1 crawl -->
+    <circle cx="52" cy="112" r="11" fill="#07111f" stroke="#3ccf91" stroke-width="4"/>
+    <text x="84" y="110" font-size="21" font-weight="700" fill="#f6f8fb">1 · Crawl</text>
+    <text x="84" y="135" font-size="15.5" fill="#a3b1c2">A crawler fetches the page — if you let it.</text>
+    <text x="84" y="160" font-size="15" font-weight="600" fill="#3ccf91">You control: robots.txt and your CDN's bot rules</text>
+
+    <!-- 2 index -->
+    <circle cx="52" cy="220" r="8" fill="#07111f" stroke="#3ccf91" stroke-width="4"/>
+    <text x="84" y="218" font-size="21" font-weight="700" fill="#f6f8fb">2 · Index</text>
+    <text x="84" y="243" font-size="15.5" fill="#a3b1c2">The page is stored and eligible to appear.</text>
+    <text x="84" y="268" font-size="15" font-weight="600" fill="#3ccf91">You control: indexable pages, snippets allowed</text>
+
+    <!-- 3 retrieve -->
+    <circle cx="52" cy="328" r="8" fill="#07111f" stroke="#2b8cff" stroke-width="4"/>
+    <text x="84" y="326" font-size="21" font-weight="700" fill="#f6f8fb">3 · Retrieve</text>
+    <text x="84" y="351" font-size="15.5" fill="#a3b1c2">Related searches gather candidate sources.</text>
+    <text x="84" y="376" font-size="15" font-weight="600" fill="#6fb0ff">You influence: answer the question early and plainly</text>
+
+    <!-- 4 compose -->
+    <circle cx="52" cy="436" r="8" fill="#07111f" stroke="#2b8cff" stroke-width="4"/>
+    <text x="84" y="434" font-size="21" font-weight="700" fill="#f6f8fb">4 · Compose</text>
+    <text x="84" y="459" font-size="15.5" fill="#a3b1c2">A model writes the answer from some of them.</text>
+    <text x="84" y="484" font-size="15" font-weight="600" fill="#6fb0ff">You influence: claims that are easy to check and quote</text>
+
+    <!-- 5 cite -->
+    <circle cx="52" cy="544" r="8" fill="#07111f" stroke="#8fa0b4" stroke-width="4"/>
+    <text x="84" y="542" font-size="21" font-weight="700" fill="#f6f8fb">5 · Cite</text>
+    <text x="84" y="567" font-size="15.5" fill="#a3b1c2">Some sources are linked. The set varies by run.</text>
+    <text x="84" y="592" font-size="15" font-weight="600" fill="#b7c3d1">Outside your control: measure rates over many runs</text>
+  </g>
+
+  <!-- legend -->
+  <g font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="12" letter-spacing="0.6">
+    <line x1="36" y1="640" x2="60" y2="640" stroke="#3ccf91" stroke-width="4"/>
+    <text x="68" y="644" fill="#a3b1c2">CONTROL</text>
+    <line x1="156" y1="640" x2="180" y2="640" stroke="#2b8cff" stroke-width="4"/>
+    <text x="188" y="644" fill="#a3b1c2">INFLUENCE</text>
+    <line x1="290" y1="640" x2="314" y2="640" stroke="#8fa0b4" stroke-opacity="0.6" stroke-width="3" stroke-dasharray="2 6" stroke-linecap="round"/>
+    <text x="322" y="644" fill="#a3b1c2">NONE · ENGINES DIFFER AND CHANGE</text>
+  </g>
+</svg>

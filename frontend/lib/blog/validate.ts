@@ -4,6 +4,8 @@
 // Errors stop the build: a broken article never deploys. Rules that only matter at publication
 // (sources, approval, alt text…) are errors for `published` and warnings for drafts and reviews.
 import { analyzeMarkdown, readingMinutes, type Heading, type MarkdownAnalysis } from "./markdown";
+import { NO_CTA } from "./cta";
+import { DEFAULT_LAYER, LAYERS, type Layer } from "./taxonomy";
 
 export type PostStatus = "draft" | "review" | "published";
 export const STATUSES: readonly PostStatus[] = ["draft", "review", "published"];
@@ -29,6 +31,8 @@ export interface Post {
   updatedAt: string | null;
   author: string;
   category: string;
+  /** Why the article exists: discovery, problem-solving or product-led (see taxonomy.ts). */
+  layer: Layer;
   tags: string[];
   seoTitle: string | null;
   description: string;
@@ -38,6 +42,7 @@ export interface Post {
   related: string[];
   sources: PostSource[];
   noSourcesReason: string | null;
+  /** An explicit call to action, "none", or null to let the layer and section decide. */
   cta: string | null;
   /** Who approved publication, and when the facts were last checked (YYYY-MM-DD). */
   approvedBy: string | null;
@@ -62,7 +67,7 @@ export interface ValidationResult {
 
 const KNOWN_KEYS = new Set([
   "title", "summary", "status", "publishedAt", "updatedAt", "author", "category", "tags", "seoTitle", "description",
-  "canonical", "image", "featured", "related", "sources", "noSourcesReason", "cta", "approvedBy", "factCheckedAt", "editorNotes",
+  "canonical", "image", "featured", "related", "sources", "noSourcesReason", "cta", "layer", "approvedBy", "factCheckedAt", "editorNotes",
 ]);
 
 const SLUG = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
@@ -105,7 +110,9 @@ export function validatePost(slug: string, data: unknown, body: string, reg: Reg
   const category = str(fm.category);
   if (!reg.categories.includes(category)) errors.push(`category "${category}" is not in lib/blog/taxonomy.ts`);
   const cta = fm.cta === undefined ? null : str(fm.cta);
-  if (cta !== null && !reg.ctas.includes(cta)) errors.push(`cta "${cta}" is not in lib/blog/cta.ts`);
+  if (cta !== null && cta !== NO_CTA && !reg.ctas.includes(cta)) errors.push(`cta "${cta}" is not in lib/blog/cta.ts (or "${NO_CTA}")`);
+  const layer = (fm.layer === undefined ? DEFAULT_LAYER : str(fm.layer)) as Layer;
+  if (!LAYERS.includes(layer)) errors.push(`layer must be one of ${LAYERS.join(", ")}`);
 
   const publishedAt = fm.publishedAt === undefined || fm.publishedAt === null ? null : String(fm.publishedAt).trim();
   if (publishedAt !== null && !isValidDate(publishedAt)) errors.push(`publishedAt "${publishedAt}" is not an ISO date (YYYY-MM-DD or date-time)`);
@@ -192,6 +199,7 @@ export function validatePost(slug: string, data: unknown, body: string, reg: Reg
       updatedAt,
       author,
       category,
+      layer,
       tags: tags ?? [],
       seoTitle,
       description,
