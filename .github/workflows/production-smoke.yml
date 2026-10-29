@@ -3,7 +3,8 @@ name: Production smoke
 # Read-only checks against the live site and API (frontend/scripts/smoke-production.mjs), then the public pages in a
 # browser (smoke-production-browser.mjs): no sign-in, no writes, no paid calls, no secrets printed.
 #   - pull request to main: checks production as it is now — the baseline a release starts from.
-#   - push to main: waits until Vercel serves that commit (the ensemblis-release meta tag), then checks it.
+#   - push to main: waits until Vercel serves that commit (the ensemblis-release meta tag), then checks it; and waits
+#     for the API (Render) to run the last commit that changed backend/ (/health/live "release").
 #   - manual: run any time from the Actions tab.
 on:
   pull_request:
@@ -32,6 +33,11 @@ jobs:
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # to find the last commit that changed backend/ (what Render deploys)
+      - name: Last commit that changed the API
+        id: api
+        run: echo "sha=$(git log -1 --format=%H -- backend)" >> "$GITHUB_OUTPUT"
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -40,6 +46,8 @@ jobs:
       - name: Check production (read-only)
         env:
           EXPECT_RELEASE: ${{ github.event_name == 'push' && github.sha || inputs.expect_release }}
+          # On a push, also wait for Render to run the latest backend change (a warning, not a failure, if it doesn't).
+          EXPECT_API_RELEASE: ${{ github.event_name == 'push' && steps.api.outputs.sha || '' }}
           WAIT_SECONDS: ${{ github.event_name == 'push' && '900' || '600' }}
         run: node frontend/scripts/smoke-production.mjs
       # Then the same site in a real browser: no JavaScript errors, the estimator responds, the access and sign-up

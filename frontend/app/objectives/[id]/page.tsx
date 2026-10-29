@@ -8,7 +8,7 @@ import { useAuth } from "@/lib/auth-context";
 import { useConfig } from "@/lib/config";
 import { EmptyState, Icon, OutcomeTag, PageSkeleton, RequireAuth, StatusTag, Tag, VerificationTag, statusLabel, useToast } from "@/components";
 import { ResultStateTag, resultReportLabel, resultStateLabel } from "@/components/Tags";
-import { MOCK_EXPORT_NOTE, MODEL_ENDPOINT_DETAIL, endpointNote, modelEndpointOf, modelEndpointTag, resultStateOf, usedMockAI } from "@/lib/openIssues";
+import { MOCK_EXPORT_NOTE, MODEL_ENDPOINT_DETAIL, WIKIPEDIA_ONLY_EXPORT_NOTE, endpointNote, modelEndpointOf, modelEndpointTag, resultStateOf, usedMockAI, usedWikipediaOnly } from "@/lib/openIssues";
 import { AI_NOTE, ExportMenu, ReportView, copyText } from "@/components/report";
 import { ApprovalCard, EventFeed, ExceptionCard, evidenceToSources } from "@/components/ops";
 import { credits, longDate, relativeTime } from "@/lib/format";
@@ -183,7 +183,8 @@ function ObjectiveConsole() {
   const mock = usedMockAI(ex, config.mockAI);
   // A test stub or local model endpoint, and a custom search endpoint, as recorded with this execution.
   const modelEndpoint = modelEndpointOf(ex);
-  const endpointExportNote = endpointNote(ex);
+  // What exports carry beyond the AI note: those endpoints, and Wikipedia-only evidence.
+  const exportNote = [endpointNote(ex), ex && usedWikipediaOnly(ex.steps) ? WIKIPEDIA_ONLY_EXPORT_NOTE : null].filter(Boolean).join(" ") || null;
   const outcome = ex ? (ex.confirmedOutcomeStatus ?? ex.outcomeStatus) : null;
   // A completed result carries its result state; its verification verdict shows separately
   // only when the state doesn't already say it (a partial result).
@@ -448,9 +449,9 @@ function ObjectiveConsole() {
                   linkDomains={ex.linkDomains}
                   meta={{
                     date: ex.completedAt,
-                    // The verification signal, the mock label and a stub, local or custom endpoint travel with the file.
+                    // The verification signal, the mock label, a stub, local or custom endpoint and Wikipedia-only evidence travel with the file.
                     label: completed ? resultReportLabel(result) : "Draft — not yet verified",
-                    ...(mock || endpointExportNote ? { note: [mock ? MOCK_EXPORT_NOTE : AI_NOTE, endpointExportNote].filter(Boolean).join(" ") } : {}),
+                    ...(mock || exportNote ? { note: [mock ? MOCK_EXPORT_NOTE : AI_NOTE, exportNote].filter(Boolean).join(" ") } : {}),
                   }}
                 />
               }
