@@ -65,7 +65,7 @@ applies only if you add a standalone worker:
 | `APP_URL` | ✔ | ✔ | frontend URL, no trailing slash — used in email and share links |
 | `CORS_ORIGIN` | ✔ | – | every origin the frontend is served from, exact `https://host` form, comma-separated, e.g. `https://www.example.com,https://example.com,https://<project>.vercel.app` (`www` and the bare domain are different origins; no wildcards, no spaces; malformed entries are ignored and logged on start) |
 | `ADMIN_EMAILS` | ✔ | – | operators; must also verify their email (see §6) |
-| `TAVILY_API_KEY` | ✔ | ✔ | web search — **required for research briefs**; without it search falls back to Wikipedia only (briefs are labelled limited evidence) |
+| `TAVILY_API_KEY` | ✔ | ✔ | web search — **required for research briefs, lead lists and any web-research step**; without it search falls back to Wikipedia only: the define page warns "Limited evidence", every research step is recorded `degraded`, the result's Evidence panel and Limitations say only encyclopedia summaries were available, and the API logs a boot warning |
 | `RESEND_API_KEY`, `EMAIL_FROM` | ✔ | ✔ | optional email: verification, notifications, password reset |
 | `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` | ✔ | – | optional real payments |
 | `TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET_KEY` | ✔ | – | optional bot check |
@@ -92,7 +92,7 @@ defaults shown — none needs setting for a normal deploy):
 
 | Variable | Default | What it does |
 |---|---|---|
-| `SEARCH_PROVIDER` | `tavily` when `TAVILY_API_KEY` is set, else `wikipedia` | `tavily` \| `wikipedia` \| `off`. Tavily without a key quietly becomes Wikipedia (the define page then labels a brief "limited evidence"); `off` blocks research briefs at planning (`PROVIDER_UNAVAILABLE`, nothing charged). |
+| `SEARCH_PROVIDER` | `tavily` when `TAVILY_API_KEY` is set, else `wikipedia` | `tavily` \| `wikipedia` \| `off`. Tavily without a key becomes Wikipedia — never silently: Wikipedia-only research is recorded `degraded` (not `ok`), the define page and the result say the evidence is encyclopedia summaries, and the API logs a boot warning; `off` blocks research briefs at planning (`PROVIDER_UNAVAILABLE`, nothing charged). |
 | `SEARCH_DAILY_BUDGET` | `30` | Successful Tavily calls per UTC day, server-wide (failed calls no longer count). A research step makes 3 searches and other web steps 2 each (plus 2 when a brief's one automatic revision researches again), so a brief typically uses 3–9 and 30 allows only a few briefs a day: raise it (e.g. `200`) for demos and the live smoke. When it is spent, searches fall back to Wikipedia and the research is recorded as `degraded`. |
 | `VERIFY_RETRY_DELAY_MS` | `60000` | When the AI verifier can't run (key, quota, timeout, unusable reply) the result is **not verified** (`UNVERIFIED`): it is checked again once after this pause, then handed to a person as "The result could not be verified" (accept / retry / cancel). Accepting keeps it `UNVERIFIED`, the outcome `UNKNOWN`, and refunds the verification fee. |
 | `TAVILY_BASE_URL` | `https://api.tavily.com` | **Tests only** (points search at a local stub). Never set it in production: results that used it carry a "Custom search endpoint" notice and the API logs a production warning at boot. |

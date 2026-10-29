@@ -316,6 +316,11 @@ export function productionConfigWarnings(role: "api" | "worker" = "api"): string
         `It is meant for tests${process.env.E2E_STUB === "1" ? " (E2E_STUB=1: this is a stub stack)" : ""}; unset it in production.`
     );
   }
+  if (config.search.provider === "wikipedia" || (config.search.provider === "tavily" && !config.search.tavilyApiKey)) {
+    warnings.push(
+      `Web research uses Wikipedia only (${config.search.provider === "wikipedia" ? "SEARCH_PROVIDER=wikipedia" : "TAVILY_API_KEY is not set"}): research steps get encyclopedia summaries, not current web pages, and are marked degraded. Set TAVILY_API_KEY on the API service for live web search.`
+    );
+  }
   if (config.creditsPerEur !== 100) {
     warnings.push(
       `CREDITS_PER_EUR=${config.creditsPerEur}: existing balances were issued at 100 credits per €1, so internal accounting now values each of those credits at €${(1 / config.creditsPerEur).toFixed(4)} instead of €0.0100. Stored balances are unchanged.`

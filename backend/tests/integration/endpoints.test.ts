@@ -10,7 +10,8 @@ import type { Prisma } from "@prisma/client";
 import { prisma } from "../../src/db";
 import { incompleteResearchNotes } from "../../src/engine/executor";
 import { api, createUser, fillContext, getExecution, runWorker, scriptLLM } from "../helpers";
-import { startStubSearch, type StubSearch } from "../stubSearch";
+import { config } from "../../src/config";
+import { STUB_RESULTS, startStubSearch, type StubSearch } from "../stubSearch";
 
 let stub: StubSearch | null = null;
 afterEach(async () => {
@@ -121,6 +122,31 @@ describe("Home's recent outcomes and the incomplete-work notes", () => {
     await prisma.execution.update({ where: { id: executionId }, data: { outcomeStatus: "NOT_ACHIEVED", confirmedOutcomeStatus: null, outcomeConfirmedAt: new Date() } });
     home = (await api().get("/api/dashboard").set(auth).expect(200)).body.recentOutcomes[0];
     expect(home).toMatchObject({ outcomeStatus: "NOT_ACHIEVED", outcomeConfirmed: true });
+  });
+
+  it("Wikipedia-only research (no Tavily key) is degraded, and the synthesis is told its evidence is encyclopedia summaries", async () => {
+    stub = await startStubSearch({ wikipedia: STUB_RESULTS });
+    config.search.tavilyApiKey = ""; // as in production while TAVILY_API_KEY is unset
+    const { auth } = await createUser({ credits: 5000 });
+    await fillContext(auth);
+    const synthesis: string[] = [];
+    scriptLLM((system, user, opts) => {
+      if (opts.purpose === "step" && /^You are the Synthesis Lead on/.test(system)) synthesis.push(user);
+      return undefined;
+    });
+    const { executionId } = await run(auth, { statement: MEMO });
+    const ex = await getExecution(auth, executionId);
+    expect(ex.status).toBe("COMPLETED");
+    const researched = ex.steps.filter((s: { researchStatus: string | null }) => s.researchStatus);
+    expect(researched.length).toBeGreaterThan(0);
+    for (const s of researched) {
+      expect(s.researchStatus).toBe("degraded");
+      expect(s.research.providers).toEqual(["wikipedia"]);
+    }
+    const line = `“${researched[0].title}”: only encyclopedia summaries were available, not the live web, so current company and market facts may be missing.`;
+    expect(synthesis.join("\n")).toContain(`- ${line}`);
+    expect(await incompleteResearchNotes(executionId)).toContain(line);
+    expect(ex.resultReasons.join(" ")).toMatch(/degraded/);
   });
 
   it("Home's result state is the execution's, and the mock label follows what the steps and the verifier ran on", async () => {

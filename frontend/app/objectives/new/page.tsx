@@ -316,6 +316,16 @@ function DefineOutcome() {
             </div>
           )}
 
+          {wikipediaOnly && (
+            <div className="ws-callout" role="note" data-testid="search-limited">
+              <Icon name="alert" size={16} />
+              <p>
+                <b>Limited evidence on this server.</b> Research searches Wikipedia only — no live web search — so sources are encyclopedia summaries, not current company or market pages.
+                Lead lists, competitor scans and account research will be thin, and each result says so.
+              </p>
+            </div>
+          )}
+
           {aiProblem && (
             <div className="ws-callout" role="note" data-testid="ai-problem">
               <Icon name="alert" size={16} />
@@ -409,7 +419,7 @@ function DefineOutcome() {
                       {searchOff
                         ? " Not available on this server right now: web search is off."
                         : wikipediaOnly
-                          ? " Limited evidence on this server: it searches Wikipedia only (no web search key), so sources are encyclopedia summaries."
+                          ? " Limited evidence on this server: Wikipedia only (see above)."
                           : ""}
                     </span>
                   </span>

@@ -18,6 +18,7 @@ import {
   unfinishedStep,
   usedCustomSearch,
   usedMockAI,
+  WIKIPEDIA_ONLY_NOTICE,
   verificationStopped,
 } from "./openIssues";
 
@@ -406,7 +407,23 @@ describe("researchNotice", () => {
 
   it("says a fallback was used when research was degraded", () => {
     const n = researchNotice([{ title: "Scan", status: "COMPLETED", researchStatus: "degraded", research: { providers: ["wikipedia"], queries: ["q"], attempts: [attempt("tavily", false, 401), attempt("wikipedia", true, 200)] } }], web, true);
-    expect(n).toEqual({ tone: "info", text: "Tavily failed (HTTP 401) — Wikipedia used instead." });
+    expect(n).toEqual({ tone: "warn", text: "Tavily failed (HTTP 401) — Wikipedia used instead." });
+    // Tavily still answered some searches: a footnote, not a warning.
+    const mixed = researchNotice(
+      [{ title: "Scan", status: "COMPLETED", researchStatus: "degraded", research: { providers: ["tavily", "wikipedia"], queries: ["q", "r"], attempts: [attempt("tavily", true, 200), attempt("tavily", false, 503), attempt("wikipedia", true, 200)] } }],
+      web,
+      true
+    );
+    expect(mixed).toEqual({ tone: "info", text: "Tavily failed (HTTP 503) — Tavily and Wikipedia used instead." });
+  });
+
+  it("says plainly when only Wikipedia was searched (no live web search), on new and older records", () => {
+    const wiki = { providers: ["wikipedia"], queries: ["q"], attempts: [attempt("wikipedia", true, 200)] };
+    expect(researchNotice([{ title: "Scan", status: "COMPLETED", researchStatus: "degraded", research: wiki }], web, true)).toEqual({ tone: "warn", text: WIKIPEDIA_ONLY_NOTICE });
+    // Recorded "ok" by servers from before Wikipedia-only research was marked degraded.
+    expect(researchNotice([{ title: "Scan", status: "COMPLETED", researchStatus: "ok", research: wiki }], web, true)).toEqual({ tone: "warn", text: WIKIPEDIA_ONLY_NOTICE });
+    // Live web research: nothing to say.
+    expect(researchNotice([{ title: "Scan", status: "COMPLETED", researchStatus: "ok", research: { providers: ["tavily"], queries: ["q"], attempts: [attempt("tavily", true, 200)] } }], web, true)).toBeNull();
   });
 
   it("says when search found nothing usable", () => {

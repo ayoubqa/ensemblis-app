@@ -597,19 +597,29 @@ const RESEARCH_STATUS_TEXT: Record<string, string> = {
   failed: "web research failed",
   off: "web research did not run",
 };
+const WIKIPEDIA_ONLY_TEXT = "only encyclopedia summaries were available, not the live web, so current company and market facts may be missing";
+
+/** True when a step's stored research was answered by Wikipedia alone (no live web search). */
+export function wikipediaOnlyResearch(json: unknown): boolean {
+  const providers = readStoredResearch(json).providersUsed;
+  return !!providers?.length && providers.every((p) => p === "wikipedia");
+}
 
 /** One line per step that was skipped or whose research wasn't ok (a brief's Evidence gaps, a memo's Limitations). Never the stored reason. */
 export async function incompleteResearchNotes(executionId: string, exceptStepId?: string, deliverable: "brief" | "result" = "brief"): Promise<string[]> {
   const steps = await prisma.executionStep.findMany({
     where: { executionId },
     orderBy: { order: "asc" },
-    select: { id: true, title: true, status: true, researchStatus: true },
+    select: { id: true, title: true, status: true, researchStatus: true, research: true },
   });
   const out: string[] = [];
   for (const s of steps) {
     if (s.id === exceptStepId) continue;
     if (s.status === "SKIPPED") {
       out.push(`“${s.title}” was skipped: its work is missing from this ${deliverable}.`);
+    } else if (s.researchStatus && s.researchStatus !== "no_results" && s.researchStatus !== "failed" && s.researchStatus !== "off" && wikipediaOnlyResearch(s.research)) {
+      // Wikipedia alone answered: recorded as "ok" by servers before this check, "degraded" since.
+      out.push(`“${s.title}”: ${WIKIPEDIA_ONLY_TEXT}.`);
     } else if (s.researchStatus && s.researchStatus !== "ok") {
       out.push(`“${s.title}”: ${RESEARCH_STATUS_TEXT[s.researchStatus] ?? "web research was incomplete"}.`);
     }

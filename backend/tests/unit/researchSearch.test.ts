@@ -18,7 +18,7 @@ import {
   webSearchDetailed,
   type SearchResult,
 } from "../../src/research/search";
-import { mergeResults, research, summarizeAttempts, type ResearchRequest } from "../../src/research/sources";
+import { mergeResults, research, summarizeAttempts, WIKIPEDIA_ONLY_REASON, type ResearchRequest } from "../../src/research/sources";
 import { STUB_RESULTS, UNSAFE_RESULTS, startStubSearch, type StubSearch } from "../stubSearch";
 
 const saved = { provider: config.search.provider, key: config.search.tavilyApiKey, budget: config.search.dailyBudget };
@@ -210,6 +210,18 @@ describe("research() status", () => {
     expect(failed?.error).toMatch(/HTTP 401/);
   });
 
+  it("degraded: no Tavily key → Wikipedia only, and the reason says it was not live web research", async () => {
+    stub = await startStubSearch({ wikipedia: STUB_RESULTS });
+    config.search.tavilyApiKey = ""; // production today: TAVILY_API_KEY unset
+    const r = await research(REQ);
+    expect(r.backend).toBe("wikipedia");
+    expect(r.status).toBe("degraded");
+    expect(r.reason).toBe(WIKIPEDIA_ONLY_REASON);
+    expect(r.providersUsed).toEqual(["wikipedia"]);
+    expect(r.attempts.every((a) => a.provider === "wikipedia" && a.ok)).toBe(true);
+    expect(stub.tavilyCalls()).toBe(0);
+  });
+
   it("no_results: the searches worked but found nothing", async () => {
     stub = await startStubSearch({ results: [] });
     const r = await research(REQ);
@@ -263,6 +275,24 @@ describe("research() status", () => {
         { ...a, provider: "wikipedia", ok: true, resultCount: 2 },
       ])
     ).toMatchObject({ status: "degraded", providersUsed: ["wikipedia"] });
+  });
+
+  it("summarizeAttempts: Wikipedia alone is degraded, never ok, even when every search succeeded", () => {
+    const a = { query: "q", httpStatus: 200, error: null, ms: 1 };
+    expect(summarizeAttempts([{ ...a, provider: "wikipedia", ok: true, resultCount: 3 }])).toEqual({
+      status: "degraded",
+      reason: WIKIPEDIA_ONLY_REASON,
+      providersUsed: ["wikipedia"],
+    });
+    // Live web results alongside it: ok.
+    expect(
+      summarizeAttempts([
+        { ...a, provider: "tavily", ok: true, resultCount: 5 },
+        { ...a, provider: "wikipedia", ok: true, resultCount: 1 },
+      ]).status
+    ).toBe("ok");
+    // Nothing found on Wikipedia: no_results, not degraded.
+    expect(summarizeAttempts([{ ...a, provider: "wikipedia", ok: true, resultCount: 0 }]).status).toBe("no_results");
   });
 });
 

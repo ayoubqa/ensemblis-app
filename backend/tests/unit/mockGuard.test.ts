@@ -61,6 +61,22 @@ describe("mock AI guard", () => {
     process.env.TAVILY_BASE_URL = "http://127.0.0.1:4198";
     expect(productionConfigWarnings()).toEqual([]);
   });
+
+  it("warns in production when web research is Wikipedia only (no TAVILY_API_KEY), naming the fix but no secret", () => {
+    process.env.RENDER = "true";
+    process.env.AI_PROVIDER = "openai";
+    config.search.provider = "tavily";
+    config.search.tavilyApiKey = "";
+    const warning = productionConfigWarnings().find((w) => w.startsWith("Web research uses Wikipedia only"));
+    expect(warning).toMatch(/TAVILY_API_KEY is not set.*Set TAVILY_API_KEY on the API service/);
+    config.search.provider = "wikipedia";
+    expect(productionConfigWarnings().join(" ")).toMatch(/Wikipedia only \(SEARCH_PROVIDER=wikipedia\)/);
+    config.search.provider = "tavily";
+    config.search.tavilyApiKey = "tvly-test";
+    expect(productionConfigWarnings().join(" ")).not.toMatch(/Wikipedia only/);
+    config.search.provider = "off";
+    expect(productionConfigWarnings().join(" ")).not.toMatch(/Wikipedia only/);
+  });
 });
 
 describe("aiConfigProblem", () => {

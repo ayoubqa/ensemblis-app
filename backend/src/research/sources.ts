@@ -12,8 +12,10 @@
 // answered (providersUsed) and every search attempt with its error, so the
 // step, the event log and the verifier can report it truthfully.
 //
-//   ok          every search succeeded and something was found
-//   degraded    something was found, but some searches failed or a fallback was used
+//   ok          every search succeeded on the live web (Tavily) and something was found
+//   degraded    something was found, but some searches failed or a fallback was used —
+//               including Wikipedia-only research (no live web search on this server),
+//               which is never reported as equivalent to web research
 //   no_results  the searches worked but found nothing
 //   failed      no search succeeded (or research itself broke) — see `reason`
 //   off         web search is off on this server
@@ -132,6 +134,10 @@ export interface ResearchOutcome {
 
 const PROVIDER_NAMES: Record<SearchProviderName, string> = { tavily: "Tavily", wikipedia: "Wikipedia" };
 
+/** The reason recorded when only Wikipedia answered and no search failed (e.g. no TAVILY_API_KEY). */
+export const WIKIPEDIA_ONLY_REASON =
+  "Only Wikipedia was searched (no live web search ran): the sources are encyclopedia summaries, not current web pages.";
+
 /** Status, reason and providers from the attempts of one research run (exported for tests). */
 export function summarizeAttempts(attempts: SearchAttempt[]): { status: Exclude<ResearchStatus, "off">; reason: string | null; providersUsed: SearchProviderName[] } {
   const providersUsed: SearchProviderName[] = [];
@@ -158,6 +164,8 @@ export function summarizeAttempts(attempts: SearchAttempt[]): { status: Exclude<
     return { status: "no_results", reason: failed.length ? `The searches found nothing (and some failed — ${failures()})` : "The searches found nothing.", providersUsed };
   }
   if (failed.length) return { status: "degraded", reason: `Some searches failed or fell back — ${failures()}`, providersUsed };
+  // Encyclopedia summaries are not web research: a lead list or market scan built on them is limited, and says so.
+  if (!providersUsed.includes("tavily")) return { status: "degraded", reason: WIKIPEDIA_ONLY_REASON, providersUsed };
   return { status: "ok", reason: null, providersUsed };
 }
 
