@@ -4,24 +4,25 @@ import { Icon } from "@/components/Icon";
 import { StartLink } from "@/components/site/StartLink";
 import { UseCaseArt } from "@/components/site/UseCaseArt";
 import { TEAM_NAMES, USE_CASES, capabilitiesFor } from "@/lib/offer";
-import { breadcrumbJsonLd, pageMetadata } from "@/lib/site";
+import { SITE, breadcrumbJsonLd, pageMetadata, webPageJsonLd } from "@/lib/site";
 
-const TITLE = "Use cases: market, competitor, sales, finance and operations research";
+const TITLE = "Use cases: research and analysis you can hand off";
 const DESCRIPTION =
-  "What you can delegate to Ensemblis today: market and competitor research, ICP and positioning, account and lead research, financial scenarios and unit economics, process and vendor analysis — each with cited evidence and a verification report.";
+  "Market, competitor and customer research, account and lead research, financial scenarios and process analysis, each with cited evidence and verification.";
 
 export const metadata = pageMetadata({ title: TITLE, description: DESCRIPTION, path: "/use-cases" });
 
 export default function UseCasesPage() {
   return (
     <div className="st">
-      <JsonLd data={breadcrumbJsonLd([{ name: "Home", path: "/" }, { name: "Use cases", path: "/use-cases" }])} />
+      <JsonLd
+        data={[
+          webPageJsonLd({ path: "/use-cases", name: `${TITLE} · ${SITE.name}`, description: DESCRIPTION }),
+          breadcrumbJsonLd([{ name: "Home", path: "/" }, { name: "Use cases", path: "/use-cases" }]),
+        ]}
+      />
       <section className="st-page-head dk" aria-labelledby="uc-h1">
         <div className="wrap">
-          <p className="st-kicker">
-            <span className="st-node" aria-hidden="true" />
-            Use cases
-          </p>
           <h1 id="uc-h1">What you can hand off today.</h1>
           <p className="st-sub">
             Research and analysis across marketing, sales, finance and operations. Each objective is planned by a Chief of Staff, carried out by

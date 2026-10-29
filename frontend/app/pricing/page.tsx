@@ -7,10 +7,10 @@ import { ExecutionLedger } from "@/components/site/ExecutionLedger";
 import { StartLink } from "@/components/site/StartLink";
 import { EXAMPLE } from "@/app/_home/content";
 import { CAPABILITIES, EXAMPLE_PLAN, EXAMPLE_PLAN_TOTAL, PLAN_COST, STEP_PRICES, TEAM_NAMES, VERIFICATION_CREDITS, WORK_STEPS, type Team } from "@/lib/offer";
-import { breadcrumbJsonLd, faqJsonLd, pageMetadata } from "@/lib/site";
+import { SITE, breadcrumbJsonLd, faqJsonLd, pageMetadata, webPageJsonLd } from "@/lib/site";
 
 const TITLE = "Pricing";
-const DESCRIPTION = `How Ensemblis is priced: every step has a fixed price in credits, you approve the total before anything runs, and failed work is refunded. An objective uses ${PLAN_COST.min}–${PLAN_COST.max} credits.`;
+const DESCRIPTION = `Every step has a fixed price in credits and you approve the total before anything runs. An objective uses ${PLAN_COST.min}–${PLAN_COST.max} credits; failed work is refunded.`;
 
 export const metadata = pageMetadata({ title: TITLE, description: DESCRIPTION, path: "/pricing" });
 
@@ -38,14 +38,16 @@ const TEAMS: Team[] = ["chief_of_staff", "marketing", "sales", "finance", "opera
 export default function PricingPage() {
   return (
     <div className="st">
-      <JsonLd data={[breadcrumbJsonLd([{ name: "Home", path: "/" }, { name: "Pricing", path: "/pricing" }]), faqJsonLd(FAQ)]} />
+      <JsonLd
+        data={[
+          webPageJsonLd({ path: "/pricing", name: `${TITLE} · ${SITE.name}`, description: DESCRIPTION }),
+          breadcrumbJsonLd([{ name: "Home", path: "/" }, { name: "Pricing", path: "/pricing" }]),
+          faqJsonLd(FAQ),
+        ]}
+      />
       <section className="st-page-head dk" aria-labelledby="pr-h1">
         <div className="wrap st-page-head-grid">
           <div>
-            <p className="st-kicker">
-              <span className="st-node" aria-hidden="true" />
-              Pricing
-            </p>
             <h1 id="pr-h1">Know the cost before anything runs.</h1>
             <p className="st-sub">
               Every step of the work has a fixed price in credits. Each plan shows its total for your approval, and work that fails or never starts is
@@ -68,10 +70,6 @@ export default function PricingPage() {
       <section className="st-sec" aria-labelledby="pr-how">
         <div className="wrap st-price-rules">
           <header className="st-head">
-            <p className="st-kicker">
-              <span className="st-node" aria-hidden="true" />
-              How credits work
-            </p>
             <h2 id="pr-how">
               {PLAN_COST.min.toLocaleString("en-US")}–{PLAN_COST.max.toLocaleString("en-US")} credits per objective.
             </h2>
@@ -80,9 +78,8 @@ export default function PricingPage() {
               verification gate. The planner sizes it to the objective; you see the plan and its total before approving.
             </p>
           </header>
-          <ol className="st-steps st-steps-3">
+          <ul className="st-steps st-steps-3">
             <li>
-              <span className="st-steps-n">01</span>
               <h3>Priced per step</h3>
               <p>
                 Planning costs {STEP_PRICES.planning} credits, research and analysis steps {STEP_PRICES.work.min}–{STEP_PRICES.work.max}, synthesis{" "}
@@ -90,26 +87,20 @@ export default function PricingPage() {
               </p>
             </li>
             <li>
-              <span className="st-steps-n">02</span>
               <h3>Approved before it runs</h3>
               <p>Nothing is charged until you approve the plan — or until it starts within a budget you pre-approved.</p>
             </li>
             <li>
-              <span className="st-steps-n">03</span>
               <h3>Refunded when it fails</h3>
               <p>A step that fails, or work that never starts, is refunded automatically. Cancelling before work starts costs nothing.</p>
             </li>
-          </ol>
+          </ul>
         </div>
       </section>
 
       <section className="st-sec st-sec-alt" id="estimate" aria-labelledby="pr-estimate">
         <div className="wrap">
           <header className="st-head">
-            <p className="st-kicker">
-              <span className="st-node" aria-hidden="true" />
-              Estimate a task
-            </p>
             <h2 id="pr-estimate">What would your question cost?</h2>
             <p className="st-lead">
               Pick a typical task or the steps you think it needs. The estimate uses the same price list as the planner; the plan for your
@@ -142,10 +133,6 @@ export default function PricingPage() {
       <section className="st-sec st-sec-alt" aria-labelledby="pr-list">
         <div className="wrap">
           <header className="st-head">
-            <p className="st-kicker">
-              <span className="st-node" aria-hidden="true" />
-              Price list
-            </p>
             <h2 id="pr-list">Every capability, and what it costs.</h2>
             <p className="st-lead">
               Prices per step, in credits. The same list the planner uses to estimate every plan.
@@ -189,10 +176,6 @@ export default function PricingPage() {
       <section className="st-sec" aria-labelledby="pr-faq">
         <div className="wrap st-faq-grid">
           <header className="st-head">
-            <p className="st-kicker">
-              <span className="st-node" aria-hidden="true" />
-              Questions
-            </p>
             <h2 id="pr-faq">About cost and credits.</h2>
             <p className="st-lead">
               More on approvals and refunds in <Link href="/how-it-works#usage">How it works</Link>; the rules for beta credits are in the{" "}

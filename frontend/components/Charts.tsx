@@ -44,7 +44,7 @@ export function LineChart({ values, height = 180, min = 0, label = "Chart", xLab
         <circle cx={X(last)} cy={Y(v[last])} r="4.5" fill="var(--accent)" />
       </svg>
       {xLabels && xLabels.length > 1 && (
-        <div className="row between tiny muted" style={{ marginTop: 6, fontVariantNumeric: "tabular-nums" }} aria-hidden="true">
+        <div className="row between tiny muted" style={{ marginTop: 6}} aria-hidden="true">
           <span>{xLabels[0]}</span>
           {xLabels.length > 2 && <span>{xLabels[Math.floor((xLabels.length - 1) / 2)]}</span>}
           <span>{xLabels[xLabels.length - 1]}</span>

@@ -50,7 +50,7 @@ export function Avatar({ name, hue, size = "md", round, className, style, label 
 /** Overlapping stack of round avatars (`.seatstack`). Kept for compatibility; currently unused. */
 export function AvatarStack({ names, max = 3, hue = 250 }: { names: string[]; max?: number; hue?: number }) {
   return (
-    <div className="seatstack" aria-label={`${names.length} people`}>
+    <div className="seatstack" role="group" aria-label={`${names.length} people`}>
       {names.slice(0, max).map((n) => (
         <div key={n} className="av" style={{ "--h": hue } as CSSProperties} title={n}>
           {initials(n)}

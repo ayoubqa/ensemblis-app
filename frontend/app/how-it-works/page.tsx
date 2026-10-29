@@ -11,7 +11,7 @@ import { SITE, breadcrumbJsonLd, pageMetadata, webPageJsonLd } from "@/lib/site"
 
 const TITLE = "How Ensemblis works";
 const DESCRIPTION =
-  "How Ensemblis turns a business objective into planned, executed and verified work: the Chief of Staff, approvals and exceptions, the AI Team, the verification gate, evidence, outcome measurement, Company Context and memory.";
+  "How Ensemblis turns an objective into verified work: the plan and its cost, your approval, the AI team, cited evidence, verification and outcome measurement.";
 
 export const metadata = pageMetadata({ title: TITLE, description: DESCRIPTION, path: "/how-it-works" });
 

@@ -23,10 +23,10 @@ The official **Ensemblis Brand + Creative Web Pack** is the source of truth: *Th
 | What | Where |
 |---|---|
 | Logo | `components/Logo.tsx` (`Logo`, `Lockup`, `Mark`) renders the official raster mark from `public/brand/` (exact files + proportional resizes, see `public/brand/README.md`). Never redraw, recolour or recreate it. Favicons: `app/favicon.ico`, `app/icon.png`, `app/apple-icon.png`. |
-| Colour | `app/styles/tokens.css` is the only place colours are defined: official palette as `--ens-*`, semantic tokens (`--bg --surface --surface2 --surface3 --ink --ink-strong --muted --subtle --line --line2 --field-line --accent --accent-fill --accent-ink --accent-soft --accent-line --ok/--warn/--bad (+ -soft) --shadow --focus`). Dark navy is the default theme; `.dk` / `.lt` force a palette on a section. Derived shades exist only where an official colour fails WCAG AA (e.g. filled buttons use `--accent-fill` #0F6BF0 = 4.8:1 with white). Never hard-code hex in components. |
-| Type | Inter (variable), self-hosted via `next/font/local` (`app/fonts.ts`). `--display` for headings (`--serif` is the legacy alias). |
-| CSS | `app/globals.css` (legacy prototype classes, being retired) → `app/styles/tokens.css` → `app/styles/components.css` (shared classes: `.btn .card .tag .chip .f .tabs table .pagehead .eyebrow .modal .toast .empty`) → one partial per area, each with its own class prefix: `shell.css` (`sh-`), `marketing.css` (`mk-`), `workspace.css` (`ws-`), `console.css` (`cs-`), `operations.css` (`op-`), `auth.css` (`au-`). |
-| Motion | Subtle and purposeful (live progress, status changes). `prefers-reduced-motion` disables animation globally (`tokens.css`). |
+| Colour | `app/styles/tokens.css` is the only place colours are defined: official palette as `--ens-*`, semantic tokens (`--bg --surface --surface2 --surface3 --ink --ink-strong --muted --subtle --line --line2 --field-line --accent --accent-fill --accent-ink --accent-soft --accent-line --ok/--warn/--bad (+ -soft) --shadow --focus`). Light is the default theme (the working paper, `docs/design/direction.md`): Paper documents on a Mist page, the command bar and hero desk in Ink. Dark stays available as a choice. `.dk` / `.lt` force a palette on a section. `--hl` (Highlighter) marks verified text only. Derived shades exist only where an official colour fails WCAG AA (e.g. filled buttons use `--accent-fill` #0F6BF0 = 4.8:1 with white). Never hard-code hex in components. |
+| Type | Self-hosted via `next/font/local` (`app/fonts.ts`): Schibsted Grotesk for headlines and interface (`--sans`, `--display`; `--serif` is the legacy alias), Newsreader for the document voice (`--doc`: objectives, briefs, article bodies), Inter only for the wordmark (`--wordmark`, as on the official reference sheet). Labels are sentence case in the interface face: no tracked capitals, no monospace labels, no arrows in buttons. |
+| CSS | `app/globals.css` (legacy prototype classes, being retired) → `app/styles/tokens.css` → `app/styles/components.css` (shared classes: `.btn .card .tag .chip .f .tabs table .pagehead .eyebrow .modal .toast .empty`) → one partial per area, each with its own class prefix: `shell.css` (`sh-`), `marketing.css` (`mk-`), `workspace.css` (`ws-`), `console.css` (`cs-`), `operations.css` (`op-`), `auth.css` (`au-`), `site.css` (`st-`, `ed-`) → `brand.css` last (`wp-`, `bl-`: the homepage, the blog hub, and the site-wide overrides that retire the earlier chrome). |
+| Motion | Subtle and purposeful (live progress, status changes). One orchestrated moment on the homepage: the example brief fills in on load. `prefers-reduced-motion` disables animation globally (`tokens.css`). |
 
 ## 2. Ground rules
 
@@ -45,11 +45,11 @@ The official **Ensemblis Brand + Creative Web Pack** is the source of truth: *Th
 
 ## 3. Information architecture (`lib/routes.ts`)
 
-Signed in, desktop: **Home** (`/dashboard`, the Chief of Staff) · **Objectives** · **AI Team** · **Company Context** · **Reports**, with **Approvals** and **Exceptions** always visible as live-count controls; **Usage** via the balance pill and the account panel (which also holds Recurring objectives, Organization members, Settings, Operations for admins, theme and shortcuts). Phones: bottom bar Home · Objectives · Define · Attention · More (a sheet reaching every other page). Signed out: How it works, Log in, Get started.
+Signed in, desktop: **Home** (`/dashboard`, the Chief of Staff) · **Objectives** · **AI Team** · **Company Context** · **Reports**, with **Approvals** and **Exceptions** always visible as live-count controls; **Usage** via the balance pill and the account panel (which also holds Recurring objectives, Organization members, Settings, Operations for admins, theme and shortcuts). Phones: bottom bar Home · Objectives · Define · Attention · More (a sheet reaching every other page). Signed out: **Product** (`/how-it-works`) · **Use cases** · **Pricing** · **Blog**, then Log in and Get started; on phones these sit in the header's Menu sheet (no bottom bar for visitors).
 
 | Route | Page |
 |---|---|
-| `/` | Landing: the Ensemblis story in eleven sections (`#how`, `#trust` anchors) + FAQ |
+| `/` | Homepage: the hero brief (a labelled example), how a request becomes a result (`#how`), what a brief contains (`#output`), use cases, when to use something else (`#fit`), pricing and access (`#pricing`), questions (`#questions`, also FAQPage JSON-LD) |
 | `/how-it-works` | Public product walkthrough (indexable) |
 | `/dashboard` | Home — the Chief of Staff: what needs you, what's running, recent outcomes, activity |
 | `/objectives` | Objective list (groups: all, in progress, needs attention, completed, drafts, failed & cancelled, earlier reports) |

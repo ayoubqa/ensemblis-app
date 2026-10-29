@@ -6,26 +6,22 @@ import { BLOG } from "@/lib/blog/seo";
 import { breadcrumbJsonLd, pageMetadata } from "@/lib/site";
 
 export const metadata = pageMetadata({
-  title: "Editorial standards — Ensemblis Journal",
-  description: "How the Ensemblis Journal sources, checks, labels and corrects its articles — including how AI assistance is used and reviewed.",
+  title: "Editorial standards · Blog",
+  description: "How the Ensemblis Blog sources, checks, labels and corrects its articles — including how AI assistance is used and reviewed.",
   path: BLOG.standardsPath,
 });
 
 export default function EditorialStandards() {
-  const report = mailto("Correction: Ensemblis Journal", "Article URL:\n\nWhat is wrong, and the source that shows it:\n");
+  const report = mailto("Correction: Ensemblis Blog", "Article URL:\n\nWhat is wrong, and the source that shows it:\n");
   return (
     <div className="ed">
-      <JsonLd data={breadcrumbJsonLd([{ name: "Home", path: "/" }, { name: "Journal", path: BLOG.path }, { name: "Editorial standards", path: BLOG.standardsPath }])} />
-      <header className="ed-hub-head dk">
+      <JsonLd data={breadcrumbJsonLd([{ name: "Home", path: "/" }, { name: "Blog", path: BLOG.path }, { name: "Editorial standards", path: BLOG.standardsPath }])} />
+      <header className="ed-hub-head bl-head">
         <div className="wrap">
-          <Breadcrumbs items={[{ name: "Journal", href: BLOG.path }, { name: "Editorial standards" }]} />
-          <p className="st-kicker">
-            <span className="st-node" aria-hidden="true" />
-            How we write
-          </p>
+          <Breadcrumbs items={[{ name: "Blog", href: BLOG.path }, { name: "Editorial standards" }]} />
           <h1 className="ed-hub-title">Editorial standards</h1>
           <p className="ed-hub-lead">
-            The Journal exists to be useful and correct. These are the rules every article follows — several of them are enforced by the publishing
+            The blog exists to be useful and correct. These are the rules every article follows — several of them are enforced by the publishing
             system itself, which refuses to publish an article that breaks them.
           </p>
         </div>

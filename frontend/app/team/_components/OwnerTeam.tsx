@@ -279,7 +279,7 @@ export function OwnerTeam({ team, setTeam }: { team: TeamDetail; setTeam: (t: Te
                       <span className="op-only-s">Joined </span>
                       {dayLabel(m.joinedAt)}
                     </td>
-                    <td className="op-m-count" style={{ textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
+                    <td className="op-m-count" style={{ textAlign: "right"}}>
                       {num(m.objectivesThisMonth)}
                     </td>
                     <td className="op-m-act" style={{ textAlign: "right" }}>

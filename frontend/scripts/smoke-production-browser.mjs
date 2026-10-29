@@ -51,7 +51,15 @@ for (const size of [DESKTOP, PHONE]) {
     record(h1.startsWith("Describe the outcome"), `${label} headline`, h1.slice(0, 60));
     const start = await page.locator('a:has-text("Get started")').first().getAttribute("href");
     record(["/access", "/signup"].includes(start ?? ""), `${label} Get started leads to access or sign-up`, start ?? "missing");
-    record((await page.locator("#compare").count()) === 1, `${label} shows when to use a general assistant instead`);
+    record((await page.locator("#fit").count()) === 1, `${label} shows when to use something else instead`);
+    if (size === DESKTOP) {
+      const blog = await page.getByRole("navigation", { name: "Main" }).getByRole("link", { name: "Blog", exact: true }).getAttribute("href");
+      record(blog === "/blog", `${label} Blog is in the main navigation`, blog ?? "missing");
+    } else {
+      await page.getByRole("button", { name: "Menu" }).click();
+      const blog = await page.getByRole("dialog", { name: "Menu" }).getByRole("link", { name: "Blog", exact: true }).getAttribute("href");
+      record(blog === "/blog", `${label} Blog is in the phone menu`, blog ?? "missing");
+    }
   });
 
   await visit("/pricing", size, async (page, label) => {
@@ -77,7 +85,7 @@ await visit("/login", DESKTOP, async (page, label) => {
   record(await page.locator('input[type="password"]').first().isVisible(), `${label} sign-in form renders (not submitted)`);
 });
 await visit("/blog", DESKTOP, async (page, label) => {
-  record((await page.locator("h1").count()) === 1, `${label} Journal renders`);
+  record((await page.locator("h1").count()) === 1, `${label} blog renders`);
 });
 await visit("/how-it-works", DESKTOP, async (page, label) => {
   record((await page.locator("h1").count()) === 1, `${label} renders`);

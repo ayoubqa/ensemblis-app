@@ -136,7 +136,7 @@ a.brand:hover .brandName {
   font-weight: 700;
   letter-spacing: -0.02em;
   color: var(--ink-strong);
-  font-variant-numeric: tabular-nums;
+  font-variant-numeric: normal;
 }
 .facts dd small {
   font-size: 14px;
@@ -342,7 +342,7 @@ a.brand:hover .brandName {
   font-size: 12px;
   font-weight: 700;
   color: var(--muted);
-  font-variant-numeric: tabular-nums;
+  font-variant-numeric: normal;
 }
 .teamB {
   display: flex;

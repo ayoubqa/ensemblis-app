@@ -20,7 +20,7 @@ export function generateMetadata({ params }: { params: { category: string } }): 
   if (!c) return { title: "Not found", robots: { index: false, follow: false } };
   const count = postsInCategory(c.key, visiblePosts()).length;
   return {
-    ...pageMetadata({ title: `${c.name} — Ensemblis Journal`, description: c.description, path: categoryPath(c.key) }),
+    ...pageMetadata({ title: `${c.name} · Blog`, description: c.description, path: categoryPath(c.key) }),
     alternates: { canonical: categoryPath(c.key), types: { "application/rss+xml": BLOG.feedPath } },
     // A topic page with one or two articles adds nothing the articles don't: indexable from INDEXABLE_CATEGORY_MIN.
     ...(count >= INDEXABLE_CATEGORY_MIN && blogMode() === "public" ? {} : { robots: { index: false, follow: true } }),
@@ -37,14 +37,10 @@ export default function CategoryPage({ params }: { params: { category: string } 
 
   return (
     <div className="ed">
-      <JsonLd data={breadcrumbJsonLd([{ name: "Home", path: "/" }, { name: "Journal", path: BLOG.path }, { name: c.name, path: categoryPath(c.key) }])} />
-      <header className="ed-hub-head ed-cat-head dk" style={{ "--cat": accentOf(c.key) } as React.CSSProperties}>
+      <JsonLd data={breadcrumbJsonLd([{ name: "Home", path: "/" }, { name: "Blog", path: BLOG.path }, { name: c.name, path: categoryPath(c.key) }])} />
+      <header className="ed-hub-head ed-cat-head bl-head" style={{ "--cat": accentOf(c.key) } as React.CSSProperties}>
         <div className="wrap">
-          <Breadcrumbs items={[{ name: "Journal", href: BLOG.path }, { name: c.name }]} />
-          <p className="st-kicker">
-            <span className="st-node" aria-hidden="true" />
-            Topic
-          </p>
+          <Breadcrumbs items={[{ name: "Blog", href: BLOG.path }, { name: c.name }]} />
           <h1 className="ed-hub-title">{c.name}</h1>
           <p className="ed-hub-lead">{c.description}</p>
         </div>
