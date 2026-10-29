@@ -57,4 +57,7 @@ jobs:
         working-directory: frontend
         run: npm ci && npx playwright install --with-deps chromium
       - name: Check production in a browser (read-only)
+        env:
+          # Set only when a release is expected: the checks for what that release adds run then (see the script).
+          EXPECT_RELEASE: ${{ github.event_name == 'push' && github.sha || inputs.expect_release }}
         run: node frontend/scripts/smoke-production-browser.mjs

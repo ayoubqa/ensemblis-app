@@ -162,7 +162,7 @@ stack. None of it was checked on the live site: this branch is not deployed.
 | End-to-end (Playwright, mock stack) | 22 passed, 4 opt-in skipped (analytics needs an analytics build; the visual tour needs `E2E_TOUR=1`) |
 | End-to-end, prod-like provider | 22 passed, 4 skipped |
 | New tests | Desktop navigation (Product, Use cases, Pricing and Blog lead to real pages; Blog marked current; footer link); phone menu (every destination, no tab bar for visitors) |
-| Production smoke script | Updated: checks Blog in the desktop navigation and the phone menu, and the `#fit` section. Not run against production: this branch is not deployed |
+| Production smoke script | Updated: checks Blog in the desktop navigation and the phone menu, and the `#fit` section. These checks run once a release is expected (`EXPECT_RELEASE`: a push to `main`, or a manual run given a commit). On a pull request the live site is still the previous release, so they are listed as skipped. Not run against this branch in production: it is not deployed |
 | axe-core, WCAG 2.1 A and AA | 0 violations on 34 scans: 10 public pages at 1440 and 390 px, the open phone menu, and 7 product screens in light and dark |
 | Keyboard | Menu reachable by Tab, opens on Enter, keeps focus inside, closes on Escape and returns focus; visible focus ring on every header control |
 | Reduced motion | The brief's load sequence is off under `prefers-reduced-motion`, and the brief shows complete |

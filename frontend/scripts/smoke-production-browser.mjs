@@ -8,11 +8,16 @@
 import { chromium } from "@playwright/test";
 
 const SITE = (process.env.SITE || "https://www.getensemblis.com").replace(/\/+$/, "");
+// Checks for what a release introduces only hold once the site runs that release. On a pull request the live site is
+// still the previous release (the baseline), so they run only when EXPECT_RELEASE names the commit being checked
+// (a push to main, or a manual run given a commit), and are listed as skipped otherwise.
+const RELEASE = Boolean(process.env.EXPECT_RELEASE);
 const results = [];
 const record = (ok, name, detail = "") => {
   results.push({ ok, name });
   console.log(`${ok ? "PASS" : "FAIL"}  ${name}${detail ? ` — ${detail}` : ""}`);
 };
+const skip = (name) => console.log(`SKIP  ${name} — checked once a release is expected (EXPECT_RELEASE)`);
 
 const browser = await chromium.launch();
 
@@ -51,6 +56,11 @@ for (const size of [DESKTOP, PHONE]) {
     record(h1.startsWith("Describe the outcome"), `${label} headline`, h1.slice(0, 60));
     const start = await page.locator('a:has-text("Get started")').first().getAttribute("href");
     record(["/access", "/signup"].includes(start ?? ""), `${label} Get started leads to access or sign-up`, start ?? "missing");
+    if (!RELEASE) {
+      skip(`${label} shows when to use something else instead`);
+      skip(`${label} Blog is in the ${size === DESKTOP ? "main navigation" : "phone menu"}`);
+      return;
+    }
     record((await page.locator("#fit").count()) === 1, `${label} shows when to use something else instead`);
     if (size === DESKTOP) {
       const blog = await page.getByRole("navigation", { name: "Main" }).getByRole("link", { name: "Blog", exact: true }).getAttribute("href");
