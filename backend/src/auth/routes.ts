@@ -332,23 +332,28 @@ const VERIFY_TTL_HOURS = 48;
 const VERIFY_PER_ACCOUNT_PER_HOUR = 3;
 export const hashVerifyToken = (token: string) => createHash("sha256").update(`verify:${token}`).digest("hex");
 
-/** Emails a single-use verification link. Never throws; a no-op when email is off or already verified. */
-export async function requestEmailVerification(userId: string): Promise<boolean> {
+/** Why a verification request did or didn't send an email. */
+export type VerificationRequestResult = "sent" | "email_off" | "not_eligible" | "already_verified" | "rate_limited" | "send_failed";
+
+/** Emails a single-use verification link. Never throws; says why nothing was sent (email off, already verified…). */
+export async function requestEmailVerification(userId: string): Promise<VerificationRequestResult> {
   try {
-    if (!config.email.enabled) return false;
+    if (!config.email.enabled) return "email_off";
     const user = await prisma.user.findUnique({ where: { id: userId }, select: { id: true, email: true, name: true, isGuest: true, emailVerifiedAt: true } });
-    if (!user || user.isGuest || user.emailVerifiedAt) return false;
+    if (!user || user.isGuest) return "not_eligible";
+    if (user.emailVerifiedAt) return "already_verified";
     const recent = await prisma.emailVerification.count({ where: { userId, createdAt: { gte: new Date(Date.now() - 60 * 60_000) } } });
-    if (recent >= VERIFY_PER_ACCOUNT_PER_HOUR) return false;
+    if (recent >= VERIFY_PER_ACCOUNT_PER_HOUR) return "rate_limited";
     const token = randomBytes(32).toString("base64url");
     await prisma.emailVerification.create({
       data: { userId, tokenHash: hashVerifyToken(token), expiresAt: new Date(Date.now() + VERIFY_TTL_HOURS * 3600_000) },
     });
     const verifyUrl = `${config.appUrl}/verify-email?token=${encodeURIComponent(token)}`;
-    return await sendEmail({ to: user.email, ...verifyEmailEmail({ name: user.name, verifyUrl, expiresHours: VERIFY_TTL_HOURS }) });
+    const ok = await sendEmail({ to: user.email, ...verifyEmailEmail({ name: user.name, verifyUrl, expiresHours: VERIFY_TTL_HOURS }) });
+    return ok ? "sent" : "send_failed";
   } catch (err) {
     console.warn("[auth] verification email failed:", err instanceof Error ? err.message : err);
-    return false;
+    return "send_failed";
   }
 }
 
@@ -380,8 +385,13 @@ router.post(
   verifyRequestLimiter,
   ah<AuthedRequest>(async (req, res) => {
     if (!config.email.enabled) throw new HttpError(503, "Email isn't configured on this server, so addresses can't be verified yet.");
-    const sent = await requestEmailVerification(req.userId!);
-    res.json({ ok: true, sent });
+    // Say plainly when no email went out: a silent "requested" left people waiting for a link that never came.
+    const result = await requestEmailVerification(req.userId!);
+    if (result === "rate_limited") throw new HttpError(429, "Several verification links were sent in the last hour. Use the newest one, or try again in an hour.");
+    if (result === "send_failed") throw new HttpError(502, "The verification email couldn't be sent. Try again in a few minutes; if it keeps failing, the email service needs attention.");
+    if (result === "not_eligible") throw new HttpError(403, "Guest trial accounts can't verify an email address. Create a free account first.");
+    if (result === "email_off") throw new HttpError(503, "Email isn't configured on this server, so addresses can't be verified yet.");
+    res.json({ ok: true, sent: result === "sent", ...(result === "already_verified" ? { alreadyVerified: true, user: await loadPublicUser(req.userId!) } : {}) });
   })
 );
 
