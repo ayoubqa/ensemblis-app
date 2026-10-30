@@ -1,6 +1,9 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import Link from "next/link";
+import { api, type OperatorCheck } from "@/lib/api";
+import { errorText } from "@/lib/errors";
 import { Icon, PageSkeleton } from "@/components";
 import { useAuth } from "@/lib/auth-context";
 import { ROUTES } from "@/lib/routes";
@@ -36,13 +39,56 @@ export function AdminGate() {
               <Link href={`${ROUTES.settings}#profile`}>verify yours in Settings</Link>.
             </p>
           ) : (
-            <p>
-              You&apos;re signed in as <b>{user.email}</b> (verified), and this address isn&apos;t one of this deployment&apos;s operators.{" "}
-              <Link href={ROUTES.dashboard}>Back to Home</Link>
-            </p>
+            <>
+              <p>
+                You&apos;re signed in as <b>{user.email}</b> (verified), and this address isn&apos;t one of this deployment&apos;s operators.{" "}
+                <Link href={ROUTES.dashboard}>Back to Home</Link>
+              </p>
+              <OperatorDiagnostics />
+            </>
           )}
         </div>
       </div>
     );
   return <OwnerDashboard />;
+}
+
+/**
+ * TEMPORARY: what the API itself sees for this account (GET /api/auth/operator-check) — which deployment
+ * answered and the masked shape of its operator list. Remove with the endpoint.
+ */
+function OperatorDiagnostics() {
+  const [check, setCheck] = useState<OperatorCheck | null>(null);
+  const [error, setError] = useState<unknown>(null);
+  useEffect(() => {
+    api.operatorCheck().then(setCheck, setError);
+  }, []);
+  if (error) return <p className="tiny muted">Diagnostics unavailable: {errorText(error, "the server didn't answer")}</p>;
+  if (!check) return <p className="tiny muted">Checking what the server sees…</p>;
+  const { deployment: d, adminEmails: a } = check;
+  const rows: [string, string][] = [
+    ["Server", [d.service, d.host].filter(Boolean).join(" · ") || "unknown"],
+    ["Release", d.release ?? "not reported"],
+    ["Started", d.startedAt],
+    ["ADMIN_EMAILS defined", a.adminEmailsDefined ? "yes" : "no"],
+    ["Entries", String(a.entryCount)],
+    ...a.entries.map((e, i): [string, string] => [
+      `Entry ${i + 1}`,
+      [e.masked, `${e.length} chars`, e.looksLikeEmail ? "plain address" : "not a plain address", e.hasQuotes ? "has quotes" : "", e.unusualCharacters.length ? `unusual: ${e.unusualCharacters.join(" ")}` : ""].filter(Boolean).join(" · "),
+    ]),
+    ["Your email matches", a.yourEmailMatches ? "yes" : "no"],
+    ["Would match without quotes/invisible characters", a.yourEmailMatchesAfterCleanup ? "yes" : "no"],
+    ["Changed since the server started", a.differsFromBootValue ? "yes" : "no"],
+    ["Similar variable names", a.similarKeys.length ? a.similarKeys.join(", ") : "none"],
+  ];
+  return (
+    <dl className="tiny" data-testid="operator-diagnostics" style={{ textAlign: "left", marginTop: 12 }}>
+      {rows.map(([k, v]) => (
+        <div key={k} className="row" style={{ gap: 8 }}>
+          <dt className="muted">{k}</dt>
+          <dd style={{ margin: 0, wordBreak: "break-all" }}>{v}</dd>
+        </div>
+      ))}
+    </dl>
+  );
 }

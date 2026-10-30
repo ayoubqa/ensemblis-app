@@ -24,6 +24,14 @@ function bool(name: string, fallback: boolean): boolean {
   return ["1", "true", "yes", "on"].includes(raw);
 }
 
+/** ADMIN_EMAILS: comma-separated, trimmed, case-insensitive. The one parser (config, and admin/operatorCheck.ts). */
+export function parseAdminEmails(raw: string | undefined): string[] {
+  return (raw || "")
+    .split(",")
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean);
+}
+
 export const isProduction = process.env.NODE_ENV === "production";
 
 /**
@@ -117,10 +125,7 @@ export const config = {
   appUrl: (process.env.APP_URL?.trim() || corsOrigins[0] || "http://localhost:3000").replace(/\/+$/, ""),
 
   // Emails allowed to open the owner dashboard (comma-separated, case-insensitive).
-  adminEmails: (process.env.ADMIN_EMAILS || "")
-    .split(",")
-    .map((s) => s.trim().toLowerCase())
-    .filter(Boolean),
+  adminEmails: parseAdminEmails(process.env.ADMIN_EMAILS),
 
   // Web research. Default: Tavily when a key is set, otherwise keyless Wikipedia.
   search: {

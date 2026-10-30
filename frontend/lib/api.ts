@@ -886,6 +886,21 @@ export interface AdminEconomics {
   excludedCosts: string[];
 }
 
+/** GET /api/auth/operator-check (temporary): why the signed-in account is or isn't an operator. */
+export interface OperatorCheck {
+  account: { email: string; emailVerified: boolean; isGuest: boolean; isAdmin: boolean };
+  deployment: { release: string | null; service: string | null; host: string | null; startedAt: string };
+  adminEmails: {
+    adminEmailsDefined: boolean;
+    entryCount: number;
+    entries: { masked: string; length: number; looksLikeEmail: boolean; hasQuotes: boolean; unusualCharacters: string[] }[];
+    yourEmailMatches: boolean;
+    yourEmailMatchesAfterCleanup: boolean;
+    differsFromBootValue: boolean;
+    similarKeys: string[];
+  };
+}
+
 export interface AdminOverview {
   generatedAt: string;
   users: { total: number; guests: number; organizations: number; signupsLast14d: DayCount[] };
@@ -1083,6 +1098,8 @@ export const api = {
   resetPassword: (body: { token: string; password: string }) => request<{ token: string; user: User }>("/api/auth/reset", { method: "POST", body: json(body) }),
   // Errors (429 too many links, 502 not sent) say why no email went out; alreadyVerified carries the fresh user.
   requestEmailVerification: () => request<{ ok: true; sent: boolean; alreadyVerified?: true; user?: User }>("/api/auth/verify-email/request", { method: "POST" }),
+  // TEMPORARY operator diagnostic (backend admin/operatorCheck.ts): the caller's own status, never the raw list.
+  operatorCheck: () => request<OperatorCheck>("/api/auth/operator-check"),
   verifyEmail: (token: string) => request<{ ok: true; user: User }>("/api/auth/verify-email", { method: "POST", body: json({ token }) }),
   guestStart: (body: { acceptedTerms: true; turnstileToken?: string }) => request<{ token: string; user: User }>("/api/guest/start", { method: "POST", body: json(body) }),
   claimAccount: (body: { email: string; password: string; name: string; company?: string; acceptedTerms: true }) =>
