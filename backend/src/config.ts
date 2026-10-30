@@ -90,6 +90,8 @@ export const config = {
     loginPer15Min: int("RATE_LIMIT_LOGIN_PER_15MIN", 20, 1),
     estimatePerMin: int("RATE_LIMIT_ESTIMATE_PER_MIN", 40, 1),
     taskRunsPerMin: int("RATE_LIMIT_TASK_RUNS_PER_MIN", 10, 1),
+    // Checkout and plan-management requests (credit packs and subscriptions) per minute.
+    checkoutPerMin: int("RATE_LIMIT_CHECKOUT_PER_MIN", 10, 1),
   },
 
   // Number of reverse proxies in front of the app, so `req.ip` is the client.
@@ -143,9 +145,52 @@ export const config = {
   stripe: {
     secretKey: process.env.STRIPE_SECRET_KEY?.trim() || "",
     webhookSecret: process.env.STRIPE_WEBHOOK_SECRET?.trim() || "",
+    // Tests and the E2E stub stack only (scripts/stripe-stub.mjs): send Stripe API calls to a local stub.
+    apiBase: process.env.STRIPE_API_BASE?.trim() || "",
     get enabled() {
       return !!(this.secretKey && this.webhookSecret);
     },
+  },
+  // Monthly subscriptions (billing/plans.ts, billing/subscriptions.ts): Stripe Checkout in subscription mode.
+  // Off unless SUBSCRIPTIONS_ENABLED=true AND Stripe is configured AND the plan has a Stripe Price ID. Prices
+  // and allowances are proposals: change them here (or with the env vars), never in the frontend. The Stripe
+  // Price must charge exactly priceCents in EUR per month — checkout refuses a mismatch.
+  subscriptions: {
+    enabled: bool("SUBSCRIPTIONS_ENABLED", false),
+    // While a renewal payment is failing (Stripe "past_due", retries still running): keep the plan's limits
+    // ("keep", default) or fall back to the prepaid limits ("revoke"). No new allowance is granted either way.
+    pastDueAccess: (process.env.SUBSCRIPTION_PAST_DUE_ACCESS?.trim().toLowerCase() === "revoke" ? "revoke" : "keep") as "keep" | "revoke",
+    // Optional Customer Portal configuration (bpc_...). Unset: the Stripe account's default portal configuration.
+    portalConfigurationId: process.env.STRIPE_PORTAL_CONFIGURATION_ID?.trim() || "",
+    plans: [
+      {
+        id: "starter",
+        name: "Starter",
+        priceCents: int("PLAN_STARTER_PRICE_CENTS", 2900, 100),
+        monthlyCredits: int("PLAN_STARTER_CREDITS", 3000, 1),
+        runsPerDay: int("PLAN_STARTER_RUNS_PER_DAY", 5, 1),
+        stripePriceId: process.env.STRIPE_PRICE_STARTER?.trim() || "",
+        stripeProductId: process.env.STRIPE_PRODUCT_STARTER?.trim() || "",
+      },
+      {
+        id: "growth",
+        name: "Growth",
+        priceCents: int("PLAN_GROWTH_PRICE_CENTS", 9900, 100),
+        monthlyCredits: int("PLAN_GROWTH_CREDITS", 15000, 1),
+        runsPerDay: int("PLAN_GROWTH_RUNS_PER_DAY", 15, 1),
+        stripePriceId: process.env.STRIPE_PRICE_GROWTH?.trim() || "",
+        stripeProductId: process.env.STRIPE_PRODUCT_GROWTH?.trim() || "",
+      },
+      {
+        id: "business",
+        name: "Business",
+        priceCents: int("PLAN_BUSINESS_PRICE_CENTS", 29900, 100),
+        monthlyCredits: int("PLAN_BUSINESS_CREDITS", 60000, 1),
+        runsPerDay: int("PLAN_BUSINESS_RUNS_PER_DAY", 40, 1),
+        stripePriceId: process.env.STRIPE_PRICE_BUSINESS?.trim() || "",
+        stripeProductId: process.env.STRIPE_PRODUCT_BUSINESS?.trim() || "",
+      },
+    ],
   },
   creditPacks: [
     { id: "starter", label: "Starter", priceCents: 1000, credits: 1000 },
@@ -320,6 +365,20 @@ export function productionConfigWarnings(role: "api" | "worker" = "api"): string
     warnings.push(
       `Web research uses Wikipedia only (${config.search.provider === "wikipedia" ? "SEARCH_PROVIDER=wikipedia" : "TAVILY_API_KEY is not set"}): research steps get encyclopedia summaries, not current web pages, and are marked degraded. Set TAVILY_API_KEY on the API service for live web search.`
     );
+  }
+  if (config.stripe.apiBase) {
+    warnings.push("STRIPE_API_BASE is set: Stripe API calls go to a local stub, not Stripe. It is for tests and the E2E stack; unset it in production.");
+  }
+  if (config.subscriptions.enabled) {
+    if (!config.stripe.enabled) {
+      warnings.push("SUBSCRIPTIONS_ENABLED=true but STRIPE_SECRET_KEY or STRIPE_WEBHOOK_SECRET is missing: plans are shown as not available.");
+    } else {
+      const missing = config.subscriptions.plans.filter((p) => !p.stripePriceId).map((p) => `STRIPE_PRICE_${p.id.toUpperCase()}`);
+      if (missing.length) warnings.push(`Subscriptions are on but ${missing.join(", ")} ${missing.length === 1 ? "is" : "are"} not set: ${missing.length === 1 ? "that plan is" : "those plans are"} shown as not available.`);
+      if (/^(sk|rk)_live_/.test(config.stripe.secretKey)) {
+        warnings.push("Subscriptions are on with a LIVE Stripe key: checkout charges real cards every month. Make sure this is intended.");
+      }
+    }
   }
   if (config.creditsPerEur !== 100) {
     warnings.push(

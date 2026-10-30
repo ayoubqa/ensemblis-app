@@ -7,6 +7,7 @@
 import type { Prisma } from "@prisma/client";
 import { prisma } from "../db";
 import { config } from "../config";
+import { entitlementsFor } from "../billing/entitlements";
 import { HttpError } from "./http";
 
 export class DailyLimitError extends HttpError {
@@ -122,7 +123,8 @@ export function withRunQuota<T>(userId: string, fn: () => Promise<T>): Promise<T
  * concurrent starts can't both pass the count, then checks the caps.
  * Call inside the transaction that records the charge.
  */
-export async function assertDailyQuotaInTx(tx: Prisma.TransactionClient, userId: string): Promise<void> {
+export async function assertDailyQuotaInTx(tx: Prisma.TransactionClient, userId: string, opts: { runsPerDay?: number } = {}): Promise<void> {
+  const perUser = opts.runsPerDay ?? config.maxTasksPerUserPerDay;
   await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${RUN_QUOTA_LOCK}))`;
   const since = startOfTodayUTC();
   const [charges, testRuns, userCount] = await Promise.all([
@@ -131,10 +133,10 @@ export async function assertDailyQuotaInTx(tx: Prisma.TransactionClient, userId:
     tx.transaction.count({ where: userChargesWhere(userId, since) }),
   ]);
   if (charges + testRuns >= config.maxTasksPerDayGlobal) throw globalLimitError();
-  if (userCount >= config.maxTasksPerUserPerDay) {
+  if (userCount >= perUser) {
     throw new DailyLimitError(
       "user",
-      `You've reached today's limit of ${config.maxTasksPerUserPerDay} execution${config.maxTasksPerUserPerDay === 1 ? "" : "s"} per account. Limits reset at midnight UTC (in ${resetsIn()}).`
+      `You've reached today's limit of ${perUser} execution${perUser === 1 ? "" : "s"} per account. Limits reset at midnight UTC (in ${resetsIn()}).`
     );
   }
 }
@@ -151,7 +153,7 @@ export async function assertPlanningQuotaInTx(tx: Prisma.TransactionClient, orgI
   const since = startOfTodayUTC();
   const p = config.planning;
   const [org, orgPlans, planningNow, globalNew] = await Promise.all([
-    tx.organization.findUnique({ where: { id: orgId }, select: { owner: { select: { isGuest: true } } } }),
+    tx.organization.findUnique({ where: { id: orgId }, select: { ownerId: true, owner: { select: { isGuest: true } } } }),
     tx.executionEvent.count({ where: { orgId, type: "PLANNING_STARTED", createdAt: { gte: since } } }),
     tx.execution.count({ where: { orgId, status: "PLANNING" } }),
     tx.execution.count({ where: { createdAt: { gte: since } } }),
@@ -160,7 +162,8 @@ export async function assertPlanningQuotaInTx(tx: Prisma.TransactionClient, orgI
   if (planningNow >= p.concurrentPerOrg) {
     throw new HttpError(429, `The Chief of Staff is already planning ${planningNow} objectives for your organization. Wait for one of those plans before starting another.`);
   }
-  const cap = org?.owner.isGuest ? p.perGuestPerDay : p.perOrgPerDay;
+  // The owner's plan (the organization's wallet) raises the daily planning cap with its execution limit.
+  const cap = org?.owner.isGuest ? p.perGuestPerDay : org ? (await entitlementsFor(tx, org.ownerId)).plansPerDay : p.perOrgPerDay;
   if (orgPlans >= cap) {
     throw new DailyLimitError("user", `Your organization has reached today's limit of ${cap} plans. Limits reset at midnight UTC (in ${resetsIn()}).`);
   }

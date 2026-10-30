@@ -7,6 +7,7 @@ import { aiConfigProblem, aiProviderLabel, currentProvider } from "../ai/llmProv
 import { effectiveSearchProvider, searchCustomEndpoint, searchEnabled, searchProviderLabel } from "../research/search";
 import { VERIFICATION_COST_CENTS } from "../org/registry";
 import { minimumPlanCost } from "../engine/budget";
+import { publicPlans, subscriptionsAvailable } from "../billing/plans";
 
 export function publicConfig() {
   // Why model calls can't work right now (unknown provider, missing key, mock where forbidden), or null.
@@ -45,6 +46,10 @@ export function publicConfig() {
     searchCustomEndpoint: searchCustomEndpoint(),
     emailEnabled: config.email.enabled,
     paymentsEnabled: config.stripe.enabled,
+    // Monthly plans from the server catalogue (billing/plans.ts): prices, allowances, limits, and whether each
+    // can be bought on this server. No Stripe IDs.
+    subscriptionsEnabled: subscriptionsAvailable(),
+    plans: publicPlans(),
     creditPacks: config.creditPacks.map((p) => ({
       id: p.id,
       label: p.label,

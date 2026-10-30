@@ -10,6 +10,7 @@ import { creditWallet, resolveWallet, spendableBalance } from "../lib/wallet";
 import { config } from "../config";
 import { formatCredits } from "./credits";
 import { createCheckoutSession } from "./stripe";
+import { changePlan, createPortalSession, createSubscriptionCheckout, setCancelAtPeriodEnd, subscriptionSummary } from "./subscriptions";
 
 // Usage & billing. The wallet is a balance of Ensemblis credits (billing/credits.ts);
 // executions are charged their planned estimate when they start and refunded
@@ -73,16 +74,21 @@ export async function billingSummary(userId: string) {
   if (!exists) throw new HttpError(401, "This account no longer exists. Please sign in again.");
   const where = await visibleLedgerWhere(userId);
   const since = startOfMonthUTC();
-  const [balance, monthSpendCents, lifetimeSpendCents, transactions, usage] = await Promise.all([
+  const [balance, monthSpendCents, lifetimeSpendCents, transactions, usage, plan] = await Promise.all([
     spendableBalance(userId),
     netSpend(where, since),
     netSpend(where),
     prisma.transaction.findMany({ where, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: 51, include: TRANSACTION_INCLUDE }),
     executionUsage(where, since),
+    subscriptionSummary(userId),
   ]);
   return {
     balanceCents: balance.credits,
     walletOwner: balance.walletOwner,
+    // Of the balance: unused plan allowance (expires at its period end) and everything else (never expires).
+    credits: plan.credits,
+    // The wallet owner's plan; null for members (managed by the owner) and for accounts without a plan.
+    subscription: plan.subscription,
     monthSpendCents,
     lifetimeSpendCents,
     usage,
@@ -183,6 +189,55 @@ router.post(
     const { packId } = parse(checkoutSchema, req.body);
     const url = await createCheckoutSession(req.userId!, packId);
     res.json({ url });
+  })
+);
+
+// Monthly plans (billing/subscriptions.ts). The client names a plan id only: the price, the Stripe Price and
+// the allowance come from the server's catalogue (billing/plans.ts). Extra fields in the body are ignored.
+const planSchema = z.object({ planId: z.enum(["starter", "growth", "business"], { errorMap: () => ({ message: "Choose a plan" }) }) });
+
+router.post(
+  "/subscription/checkout",
+  checkoutLimiter,
+  ah<AuthedRequest>(async (req, res) => {
+    const { planId } = parse(planSchema, req.body);
+    res.json({ url: await createSubscriptionCheckout(req.userId!, planId) });
+  })
+);
+
+router.post(
+  "/subscription/change",
+  checkoutLimiter,
+  ah<AuthedRequest>(async (req, res) => {
+    const { planId } = parse(planSchema, req.body);
+    const result = await changePlan(req.userId!, planId);
+    res.json({ ...result, billing: await billingSummary(req.userId!) });
+  })
+);
+
+router.post(
+  "/subscription/cancel",
+  checkoutLimiter,
+  ah<AuthedRequest>(async (req, res) => {
+    await setCancelAtPeriodEnd(req.userId!, true);
+    res.json({ billing: await billingSummary(req.userId!) });
+  })
+);
+
+router.post(
+  "/subscription/resume",
+  checkoutLimiter,
+  ah<AuthedRequest>(async (req, res) => {
+    await setCancelAtPeriodEnd(req.userId!, false);
+    res.json({ billing: await billingSummary(req.userId!) });
+  })
+);
+
+router.post(
+  "/subscription/portal",
+  checkoutLimiter,
+  ah<AuthedRequest>(async (req, res) => {
+    res.json({ url: await createPortalSession(req.userId!) });
   })
 );
 

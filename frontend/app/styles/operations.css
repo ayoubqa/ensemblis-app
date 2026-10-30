@@ -119,6 +119,58 @@
   line-height: 1.55;
   color: var(--muted);
 }
+.op-note.is-bad {
+  color: var(--bad);
+}
+.op-note b {
+  color: var(--ink-strong);
+}
+.op-note.is-bad b {
+  color: inherit;
+}
+/* Plan panel on Usage (app/usage/_components/PlanPanel.tsx). */
+.op-plan-top {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 8px 24px;
+  align-items: baseline;
+}
+.op-plan-name {
+  margin: 0 0 4px;
+  font-size: 18px;
+  font-weight: 650;
+  color: var(--ink-strong);
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.op-plan-credits {
+  margin-top: 18px;
+  display: grid;
+  gap: 8px;
+}
+.op-plan-credits .op-bar {
+  margin-top: 0;
+  width: 100%;
+}
+.op-plan-meter {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 4px 16px;
+}
+.op-plan-actions {
+  margin-top: 18px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+.op-plan-empty p {
+  margin: 0;
+}
 .op-note a,
 .op-link {
   color: var(--accent);

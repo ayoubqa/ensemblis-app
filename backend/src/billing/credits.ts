@@ -35,6 +35,8 @@ export const LEDGER_REASONS = {
   legacy_task_refund: "Report refund (earlier version)",
   demo_top_up: "Demo credits added (no real money)",
   stripe_purchase: "Credit pack purchased",
+  subscription_allowance: "Monthly plan credits for a paid billing period",
+  allowance_expired: "Unused plan credits expired at the end of their billing period",
   signup_grant: "Starting credits for a new account",
   guest_trial_grant: "Trial credits for a guest account",
   opening_balance: "Opening balance carried over when the credit ledger was introduced",
