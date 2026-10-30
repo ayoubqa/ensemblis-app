@@ -42,7 +42,7 @@ export function SkeletonCard() {
 /** Generic page skeleton (page head + card grid). Used by RequireAuth. */
 export function PageSkeleton({ cards = 3 }: { cards?: number }) {
   return (
-    <div className="wrap" aria-busy="true" aria-label="Loading">
+    <div className="wrap" role="status" aria-busy="true" aria-label="Loading">
       <div className="pagehead">
         <Skeleton height={40} width="min(420px, 80%)" radius={10} />
         <Skeleton height={14} width="min(560px, 90%)" style={{ marginTop: 14 }} />

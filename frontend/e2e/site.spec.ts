@@ -9,7 +9,7 @@ const content = readContent();
 const publicPosts = content.posts.filter((p) => isPublic(p));
 const hiddenPosts = content.posts.filter((p) => !isPublic(p));
 
-test.describe("Journal: only published articles are public", () => {
+test.describe("Blog: only published articles are public", () => {
   test("content/blog is valid", () => {
     expect(content.errors).toEqual([]);
   });
@@ -34,7 +34,7 @@ test.describe("Journal: only published articles are public", () => {
     await expect(page.locator(".ed-state, .ed-preview-note, .ed-preview-bar")).toHaveCount(0);
   });
 
-  test("published articles are in the sitemap and the feed; an empty Journal stays out of search and the menu", async ({ page, request }) => {
+  test("published articles are in the sitemap and the feed; an empty blog stays out of search", async ({ page, request }) => {
     const sitemap = await (await request.get("/sitemap.xml")).text();
     const feed = await request.get("/blog/feed.xml");
     expect(feed.headers()["content-type"]).toContain("application/rss+xml");
@@ -45,15 +45,44 @@ test.describe("Journal: only published articles are public", () => {
     }
     await page.goto("/blog");
     const robots = await page.locator('meta[name="robots"]').getAttribute("content").catch(() => null);
-    const nav = page.getByRole("navigation", { name: "Main" });
     if (publicPosts.length) {
       expect(robots ?? "").not.toContain("noindex");
-      await expect(nav.getByRole("link", { name: "Journal" })).toBeVisible();
+      expect(sitemap).toContain("/blog</loc>");
     } else {
       expect(robots).toContain("noindex");
+      expect(sitemap).not.toContain("/blog</loc>");
       await expect(page.getByRole("heading", { name: /first articles are in editorial review/i })).toBeVisible();
-      await expect(nav.getByRole("link", { name: "Journal" })).toHaveCount(0);
     }
+  });
+});
+
+test.describe("Navigation", () => {
+  test("desktop: Product, Use cases, Pricing and Blog are in the main navigation and lead to real pages", async ({ page }) => {
+    await page.goto("/");
+    const nav = page.getByRole("navigation", { name: "Main" });
+    for (const [name, path] of [["Product", "/how-it-works"], ["Use cases", "/use-cases"], ["Pricing", "/pricing"], ["Blog", "/blog"]]) {
+      await expect(nav.getByRole("link", { name, exact: true })).toHaveAttribute("href", path);
+    }
+    await nav.getByRole("link", { name: "Blog", exact: true }).click();
+    await expect(page).toHaveURL(/\/blog$/);
+    await expect(page.locator("h1")).toHaveCount(1);
+    await expect(nav.getByRole("link", { name: "Blog", exact: true })).toHaveAttribute("aria-current", "page");
+    await expect(page.getByRole("navigation", { name: "Footer" }).getByRole("link", { name: "Blog", exact: true })).toHaveAttribute("href", "/blog");
+  });
+
+  test("phone: signed-out visitors get a menu with every destination, and no app tab bar", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto("/");
+    await expect(page.locator(".sh-bottom")).toHaveCount(0);
+    await expect(page.getByRole("navigation", { name: "Main" })).toBeHidden();
+    await page.getByRole("button", { name: "Menu" }).click();
+    const menu = page.getByRole("dialog", { name: "Menu" });
+    for (const name of ["Home", "Product", "Use cases", "Pricing", "Blog", "Get started", "Log in"]) {
+      await expect(menu.getByRole("link", { name, exact: true })).toBeVisible();
+    }
+    await menu.getByRole("link", { name: "Blog", exact: true }).click();
+    await expect(page).toHaveURL(/\/blog$/);
+    await expect(page.getByRole("dialog", { name: "Menu" })).toHaveCount(0);
   });
 });
 
@@ -66,7 +95,7 @@ test.describe("Get started never dead-ends", () => {
       await route.fulfill({ response: res, json: { ...json, inviteRequired: true, guestTrialEnabled: false } });
     });
     await page.goto("/");
-    const hero = page.locator(".st-hero");
+    const hero = page.locator(".wp-hero");
     await expect(hero.getByRole("link", { name: "Get started" })).toHaveAttribute("href", "/access");
     await expect(page.getByRole("banner").getByRole("link", { name: "Get started" })).toHaveAttribute("href", "/access");
     await hero.getByRole("link", { name: "Get started" }).click();
@@ -117,7 +146,7 @@ test.describe("Public pages: content and SEO plumbing", () => {
     await page.goto("/");
     const blocks = await page.locator('script[type="application/ld+json"]').allTextContents();
     const faq = blocks.map((b) => JSON.parse(b)).flat().find((d) => d["@type"] === "FAQPage");
-    const visible = await page.locator(".st-faq summary h3").allTextContents();
+    const visible = await page.locator(".wp-faq summary h3").allTextContents();
     expect(faq.mainEntity.map((q: { name: string }) => q.name)).toEqual(visible);
   });
 

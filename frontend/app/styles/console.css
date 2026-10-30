@@ -157,7 +157,7 @@
   font-size: 15px;
   font-weight: 600;
   color: var(--ink-strong);
-  font-variant-numeric: tabular-nums;
+  font-variant-numeric: normal;
   overflow-wrap: anywhere;
 }
 .cs-facts dd small {
@@ -180,7 +180,7 @@
   background: var(--bg);
   color: var(--muted);
   font-weight: 700;
-  font-variant-numeric: tabular-nums;
+  font-variant-numeric: normal;
   line-height: 1;
   transition: background var(--dur) var(--ease), border-color var(--dur) var(--ease), color var(--dur) var(--ease);
 }
@@ -312,7 +312,7 @@ a.cs-life-i:focus-visible {
   font-size: 12px;
   line-height: 1.35;
   color: var(--muted);
-  font-variant-numeric: tabular-nums;
+  font-variant-numeric: normal;
 }
 .is-current .cs-life-n {
   color: var(--accent);
@@ -531,7 +531,7 @@ a.cs-life-i:focus-visible {
   font-weight: 700;
   letter-spacing: -0.01em;
   color: var(--ink-strong);
-  font-variant-numeric: tabular-nums;
+  font-variant-numeric: normal;
 }
 .cs-dc-sub {
   font-size: 13px;
@@ -780,7 +780,7 @@ a.cs-life-i:focus-visible {
   letter-spacing: 0;
   text-transform: none;
   color: var(--ink);
-  font-variant-numeric: tabular-nums;
+  font-variant-numeric: normal;
 }
 .cs-kicker {
   display: block;
@@ -909,7 +909,7 @@ a.cs-life-i:focus-visible {
   color: var(--accent);
   background: var(--accent-soft);
   border: 1px solid var(--accent-line);
-  font-variant-numeric: tabular-nums;
+  font-variant-numeric: normal;
   transition: background var(--dur) var(--ease), color var(--dur) var(--ease);
 }
 .cs-evchip:hover,
@@ -987,7 +987,7 @@ a.cs-life-i:focus-visible {
   color: var(--accent);
   background: var(--accent-soft);
   border: 1px solid var(--accent-line);
-  font-variant-numeric: tabular-nums;
+  font-variant-numeric: normal;
 }
 .cs-sc-list p {
   margin-top: 2px;
@@ -1100,7 +1100,7 @@ a.cs-life-i:focus-visible {
   font-size: 14.5px;
   font-weight: 600;
   color: var(--ink);
-  font-variant-numeric: tabular-nums;
+  font-variant-numeric: normal;
 }
 .cs-plan-facts dd small {
   margin-left: 4px;
@@ -1215,7 +1215,7 @@ a.cs-life-i:focus-visible {
   font-size: 14px;
   font-weight: 650;
   color: var(--ink);
-  font-variant-numeric: tabular-nums;
+  font-variant-numeric: normal;
 }
 
 /* ------------------------------------------------------------------ 04 execution timeline */
@@ -1264,7 +1264,7 @@ a.cs-life-i:focus-visible {
   color: var(--muted);
   font-size: 12.5px;
   font-weight: 650;
-  font-variant-numeric: tabular-nums;
+  font-variant-numeric: normal;
   transition: background var(--dur) var(--ease), border-color var(--dur) var(--ease), color var(--dur) var(--ease);
 }
 .st-COMPLETED > .cs-tl-node {
@@ -1522,7 +1522,7 @@ a.cs-life-i:focus-visible {
   font-weight: 700;
   letter-spacing: -0.02em;
   color: var(--ink-strong);
-  font-variant-numeric: tabular-nums;
+  font-variant-numeric: normal;
 }
 .cs-gate-num span {
   margin-top: 3px;
@@ -1630,7 +1630,7 @@ a.cs-life-i:focus-visible {
   font-weight: 650;
   text-align: right;
   color: var(--ink);
-  font-variant-numeric: tabular-nums;
+  font-variant-numeric: normal;
 }
 .cs-meter {
   flex: 1;
@@ -1915,7 +1915,7 @@ a.cs-life-i:focus-visible {
   color: var(--accent);
   background: var(--accent-soft);
   border: 1px solid var(--accent-line);
-  font-variant-numeric: tabular-nums;
+  font-variant-numeric: normal;
 }
 .cs-ev-b {
   min-width: 0;
@@ -2325,7 +2325,7 @@ a.cs-life-i:focus-visible {
   margin-top: 8px;
   font-size: 12.5px;
   color: var(--muted);
-  font-variant-numeric: tabular-nums;
+  font-variant-numeric: normal;
 }
 .cs-now-work {
   display: flex;
@@ -2388,7 +2388,7 @@ a.cs-life-i:focus-visible {
 .cs-panel-h span {
   font-size: 12px;
   color: var(--muted);
-  font-variant-numeric: tabular-nums;
+  font-variant-numeric: normal;
 }
 .cs-attempts {
   list-style: none;
@@ -2430,7 +2430,7 @@ a.cs-life-i:focus-visible {
 .cs-attempt-n {
   font-weight: 650;
   color: var(--muted);
-  font-variant-numeric: tabular-nums;
+  font-variant-numeric: normal;
 }
 .cs-attempts .is-on .cs-attempt-n {
   color: var(--accent);
@@ -2517,7 +2517,7 @@ a.cs-life-i:focus-visible {
   flex: none;
   font-size: 11.5px;
   color: var(--muted);
-  font-variant-numeric: tabular-nums;
+  font-variant-numeric: normal;
 }
 .cs-feed-b p {
   margin-top: 1px;
@@ -2681,7 +2681,7 @@ a.cs-life-i:focus-visible {
   margin-top: 10px;
   font-size: 12.5px;
   color: var(--muted);
-  font-variant-numeric: tabular-nums;
+  font-variant-numeric: normal;
   overflow-wrap: anywhere;
 }
 .cs-tl-model > span {
@@ -2994,7 +2994,7 @@ a.cs-life-i:focus-visible {
   font-size: 14px;
   font-weight: 600;
   color: var(--ink);
-  font-variant-numeric: tabular-nums;
+  font-variant-numeric: normal;
 }
 .cs-use-sum dd small:not(.cs-est) {
   flex-basis: 100%;
@@ -3042,7 +3042,7 @@ a.cs-life-i:focus-visible {
   gap: 2px 14px;
   font-size: 12.5px;
   color: var(--muted);
-  font-variant-numeric: tabular-nums;
+  font-variant-numeric: normal;
 }
 .cs-use-v > span {
   display: inline-flex;

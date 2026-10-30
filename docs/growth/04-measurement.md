@@ -43,7 +43,7 @@ Events (no personal data — paths and short labels only):
 
 | Event | When | Properties |
 |---|---|---|
-| `cta_click` | a Get started link is followed — page sections, the header button and the mobile bottom bar | `from` (e.g. `home-hero`, `header`, `bottom-nav`), `to` (`/access`, `/signup`, `/objectives/new`) |
+| `cta_click` | a Get started link is followed — page sections, the header button and the phone Menu sheet | `from` (e.g. `home-hero`, `header`, `menu`), `to` (`/access`, `/signup`, `/objectives/new`) |
 | `access_request_click` | the request-access email is opened | `from` |
 | `signup_completed` | an account is created | `invite` (`yes`/`no`), `claim` (trial converted) |
 | `trial_started` | a no-account trial begins | — |

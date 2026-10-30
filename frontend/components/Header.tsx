@@ -8,8 +8,7 @@ import { useAuth } from "@/lib/auth-context";
 import { credits } from "@/lib/format";
 import { useOnClickOutside } from "@/lib/hooks";
 import { ROUTES } from "@/lib/routes";
-import { StartLink, useStartHref } from "@/components/site/StartLink";
-import { track } from "@/lib/analytics";
+import { StartLink } from "@/components/site/StartLink";
 import { Avatar } from "./Avatar";
 import { Icon, type IconName } from "./Icon";
 import { Logo } from "./Logo";
@@ -28,14 +27,13 @@ export type NavItem = { href: string; label: string; icon: IconName; match: (p: 
 const starts = (p: string, ...prefixes: string[]) => prefixes.some((x) => p === x || p.startsWith(x + "/"));
 const cx = (...c: (string | false | null | undefined)[]) => c.filter(Boolean).join(" ");
 
-/** Signed out: the story, then Log in / Get started (right-hand side). */
+/** Signed out: four destinations, then Log in / Get started (right-hand side). Below 860px they move into the Menu sheet. */
 export const PUBLIC_NAV: NavItem[] = [
+  { href: ROUTES.howItWorksPage, label: "Product", icon: "layers", match: (p) => p === ROUTES.howItWorksPage },
   { href: ROUTES.useCases, label: "Use cases", icon: "target", match: (p) => p === ROUTES.useCases },
-  { href: ROUTES.howItWorksPage, label: "How it works", icon: "layers", match: (p) => p === ROUTES.howItWorksPage },
   { href: ROUTES.pricing, label: "Pricing", icon: "wallet", match: (p) => p === ROUTES.pricing },
+  { href: ROUTES.blog, label: "Blog", icon: "file", match: (p) => p === ROUTES.blog || p.startsWith(`${ROUTES.blog}/`) },
 ];
-/** Shown once the Journal has a published article (the root layout knows; an empty Journal isn't promoted). */
-export const JOURNAL_NAV: NavItem = { href: ROUTES.blog, label: "Journal", icon: "file", match: (p) => p === ROUTES.blog || p.startsWith(`${ROUTES.blog}/`) };
 
 /** Signed in, primary navigation (desktop). */
 export const SIGNED_NAV: NavItem[] = [
@@ -79,10 +77,9 @@ function AcctLink({ href, icon, children, onSelect, right, current }: { href: st
 }
 
 // ------------------------------------------------------------------ Header
-/** The navy command bar every page lives under (`.dk` whatever the theme). */
-export function Header({ journal = false }: { journal?: boolean }) {
+/** The Ink command bar every page lives under (`.dk` whatever the theme). */
+export function Header() {
   const { user, loading, signOut } = useAuth();
-  const publicNav = journal ? [...PUBLIC_NAV, JOURNAL_NAV] : PUBLIC_NAV;
   const pathname = usePathname() || "/";
   const router = useRouter();
   const shell = useShell();
@@ -91,6 +88,7 @@ export function Header({ journal = false }: { journal?: boolean }) {
   const isGuest = !!user?.isGuest;
   const attention = shell.attention;
   const [menu, setMenu] = useState(false);
+  const [siteMenu, setSiteMenu] = useState(false);
   const [confirmExit, setConfirmExit] = useState(false);
   const hdrRef = useRef<HTMLElement>(null);
   const acctRef = useRef<HTMLDivElement>(null);
@@ -116,7 +114,10 @@ export function Header({ journal = false }: { journal?: boolean }) {
     triggerRef.current?.focus();
   }, []);
   useOnClickOutside([acctRef], close, menu);
-  useEffect(() => setMenu(false), [pathname]);
+  useEffect(() => {
+    setMenu(false);
+    setSiteMenu(false);
+  }, [pathname]);
 
   const doSignOut = () => {
     setMenu(false);
@@ -163,7 +164,7 @@ export function Header({ journal = false }: { journal?: boolean }) {
 
         <nav className="sh-nav" aria-label="Main">
           <ul className="sh-links">
-            {(user ? SIGNED_NAV : publicNav).map((n) => {
+            {(user ? SIGNED_NAV : PUBLIC_NAV).map((n) => {
               const on = n.match(pathname);
               return (
                 <li key={n.label}>
@@ -358,15 +359,56 @@ export function Header({ journal = false }: { journal?: boolean }) {
                 </Link>
               )}
               {!starts(pathname, ROUTES.signup, ROUTES.access) && (
-                <StartLink from="header" className="btn p sm">
+                <StartLink from="header" className="btn p sm sh-start">
                   Get started
                 </StartLink>
               )}
+              <button type="button" className="sh-ibtn sh-menu-btn" aria-haspopup="dialog" aria-expanded={siteMenu} onClick={() => setSiteMenu(true)}>
+                <Icon name="menu" />
+                <span className="sr-only">Menu</span>
+              </button>
+              <SiteMenu open={siteMenu} onClose={() => setSiteMenu(false)} pathname={pathname} />
             </>
           )}
         </div>
       </div>
     </header>
+  );
+}
+
+// ------------------------------------------------------------------ SiteMenu
+/** Signed-out navigation below 860px: every public destination, then the two account actions. */
+function SiteMenu({ open, onClose, pathname }: { open: boolean; onClose: () => void; pathname: string }) {
+  return (
+    <Modal open={open} onClose={onClose} title="Menu" sheet className="sh-site-menu">
+      <nav aria-label="Site">
+        <ul className="sh-site-links">
+          <li>
+            <Link href={ROUTES.home} aria-current={pathname === ROUTES.home ? "page" : undefined} onClick={onClose}>
+              Home
+            </Link>
+          </li>
+          {PUBLIC_NAV.map((n) => {
+            const on = n.match(pathname);
+            return (
+              <li key={n.href}>
+                <Link href={n.href} aria-current={on ? "page" : undefined} onClick={onClose}>
+                  {n.label}
+                </Link>
+              </li>
+            );
+          })}
+        </ul>
+        <div className="sh-site-acts">
+          <StartLink from="menu" className="btn p lg">
+            Get started
+          </StartLink>
+          <Link href={ROUTES.login} className="btn lg" onClick={onClose}>
+            Log in
+          </Link>
+        </div>
+      </nav>
+    </Modal>
   );
 }
 
@@ -377,40 +419,18 @@ type Tab = { key: string; href?: string; label: ReactNode; icon: IconName; on: b
 const MORE_PATHS = [ROUTES.aiTeam, ROUTES.context, ROUTES.reports, "/tasks", ROUTES.usage, "/billing", ROUTES.members, ROUTES.settings, ROUTES.admin];
 
 /**
- * Mobile bottom bar (below 860px): Home · Objectives · Define · Attention · More.
+ * Mobile bottom bar for signed-in users (below 860px): Home · Objectives · Define · Attention · More.
  * "More" opens a sheet with every other page, so the whole product is reachable on a phone.
  */
 export function BottomNav() {
   const { user } = useAuth();
-  const startHref = useStartHref();
   const pathname = usePathname() || "/";
   const { attention } = useShell();
   const [more, setMore] = useState(false);
   useEffect(() => setMore(false), [pathname]);
 
-  if (!user) {
-    const tabs: Tab[] = [
-      { key: "home", href: ROUTES.home, label: "Home", icon: "home", on: pathname === ROUTES.home },
-      { key: "uses", href: ROUTES.useCases, label: "Use cases", icon: "target", on: pathname === ROUTES.useCases },
-      { key: "pricing", href: ROUTES.pricing, label: "Pricing", icon: "wallet", on: pathname === ROUTES.pricing },
-      {
-        key: "start",
-        href: startHref,
-        label: "Get started",
-        icon: "arrow",
-        on: starts(pathname, ROUTES.signup, ROUTES.access),
-        onClick: () => track("cta_click", { from: "bottom-nav", to: startHref }),
-      },
-      { key: "login", href: ROUTES.login, label: "Log in", icon: "user", on: starts(pathname, ROUTES.login) },
-    ];
-    return (
-      <nav className="sh-bottom dk no-print" aria-label="Primary">
-        {tabs.map((t) => (
-          <BottomTab key={t.key} tab={t} />
-        ))}
-      </nav>
-    );
-  }
+  // Signed out, phones navigate from the header's Menu: a visitor reading the site needs no app tab bar.
+  if (!user) return null;
 
   const isGuest = user.isGuest;
   const a = attention?.approvals ?? 0;

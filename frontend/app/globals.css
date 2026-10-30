@@ -679,7 +679,7 @@ body.modal-open {
   transform: translateY(8px);
 }
 .count {
-  font-variant-numeric: tabular-nums;
+  font-variant-numeric: normal;
 }
 /* Numbers inside a stat value keep the big value styling (not `.stat span`). */
 .stat b span,
@@ -802,7 +802,7 @@ html[data-demo-off] .dbar{display:none}
 .legal th{color:var(--muted);font-weight:600;font-size:12px;text-transform:uppercase;letter-spacing:.04em}
 
 /* Character counter for long text inputs */
-.charcount{font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}
+.charcount{font-size:12px;color:var(--muted);font-variant-numeric:normal}
 .charcount.over{color:var(--bad);font-weight:700}
 
 /* ===================================================================
@@ -824,7 +824,7 @@ html[data-demo-off] .dbar{display:none}
 .feed{list-style:none;margin:0;padding:0;font-size:13px}
 .feed li{display:grid;grid-template-columns:52px minmax(0,1fr);gap:10px;padding:7px 0;border-top:1px solid var(--line)}
 .feed li:first-child{border-top:0}
-.feed time{color:var(--muted);font-size:11.5px;font-variant-numeric:tabular-nums;padding-top:1px}
+.feed time{color:var(--muted);font-size:11.5px;font-variant-numeric:normal;padding-top:1px}
 .feed .who{font-weight:600;margin-right:6px}
 .feed .t-EXCEPTION_CREATED,.feed .t-STEP_FAILED,.feed .t-EXECUTION_FAILED{color:var(--bad)}
 .feed .t-APPROVAL_REQUESTED{color:var(--warn)}
@@ -836,7 +836,7 @@ html[data-demo-off] .dbar{display:none}
 .attn dt{color:var(--muted);font-weight:600}
 .attn dd{margin:0;white-space:pre-wrap}
 
-.score{display:inline-flex;align-items:baseline;gap:4px;font-variant-numeric:tabular-nums}
+.score{display:inline-flex;align-items:baseline;gap:4px;font-variant-numeric:normal}
 .score b{font-size:30px;font-weight:650;letter-spacing:-.02em}
 .claims{list-style:none;margin:0;padding:0}
 .claims li{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;padding:9px 0;border-top:1px solid var(--line);font-size:13px}

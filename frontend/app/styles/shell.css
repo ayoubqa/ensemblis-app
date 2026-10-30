@@ -189,7 +189,7 @@
   font-size: 11.5px;
   font-weight: 750;
   line-height: 1;
-  font-variant-numeric: tabular-nums;
+  font-variant-numeric: normal;
   color: var(--ens-ink);
 }
 .sh-attn.warn .sh-count {
@@ -245,7 +245,7 @@
 }
 .sh-bal-amt {
   color: var(--ink-strong);
-  font-variant-numeric: tabular-nums;
+  font-variant-numeric: normal;
   letter-spacing: -0.01em;
 }
 .sh-bal:hover {
@@ -388,7 +388,7 @@
   font-weight: 700;
   letter-spacing: -0.02em;
   color: var(--ink-strong);
-  font-variant-numeric: tabular-nums;
+  font-variant-numeric: normal;
 }
 .sh-acct-go {
   display: inline-flex;
@@ -736,7 +736,7 @@
   line-height: 1;
   color: var(--ens-ink);
   box-shadow: 0 0 0 2px var(--ens-ink);
-  font-variant-numeric: tabular-nums;
+  font-variant-numeric: normal;
 }
 .sh-tab-badge.warn {
   background: var(--warn);
@@ -1654,7 +1654,7 @@ h1.sh-empty-t {
   background: var(--surface);
   font-size: 10.5px;
   font-weight: 700;
-  font-variant-numeric: tabular-nums;
+  font-variant-numeric: normal;
   color: var(--muted);
 }
 .sh-flow .sh-flow-dot .i {

@@ -1,0 +1,1175 @@
+/* =====================================================================
+   The working paper — docs/design/direction.md.
+   ---------------------------------------------------------------------
+   Loaded last, so it also retires the template chrome the earlier site
+   carried everywhere (tracked monospace eyebrows, glows, the dot grid)
+   without touching each page's markup. Prefix for new parts: wp-.
+   - Type: Schibsted Grotesk for headlines and interface; Newsreader for
+     the document voice (objectives, briefs, articles).
+   - Colour: Paper documents on Mist, the desk in Ink. Ribbon blue for
+     links, the primary action and citation numbers. Highlighter only
+     behind verified text.
+   - Motion: one moment, the brief filling in on load.
+   ===================================================================== */
+
+/* ---------------------------------------------------------------- base */
+body {
+  font-size: 16px;
+  font-feature-settings: "kern", "liga";
+}
+h1,
+h2,
+h3 {
+  font-family: var(--display);
+  text-wrap: balance;
+}
+p {
+  text-wrap: pretty;
+}
+.wm {
+  font-family: var(--wordmark);
+}
+a:focus-visible,
+summary:focus-visible,
+button:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* Buttons: a flat fill and a clear edge, no glow. */
+.btn {
+  border-radius: 8px;
+}
+.btn.lg {
+  border-radius: 9px;
+  font-size: 16px;
+  padding: 12px 22px;
+}
+.btn.p,
+.btn.p:hover {
+  box-shadow: none;
+}
+.btn.p:hover {
+  background: var(--ens-blue);
+  border-color: var(--ens-blue);
+}
+
+/* Section labels everywhere: sentence case in the interface face, not tracked monospace capitals. */
+.st-kicker {
+  font-family: var(--sans);
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--muted);
+  gap: 0;
+}
+.st-kicker .st-node,
+.st-node {
+  display: none;
+}
+.ed-hub-head {
+  background-image: none;
+}
+
+/* ---------------------------------------------------------------- footer */
+.sh-ft-h {
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--ink-strong);
+}
+.sh-ft-cols a {
+  font-size: 15px;
+}
+/* A page that closes on a full-width band meets the footer directly. */
+body:has(.wp-final, .st-final, .mk-final) footer.ft.sh-ft {
+  margin-top: 0;
+}
+
+/* ---------------------------------------------------------------- header */
+.sh-top {
+  background: var(--ens-ink);
+  border-bottom-color: #18263f;
+}
+.sh-top::after {
+  display: none;
+}
+.sh-links a {
+  font-size: 15px;
+  font-weight: 550;
+}
+.sh-links a.on::after {
+  box-shadow: none;
+}
+.sh-menu-btn {
+  display: none;
+}
+@media (max-width: 859px) {
+  .sh-menu-btn {
+    display: inline-grid;
+  }
+  /* Phones: Log in lives in the Menu sheet; Get started stays in the bar. */
+  .sh-login {
+    display: none;
+  }
+}
+@media (max-width: 380px) {
+  .sh-start {
+    display: none;
+  }
+}
+/* Only signed-in phones have the bottom bar, so only they reserve space for it. */
+@media (max-width: 859px) {
+  body {
+    padding-bottom: 0;
+  }
+  body:has(.sh-bottom) {
+    padding-bottom: calc(
+      var(--sh-bottom-h) + 8px + env(safe-area-inset-bottom, 0px)
+    );
+  }
+}
+
+/* Signed-out menu sheet */
+.sh-site-links {
+  list-style: none;
+  margin: 4px 0 20px;
+  padding: 0;
+}
+.sh-site-links a {
+  display: block;
+  padding: 13px 2px;
+  border-bottom: 1px solid var(--line);
+  font-size: 20px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  color: var(--ink-strong);
+}
+.sh-site-links a[aria-current="page"] {
+  color: var(--accent);
+}
+.sh-site-acts {
+  display: grid;
+  gap: 10px;
+}
+.sh-site-acts .btn {
+  justify-content: center;
+}
+
+/* ---------------------------------------------------------------- shared section parts */
+.wp {
+  --wp-gap: clamp(72px, 9vw, 120px);
+}
+.wp-sec {
+  padding: var(--wp-gap) 0;
+  background: var(--bg);
+}
+.wp-sec-paper {
+  background: var(--surface);
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+.wp-head {
+  max-width: 720px;
+  margin-bottom: 48px;
+}
+.wp-head h2 {
+  margin: 0;
+  font-size: var(--fs-h2);
+  font-weight: 750;
+  line-height: 1.05;
+  letter-spacing: var(--tracking-heading);
+  color: var(--ink-strong);
+}
+.wp-lead {
+  margin: 18px 0 0;
+  max-width: 60ch;
+  font-size: var(--fs-lead);
+  line-height: 1.55;
+  color: var(--muted);
+}
+.wp-split {
+  display: grid;
+  grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
+  gap: clamp(32px, 6vw, 96px);
+  align-items: start;
+}
+.wp-split > .wp-head {
+  margin-bottom: 0;
+  position: sticky;
+  top: calc(var(--sh-header-h, 64px) + 32px);
+}
+.wp-more {
+  margin: 32px 0 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+.wp-more a,
+.wp-faq a {
+  color: var(--accent);
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 4px;
+}
+.wp-more a:hover {
+  text-decoration-thickness: 2px;
+}
+.wp-note {
+  margin: 16px 0 0;
+  font-size: 14px;
+  color: var(--subtle);
+}
+.wp-ctas {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 32px;
+}
+.wp-quiet {
+  background: transparent;
+  border-color: color-mix(in srgb, var(--ink) 30%, transparent);
+  color: var(--ink-strong);
+}
+.wp-quiet:hover {
+  background: color-mix(in srgb, var(--ink) 8%, transparent);
+  border-color: color-mix(in srgb, var(--ink) 50%, transparent);
+}
+
+/* ---------------------------------------------------------------- hero: the desk and the brief */
+.wp-hero {
+  position: relative;
+  z-index: 1;
+  padding: clamp(56px, 8vw, 104px) 0 0;
+  background: var(--ens-ink);
+}
+.wp-hero-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 6fr) minmax(0, 5fr);
+  gap: clamp(32px, 5vw, 72px);
+  align-items: start;
+}
+.wp-hero-copy {
+  padding-bottom: clamp(56px, 7vw, 96px);
+}
+.wp-hero h1 {
+  margin: 0;
+  max-width: 11ch;
+  font-size: var(--fs-display);
+  font-weight: 800;
+  line-height: 0.98;
+  letter-spacing: var(--tracking-display);
+  color: var(--ens-white);
+}
+.wp-sub {
+  margin: 28px 0 0;
+  max-width: 54ch;
+  font-size: var(--fs-lead);
+  line-height: 1.55;
+  color: #c9d2e3;
+}
+.wp-hero .st-cta-note {
+  margin: 20px 0 0;
+  min-height: 1.5em;
+  font-size: 15px;
+  color: #a3b1c2;
+}
+.wp-hero .st-textlink {
+  color: var(--ens-blue-night);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+/* The sheet hangs off the desk into the page below: the one bold move. */
+.wp-sheet {
+  margin: 0 0 calc(-1 * clamp(96px, 12vw, 160px));
+  transform: rotate(-0.6deg);
+  transform-origin: 30% 0;
+}
+.wp-paper {
+  position: relative;
+  padding: 28px 30px 24px;
+  border-radius: 3px;
+  background: var(--ens-paper);
+  color: var(--ens-graphite);
+  box-shadow:
+    0 1px 1px rgba(7, 17, 31, 0.3),
+    0 30px 60px -20px rgba(0, 0, 0, 0.55);
+}
+.wp-paper-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 16px;
+  padding-bottom: 14px;
+  margin-bottom: 18px;
+  border-bottom: 2px solid var(--ens-graphite);
+}
+.wp-paper-name {
+  font-size: 20px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  color: var(--ens-ink);
+}
+.wp-paper-state {
+  font-size: 14px;
+  font-weight: 650;
+  color: var(--warn);
+}
+.wp-paper-k {
+  margin: 18px 0 6px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--ens-pencil);
+}
+.wp-paper-k:first-of-type {
+  margin-top: 0;
+}
+.wp-paper-obj {
+  margin: 0;
+  font-family: var(--doc);
+  font-size: 19px;
+  line-height: 1.4;
+  color: var(--ens-ink);
+}
+.wp-crit {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.wp-crit li {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: baseline;
+  padding: 7px 0;
+  border-bottom: 1px solid #e6e9ef;
+  font-size: 15px;
+}
+.wp-crit-mark {
+  position: relative;
+  top: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid var(--ok);
+  background: var(--ok);
+}
+.wp-crit li[data-state="partial"] .wp-crit-mark {
+  border-color: var(--warn);
+  background: linear-gradient(90deg, var(--warn) 50%, transparent 50%);
+}
+.wp-crit-state {
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--ok);
+  white-space: nowrap;
+}
+.wp-crit li[data-state="partial"] .wp-crit-state {
+  color: var(--warn);
+}
+.wp-find p {
+  margin: 0 0 8px;
+  font-family: var(--doc);
+  font-size: 17px;
+  line-height: 1.55;
+  color: var(--ens-ink);
+}
+.wp-find mark {
+  padding: 0 2px;
+  color: inherit;
+  background: linear-gradient(var(--ens-highlighter), var(--ens-highlighter))
+    no-repeat 0 0 / 100% 100%;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+}
+.wp-ref {
+  margin-left: 2px;
+  font-family: var(--sans);
+  font-size: 12px;
+  font-weight: 750;
+  color: var(--ens-blue-text);
+}
+.wp-ref::before {
+  content: "[";
+}
+.wp-ref::after {
+  content: "]";
+}
+.wp-limit {
+  margin: 12px 0 0;
+  padding: 10px 12px;
+  border-left: 3px solid var(--warn);
+  background: var(--warn-soft);
+  font-size: 14.5px;
+  line-height: 1.5;
+}
+.wp-sources {
+  margin: 16px 0 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: src;
+  font-size: 13.5px;
+  color: var(--ens-pencil);
+}
+.wp-sources li {
+  counter-increment: src;
+}
+.wp-sources li::before {
+  content: "[" counter(src) "] ";
+  font-weight: 750;
+  color: var(--ens-blue-text);
+}
+.wp-ledger {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 4px 16px;
+  margin: 18px 0 0;
+  padding-top: 12px;
+  border-top: 1px dashed #c9d0db;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--ens-graphite);
+}
+.wp-sheet-cap {
+  margin: 14px 0 0;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--ens-pencil);
+}
+
+/* The one orchestrated moment: criteria measured, the verified sentence highlighted, the ledger line written. */
+@media (prefers-reduced-motion: no-preference) {
+  .wp-crit li {
+    animation: wp-in 0.42s var(--ease) both;
+    animation-delay: calc(0.45s + var(--i) * 0.22s);
+  }
+  .wp-find mark {
+    animation: wp-hl 0.7s var(--ease) 1.25s both;
+  }
+  .wp-ledger {
+    animation: wp-in 0.5s var(--ease) 1.85s both;
+  }
+}
+@keyframes wp-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes wp-hl {
+  from {
+    background-size: 0% 100%;
+  }
+  to {
+    background-size: 100% 100%;
+  }
+}
+
+/* The section under the hero makes room for the hanging sheet. */
+.wp-sec-first {
+  padding-top: calc(var(--wp-gap) + clamp(56px, 8vw, 120px));
+}
+
+/* ---------------------------------------------------------------- how: the six steps */
+.wp-steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  border-top: 2px solid var(--ink-strong);
+}
+.wp-steps li {
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr);
+  gap: 4px 12px;
+  padding: 22px 28px 30px 0;
+  border-bottom: 1px solid var(--line2);
+}
+.wp-step-n {
+  font-size: 28px;
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: -0.03em;
+  color: var(--line2);
+}
+.wp-steps li.you .wp-step-n {
+  color: var(--accent);
+}
+.wp-steps h3 {
+  margin: 2px 0 8px;
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 1.2;
+  letter-spacing: -0.012em;
+  color: var(--ink-strong);
+}
+.wp-steps p {
+  margin: 0;
+  font-size: 15.5px;
+  line-height: 1.55;
+  color: var(--muted);
+}
+.wp-you {
+  display: block;
+  width: max-content;
+  margin-top: 6px;
+  padding: 1px 8px;
+  border-radius: 4px;
+  background: var(--accent-soft);
+  font-size: 13px;
+  font-weight: 650;
+  letter-spacing: 0;
+  color: var(--accent);
+}
+.wp-shots {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 24px;
+  margin-top: 56px;
+}
+.wp-shots figure {
+  margin: 0;
+}
+.wp-shot-frame {
+  overflow: hidden;
+  border: 1px solid var(--line2);
+  border-radius: 8px;
+  background: var(--surface);
+}
+.wp-shot-frame img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+.wp-shots figcaption {
+  margin-top: 10px;
+  font-size: 15px;
+  color: var(--muted);
+}
+
+/* ---------------------------------------------------------------- output: parts of a brief */
+.wp-parts {
+  margin: 0;
+  border-top: 2px solid var(--ink-strong);
+}
+.wp-parts > div {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
+  gap: 8px 32px;
+  padding: 20px 0;
+  border-bottom: 1px solid var(--line2);
+}
+.wp-parts dt {
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--ink-strong);
+}
+.wp-parts dd {
+  margin: 0;
+  font-size: 16px;
+  line-height: 1.55;
+  color: var(--muted);
+}
+
+/* ---------------------------------------------------------------- use cases: an editorial list */
+.wp-uses {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border-top: 2px solid var(--ink-strong);
+}
+.wp-uses li {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 5fr) minmax(0, 4fr);
+  gap: 12px 40px;
+  padding: 28px 0;
+  border-bottom: 1px solid var(--line2);
+}
+.wp-uses-team {
+  margin: 4px 0 0;
+  font-size: 15px;
+  font-weight: 650;
+  color: var(--muted);
+}
+.wp-uses h3 {
+  margin: 0 0 8px;
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1.2;
+  letter-spacing: -0.015em;
+}
+.wp-uses h3 a {
+  color: var(--ink-strong);
+  text-decoration: underline;
+  text-decoration-color: transparent;
+  text-underline-offset: 4px;
+  transition: text-decoration-color var(--dur) var(--ease);
+}
+.wp-uses h3 a:hover {
+  text-decoration-color: var(--accent);
+}
+.wp-uses-main p {
+  margin: 0;
+  font-size: 16px;
+  line-height: 1.55;
+  color: var(--muted);
+}
+.wp-uses-ex {
+  margin: 0;
+  padding: 2px 0 2px 18px;
+  border-left: 2px solid var(--accent);
+}
+.wp-uses-ex p {
+  margin: 0;
+  font-family: var(--doc);
+  font-size: 18px;
+  line-height: 1.45;
+  color: var(--ink-strong);
+}
+.wp-uses-ex footer {
+  margin-top: 8px;
+  font-size: 13.5px;
+  color: var(--subtle);
+}
+
+/* ---------------------------------------------------------------- fit */
+.wp-fit {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 24px;
+}
+.wp-fit > div {
+  padding: 28px 30px 30px;
+  border-radius: 10px;
+  border: 1px solid var(--line2);
+  background: var(--bg);
+}
+.wp-fit > div:first-child {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--line2));
+  background: var(--surface);
+}
+.wp-fit h3 {
+  margin: 0 0 14px;
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--ink-strong);
+}
+.wp-fit ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.wp-fit li {
+  position: relative;
+  padding: 10px 0 10px 22px;
+  border-top: 1px solid var(--line);
+  font-size: 16px;
+  line-height: 1.5;
+  color: var(--ink);
+}
+.wp-fit li::before {
+  content: "";
+  position: absolute;
+  left: 2px;
+  top: 19px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--line2);
+}
+.wp-fit > div:first-child li::before {
+  background: var(--accent);
+}
+
+/* ---------------------------------------------------------------- pricing and access */
+.wp-access {
+  padding: 28px 30px;
+  border-radius: 10px;
+  border: 1px solid var(--line2);
+  background: var(--surface);
+}
+.wp-access h3 {
+  margin: 0 0 6px;
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--ink-strong);
+}
+.wp-access .st-beta {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.wp-access .st-beta li::before {
+  display: none;
+}
+.wp-access .st-beta li {
+  padding: 12px 0;
+  border-bottom: 1px solid var(--line);
+  font-size: 16px;
+  line-height: 1.5;
+  color: var(--ink);
+}
+.wp-access .wp-more {
+  margin-top: 20px;
+}
+
+/* ---------------------------------------------------------------- questions */
+.wp-faq {
+  border-top: 2px solid var(--ink-strong);
+}
+.wp-faq details {
+  border-bottom: 1px solid var(--line2);
+}
+.wp-faq summary {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 20px;
+  padding: 18px 0;
+  cursor: pointer;
+  list-style: none;
+}
+.wp-faq summary::-webkit-details-marker {
+  display: none;
+}
+.wp-faq summary::after {
+  content: "";
+  flex: none;
+  width: 10px;
+  height: 10px;
+  margin-right: 4px;
+  border-right: 2px solid var(--muted);
+  border-bottom: 2px solid var(--muted);
+  transform: translateY(-3px) rotate(45deg);
+  transition: transform var(--dur) var(--ease);
+}
+.wp-faq details[open] summary::after {
+  transform: translateY(2px) rotate(-135deg);
+}
+.wp-faq h3 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 650;
+  line-height: 1.35;
+  color: var(--ink-strong);
+}
+.wp-faq details p {
+  margin: 0 0 22px;
+  max-width: 64ch;
+  font-size: 16px;
+  line-height: 1.6;
+  color: var(--muted);
+}
+
+/* ---------------------------------------------------------------- final call to action */
+.wp-final {
+  padding: clamp(72px, 9vw, 112px) 0;
+  background: var(--ens-ink);
+}
+.wp-final h2 {
+  margin: 0;
+  max-width: 18ch;
+  font-size: var(--fs-h1);
+  font-weight: 800;
+  line-height: 1.02;
+  letter-spacing: var(--tracking-display);
+  color: var(--ens-white);
+}
+.wp-final p {
+  margin: 20px 0 0;
+  max-width: 52ch;
+  font-size: var(--fs-lead);
+  line-height: 1.55;
+  color: #c9d2e3;
+}
+
+/* ---------------------------------------------------------------- responsive */
+@media (max-width: 1060px) {
+  .wp-steps {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .wp-uses li {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+  .wp-uses-team {
+    grid-column: 1 / -1;
+  }
+}
+@media (max-width: 860px) {
+  .wp-hero-grid,
+  .wp-split,
+  .wp-fit,
+  .wp-shots {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .wp-split > .wp-head {
+    position: static;
+    margin-bottom: 32px;
+  }
+  .wp-hero-copy {
+    padding-bottom: 8px;
+  }
+  .wp-sheet {
+    transform: none;
+  }
+  .wp-parts > div {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+@media (max-width: 640px) {
+  .wp-steps {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .wp-steps li {
+    padding-right: 0;
+  }
+  .wp-uses li {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 10px;
+  }
+  .wp-paper {
+    padding: 22px 18px 18px;
+  }
+  .wp-crit li {
+    grid-template-columns: 18px minmax(0, 1fr);
+  }
+  .wp-crit-state {
+    grid-column: 2;
+  }
+  .wp-fit > div,
+  .wp-access {
+    padding: 22px 20px;
+  }
+  .wp-ctas .btn {
+    flex: 1 1 100%;
+    justify-content: center;
+  }
+}
+
+/* ---------------------------------------------------------------- blog: light reading pages */
+.ed-hub-head,
+.ed-cat-head,
+.ed-art-head {
+  background-image: none;
+  background-color: var(--surface);
+}
+.ed-art-plate {
+  display: none;
+}
+.ed-hub-title,
+.ed-art-title {
+  font-family: var(--display);
+  font-weight: 780;
+  letter-spacing: var(--tracking-heading);
+  line-height: 1.04;
+}
+.ed-sec-h {
+  font-family: var(--sans);
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--ink-strong);
+}
+.ed-sec-h::after {
+  display: none;
+}
+.bl-head {
+  padding: clamp(40px, 6vw, 72px) 0 clamp(40px, 5vw, 64px);
+  border-bottom: 1px solid var(--line);
+}
+.bl-title {
+  margin: 18px 0 0;
+  max-width: 20ch;
+  font-size: var(--fs-h1);
+  font-weight: 800;
+  line-height: 1.02;
+  letter-spacing: var(--tracking-display);
+  color: var(--ink-strong);
+}
+.bl-lead {
+  margin: 22px 0 0;
+  max-width: 60ch;
+  font-size: var(--fs-lead);
+  line-height: 1.55;
+  color: var(--muted);
+}
+.bl-body {
+  padding-top: clamp(40px, 6vw, 72px);
+}
+.bl-empty {
+  max-width: 760px;
+  padding: 28px 30px;
+  border: 1px solid var(--line2);
+  border-left: 4px solid var(--accent);
+  border-radius: 8px;
+  background: var(--surface);
+}
+.bl-empty h2 {
+  margin: 0 0 10px;
+  font-size: 24px;
+  font-weight: 750;
+  letter-spacing: -0.015em;
+  color: var(--ink-strong);
+}
+.bl-empty p {
+  margin: 0;
+  font-size: 17px;
+  line-height: 1.6;
+  color: var(--muted);
+}
+.bl-empty a,
+.bl-note a {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.bl-topics ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  border-top: 2px solid var(--ink-strong);
+}
+.bl-topics li {
+  padding: 20px 28px 24px 0;
+  border-bottom: 1px solid var(--line2);
+}
+.bl-topics h3 {
+  margin: 0 0 6px;
+  font-size: 19px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--ink-strong);
+}
+.bl-topics h3 a {
+  color: var(--accent);
+}
+.bl-topics p {
+  margin: 0;
+  font-size: 15.5px;
+  line-height: 1.55;
+  color: var(--muted);
+}
+.bl-topics .bl-count {
+  margin-top: 10px;
+  font-size: 14px;
+  color: var(--subtle);
+}
+.bl-foot {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 24px;
+}
+.ed-hub > .bl-foot {
+  margin-top: 64px;
+}
+.bl-note {
+  padding: 26px 28px;
+  border: 1px solid var(--line2);
+  border-radius: 8px;
+  background: var(--surface);
+}
+.bl-note h2 {
+  margin: 0 0 8px;
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--ink-strong);
+}
+.bl-note p {
+  margin: 0;
+  font-size: 16px;
+  line-height: 1.6;
+  color: var(--ink);
+}
+.bl-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 22px;
+  margin-top: 14px !important;
+  font-weight: 600;
+}
+.bl-links a {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+@media (max-width: 860px) {
+  .bl-topics ul,
+  .bl-foot {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .bl-topics li {
+    padding-right: 0;
+  }
+}
+.bl-head {
+  background: var(--surface);
+}
+
+/* ---------------------------------------------------------------- retiring the earlier chrome, site-wide */
+/* Display type: one family. The serif is kept only for the document voice (objectives, briefs, article bodies). */
+:root {
+  --serif-display: var(--display);
+  --st-dots: none;
+}
+.ed-hub-title,
+.ed-item-title,
+.ed-art-title,
+.ed-prose h2,
+.ed-cta h2,
+.st-page-head h1,
+.st-head h2,
+.st-final h2,
+.st-access-card h2,
+.st-est-total b,
+.mk-doc-hero h1,
+.mk-final h2 {
+  font-weight: 760;
+  letter-spacing: var(--tracking-heading);
+}
+.st-page-head h1,
+.mk-doc-hero h1 {
+  letter-spacing: var(--tracking-display);
+  line-height: 1.02;
+}
+.ed-prose,
+.ed-art-dek,
+.st-uc-ex > li > p {
+  font-family: var(--doc);
+}
+
+/* Labels: sentence case in the interface face, never tracked capitals or monospace. (The wordmark keeps its
+   capitals: it is set that way on the official reference sheet.) */
+.legal th,
+.palette .pgrp,
+.sh,
+.au-dtable td[data-label]::before,
+.au-dtable th,
+.au-k,
+.eyebrow,
+th,
+.mk-band-tag,
+.mk-evl-sources small,
+.mk-k,
+.mk-life-status,
+.ed-cat,
+.ed-cta-eyebrow,
+.ed-layer,
+.ed-prose .footnotes h2,
+.ed-prose aside.callout::before,
+.ed-provenance h2,
+.ed-share-h,
+.ed-table th,
+.ed-toc-h,
+.st-est-teams legend,
+.st-lg-k,
+.st-mini-h,
+.st-uc-deliv span {
+  font-family: var(--sans);
+  font-size: 13.5px;
+  font-weight: 650;
+  letter-spacing: 0;
+  text-transform: none;
+}
+/* Numbers and citation markers: the interface face, not a code font. (Its tabular figures widen the comma, so default figures are used.) */
+.mk-chore,
+.mk-cite,
+.ed-prose [data-footnote-ref],
+.ed-sources li::marker,
+.st-after li::before,
+.st-est-c,
+.st-est-lines li span:last-child,
+.st-lg-cost,
+.st-lg-ev,
+.st-lg-n,
+.st-pricelist th.num,
+.st-uc-cap span {
+  font-family: var(--sans);
+  font-variant-numeric: normal;
+  letter-spacing: 0;
+}
+
+/* Flat desks: no dot grids, glows or graph paper behind the page heads. */
+.st-page-head,
+.st-final,
+.ed-hub-head {
+  background-image: none;
+}
+.mk-hero-bg {
+  display: none;
+}
+.st-page-head.dk,
+.mk-doc-hero.dk,
+.st-final.dk,
+.mk-final.dk {
+  background-color: var(--ens-ink);
+}
+/* A button says what it does; it doesn't need an arrow to say it goes somewhere. */
+.btn > [data-icon="arrow"] {
+  display: none;
+}
+/* A list of facts is not a timeline: no nodes on the rule. */
+ul.st-steps li::before {
+  display: none;
+}
+ul.st-steps {
+  list-style: none;
+  padding: 0;
+}
+
+/* ---------------------------------------------------------------- the product: same labels, same voice */
+.cs .cs-now-k,
+.cs .cs-panel-h h2,
+.cs .cs-sc-h h3,
+.cs-attn-h,
+.cs-crumb-here,
+.cs-dc-kind,
+.cs-dc-rec-k,
+.cs-facts dt,
+.cs-issues-g h4,
+.cs-kicker,
+.cs-life-now-k,
+.cs-live-h,
+.cs-obj-kind dt,
+.cs-plan-facts dt,
+.cs-rv-tochead,
+.cs-use-sum dt,
+.op-label,
+.sh-404-code,
+.sh-404-links h2,
+.sh-acct-k,
+.sh-demo-tag,
+.sh-keys-group h4,
+.sh-more-h,
+.ws-facts dt,
+.ws-fresh-loop h3,
+.ws-next h2,
+.ws-ol-group,
+.ws-ol-head,
+.ws-side-h {
+  font-family: var(--sans);
+  font-size: 13.5px;
+  font-weight: 650;
+  letter-spacing: 0;
+  text-transform: none;
+}
+.cs-tl-model > span:first-child,
+.cs-use-k span,
+.op-kind,
+.op-ver {
+  font-family: var(--sans);
+  font-variant-numeric: normal;
+  letter-spacing: 0;
+}

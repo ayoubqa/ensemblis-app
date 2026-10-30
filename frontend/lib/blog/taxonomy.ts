@@ -61,7 +61,7 @@ export const CATEGORIES: readonly Category[] = [
 export const categoryByKey = (key: string): Category | undefined => CATEGORIES.find((c) => c.key === key);
 
 /**
- * Editorial layers: why an article exists. Most of the Journal is written for readers who may never buy
+ * Editorial layers: why an article exists. Most of the blog is written for readers who may never buy
  * anything — that is the point of a publication.
  * - discovery: broad ideas and analysis; no product call to action unless the editor sets one.
  * - problem: practical help with a problem our readers have; a soft, relevant next step.

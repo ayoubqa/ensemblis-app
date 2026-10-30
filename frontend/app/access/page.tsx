@@ -19,10 +19,6 @@ export default function AccessPage() {
         {/* Intro, then the action, then the details: on a phone the request form comes before the fine print. */}
         <div className="wrap st-page-head-grid st-access-grid">
           <div className="st-access-intro">
-            <p className="st-kicker">
-              <span className="st-node" aria-hidden="true" />
-              Get access
-            </p>
             <h1 id="ac-h1">Start with a real question.</h1>
             <p className="st-sub">
               Ensemblis is in a private beta. Bring a business question you would otherwise research by hand: you&apos;ll see the plan and its cost

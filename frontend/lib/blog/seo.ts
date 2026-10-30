@@ -7,8 +7,8 @@ import type { Post } from "./validate";
 
 export const BLOG = {
   path: "/blog",
-  name: "Ensemblis Journal",
-  title: "Ensemblis Journal — practical, sourced writing on AI, strategy and growth",
+  name: "Ensemblis Blog",
+  title: "Ensemblis Blog: sourced writing on AI, strategy and growth",
   description:
     "Sourced, practical writing for people who run businesses: AI and agents at work, strategy, marketing and growth, search and AI discovery, sales and operations.",
   feedPath: "/blog/feed.xml",
