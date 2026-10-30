@@ -68,7 +68,7 @@ const idOf = (x: string | { id: string } | null | undefined) => (typeof x === "s
 
 type AnySub = Stripe.Subscription & { items: { data: (Stripe.SubscriptionItem & { current_period_start?: number; current_period_end?: number })[] } };
 type AnyInvoice = Stripe.Invoice & { parent?: { subscription_details?: { subscription?: string | { id: string } } } };
-type AnyLine = Stripe.InvoiceLineItem & { pricing?: { price_details?: { price?: string } } };
+type AnyLine = Stripe.InvoiceLineItem & { pricing?: { price_details?: { price?: string } }; parent?: { subscription_item_details?: { proration?: boolean } } };
 
 function subPeriod(s: AnySub): { start: Date | null; end: Date | null } {
   const item = s.items?.data?.[0];
@@ -82,6 +82,9 @@ function invoiceSubscriptionId(inv: AnyInvoice): string | null {
 }
 function linePriceId(l: AnyLine): string | null {
   return l.price?.id ?? l.pricing?.price_details?.price ?? null;
+}
+function isProration(l: AnyLine): boolean {
+  return l.proration ?? l.parent?.subscription_item_details?.proration ?? false;
 }
 
 // ------------------------------------------------------------------ checkout
@@ -317,7 +320,7 @@ export async function applyPaidInvoice(rowId: string, inv: AnyInvoice): Promise<
     if (await tx.transaction.findUnique({ where: { idempotencyKey: key }, select: { id: true } })) return "already";
 
     if (reason === "subscription_create" || reason === "subscription_cycle") {
-      const line = lines.find((l) => !l.proration && planByPriceId(linePriceId(l))) ?? lines.find((l) => planByPriceId(linePriceId(l)));
+      const line = lines.find((l) => !isProration(l) && planByPriceId(linePriceId(l))) ?? lines.find((l) => planByPriceId(linePriceId(l)));
       const plan = line ? planByPriceId(linePriceId(line)) : null;
       if (!line || !plan) {
         log.error("subscription.invoice_unknown_price", { subscriptionId: rowId, invoiceId: inv.id });
