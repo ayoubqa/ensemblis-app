@@ -943,16 +943,16 @@ export interface AdminEconomics {
 
 /** GET /api/auth/operator-check (temporary): why the signed-in account is or isn't an operator. */
 export interface OperatorCheck {
-  account: { email: string; emailVerified: boolean; isGuest: boolean; isAdmin: boolean };
-  deployment: { release: string | null; service: string | null; host: string | null; startedAt: string };
+  account: { email: string; emailVerified: boolean; isAdmin: boolean };
+  deployment: { release: string | null; expectedService: boolean | null; startedAt: string };
   adminEmails: {
     adminEmailsDefined: boolean;
     entryCount: number;
-    entries: { masked: string; length: number; looksLikeEmail: boolean; hasQuotes: boolean; unusualCharacters: string[] }[];
+    entries: { masked: string; looksLikeEmail: boolean; hasQuotes: boolean; unusualCharacters: string[] }[];
     yourEmailMatches: boolean;
     yourEmailMatchesAfterCleanup: boolean;
     differsFromBootValue: boolean;
-    similarKeys: string[];
+    nearMissKeys: string[];
   };
 }
 

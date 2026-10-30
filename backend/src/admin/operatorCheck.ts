@@ -2,9 +2,9 @@
 // Remove once production operator access is confirmed.
 //
 // Reports only facts about the caller's own account and the SHAPE of ADMIN_EMAILS — never the raw value, never
-// another environment variable's value, never another user's data. Entries are masked ("a***n@g***s.com") and
+// another environment variable's value, never another user's data. Entries are masked ("a***@***.com") and
 // described by flags (quotes, invisible or non-ASCII characters) so a mistyped or pasted value can be found
-// without printing it.
+// without printing it. The caller's address is the only one ever compared: there is no email parameter.
 
 import { parseAdminEmails } from "../config";
 
@@ -16,21 +16,19 @@ const QUOTES = /["'‘’“”`]/;
 /** A plain ASCII address: what the sign-up form stores. */
 const PLAIN_EMAIL = /^[a-z0-9._%+-]+@[a-z0-9-]+(\.[a-z0-9-]+)+$/;
 
-const maskPart = (s: string) => (s.length <= 2 ? "*".repeat(s.length) : `${s[0]}***${s[s.length - 1]}`);
-
-/** "admin@getensemblis.com" → "a***n@g***s.com": enough to recognise your own entry, not to read anyone's. */
+/** "admin@getensemblis.com" → "a***@***.com": the first character and the top-level domain only. */
 export function maskEmail(entry: string): string {
   const at = entry.lastIndexOf("@");
-  if (at < 0) return maskPart(entry);
-  const [first, ...rest] = entry.slice(at + 1).split(".");
-  return `${maskPart(entry.slice(0, at))}@${[maskPart(first), ...rest].join(".")}`;
+  const first = entry ? [...entry][0] : "";
+  if (at < 0) return `${first}***`;
+  const dot = entry.lastIndexOf(".");
+  return `${first}***@***${dot > at ? entry.slice(dot) : ""}`;
 }
 
 const codePoint = (ch: string) => `U+${ch.codePointAt(0)!.toString(16).toUpperCase().padStart(4, "0")}`;
 
 export interface EntryReport {
   masked: string;
-  length: number;
   looksLikeEmail: boolean;
   hasQuotes: boolean;
   /** Code points of invisible or non-ASCII characters (e.g. "U+200B", "U+0430"), never the characters' context. */
@@ -47,13 +45,16 @@ export interface OperatorCheck {
   yourEmailMatchesAfterCleanup: boolean;
   /** process.env.ADMIN_EMAILS now differs from what was loaded at boot. */
   differsFromBootValue: boolean;
-  /** Environment variable NAMES (never values) that mention ADMIN, other than ADMIN_EMAILS itself: a misspelt key. */
-  similarKeys: string[];
+  /** Names (never values) of variables that are a misspelling of ADMIN_EMAILS — case, spaces, "_"/"-", singular. */
+  nearMissKeys: string[];
 }
+
+/** ADMIN_EMAIL, admin_emails, "ADMIN_EMAILS ", ADMIN-EMAILS…: a key that was meant to be ADMIN_EMAILS. */
+const NEAR_MISS_KEY = /^\s*admin[\s_-]*emails?\s*$/i;
 
 export function describeEntry(entry: string): EntryReport {
   const unusual = [...new Set([...entry].filter((ch) => INVISIBLE.test(ch) || ch.charCodeAt(0) > 0x7e || ch.charCodeAt(0) < 0x20).map(codePoint))];
-  return { masked: maskEmail(entry), length: [...entry].length, looksLikeEmail: PLAIN_EMAIL.test(entry), hasQuotes: QUOTES.test(entry), unusualCharacters: unusual };
+  return { masked: maskEmail(entry), looksLikeEmail: PLAIN_EMAIL.test(entry), hasQuotes: QUOTES.test(entry), unusualCharacters: unusual };
 }
 
 const cleanup = (s: string) => s.replace(INVISIBLE_ALL, "").replace(/["'‘’“”`]/g, "").trim().toLowerCase();
@@ -62,7 +63,7 @@ const cleanup = (s: string) => s.replace(INVISIBLE_ALL, "").replace(/["'‘’�
  * @param raw        process.env.ADMIN_EMAILS now
  * @param bootList   config.adminEmails (what the running process authorises with)
  * @param yourEmail  the signed-in account's stored address
- * @param envKeys    Object.keys(process.env) — names only
+ * @param envKeys    Object.keys(process.env) — names only, filtered to ADMIN_EMAILS misspellings
  */
 export function operatorCheck(raw: string | undefined, bootList: string[], yourEmail: string, envKeys: string[]): OperatorCheck {
   const entries = parseAdminEmails(raw);
@@ -74,6 +75,6 @@ export function operatorCheck(raw: string | undefined, bootList: string[], yourE
     yourEmailMatches: bootList.includes(mine),
     yourEmailMatchesAfterCleanup: entries.map(cleanup).includes(mine),
     differsFromBootValue: entries.join(",") !== bootList.join(","),
-    similarKeys: envKeys.filter((k) => k !== "ADMIN_EMAILS" && /admin/i.test(k)).map((k) => JSON.stringify(k)).sort(),
+    nearMissKeys: envKeys.filter((k) => k !== "ADMIN_EMAILS" && NEAR_MISS_KEY.test(k)).map((k) => JSON.stringify(k)).sort(),
   };
 }

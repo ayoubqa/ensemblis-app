@@ -104,9 +104,12 @@ describe("authentication & authorization", () => {
       const { auth } = await createUser({ email: "someone@example.org", verified: true });
       const r = await api().get("/api/auth/operator-check").set(auth).expect(200);
       expect(r.headers["cache-control"]).toBe("no-store");
-      expect(r.body.account).toMatchObject({ email: "someone@example.org", emailVerified: true, isAdmin: false });
+      expect(r.body.account).toEqual({ email: "someone@example.org", emailVerified: true, isAdmin: false });
+      expect(Object.keys(r.body).sort()).toEqual(["account", "adminEmails", "deployment"]);
+      expect(Object.keys(r.body.deployment).sort()).toEqual(["expectedService", "release", "startedAt"]);
+      expect(r.body.deployment.expectedService).toBeNull(); // not on Render in tests
       expect(r.body.adminEmails).toMatchObject({ adminEmailsDefined: true, entryCount: 1, yourEmailMatches: false, differsFromBootValue: false });
-      expect(r.body.adminEmails.entries).toEqual([{ masked: "o***r@e***e.com", length: 17, looksLikeEmail: true, hasQuotes: false, unusualCharacters: [] }]);
+      expect(r.body.adminEmails.entries).toEqual([{ masked: "o***@***.com", looksLikeEmail: true, hasQuotes: false, unusualCharacters: [] }]);
       // Never the operator's address, nor any environment value.
       const body = JSON.stringify(r.body);
       expect(body).not.toContain("owner@example.com");
@@ -123,10 +126,30 @@ describe("authentication & authorization", () => {
       await api().get("/api/admin/overview").set(auth).expect(200);
     });
 
+    it("only ever checks the caller: an email in the query or body is ignored", async () => {
+      const { auth } = await createUser({ email: "someone-else@example.org", verified: true });
+      const r = await api().get("/api/auth/operator-check?email=owner@example.com").set(auth).send({ email: "owner@example.com" }).expect(200);
+      expect(r.body.account.email).toBe("someone-else@example.org");
+      expect(r.body.adminEmails.yourEmailMatches).toBe(false);
+    });
+
+    it("is read-only: no other method is routed", async () => {
+      const { auth } = await createUser({ verified: true });
+      await api().post("/api/auth/operator-check").set(auth).expect(404);
+    });
+
     it("grants nothing: an ordinary user who calls it is still refused by /api/admin", async () => {
       const { auth } = await createUser({ verified: true });
       await api().get("/api/auth/operator-check").set(auth).expect(200);
       await api().get("/api/admin/overview").set(auth).expect(403);
+    });
+
+    // Last in this block: it spends the per-IP hourly allowance (20) shared with the tests above.
+    it("is rate limited server-side", async () => {
+      const { auth } = await createUser({ verified: true });
+      let status = 200;
+      for (let i = 0; i < 25 && status !== 429; i++) status = (await api().get("/api/auth/operator-check").set(auth)).status;
+      expect(status).toBe(429);
     });
   });
 

@@ -23,15 +23,16 @@ describe("ADMIN_EMAILS parsing (the live rule)", () => {
 
 describe("operator check", () => {
   it("masks entries so they are recognisable but not readable", () => {
-    expect(maskEmail(ME)).toBe("a***n@g***s.com");
-    expect(maskEmail("jo@ex.co.uk")).toBe("**@**.co.uk");
-    expect(maskEmail("no-at-sign")).toBe("n***n");
+    expect(maskEmail(ME)).toBe("a***@***.com");
+    expect(maskEmail("jo@ex.co.uk")).toBe("j***@***.uk");
+    expect(maskEmail("no-at-sign")).toBe("n***");
+    expect(maskEmail("")).toBe("***");
   });
 
   it("a clean match", () => {
     const r = operatorCheck(ME, [ME], ME, ["ADMIN_EMAILS", "PATH"]);
-    expect(r).toMatchObject({ adminEmailsDefined: true, entryCount: 1, yourEmailMatches: true, yourEmailMatchesAfterCleanup: true, differsFromBootValue: false, similarKeys: [] });
-    expect(r.entries).toEqual([{ masked: "a***n@g***s.com", length: 22, looksLikeEmail: true, hasQuotes: false, unusualCharacters: [] }]);
+    expect(r).toMatchObject({ adminEmailsDefined: true, entryCount: 1, yourEmailMatches: true, yourEmailMatchesAfterCleanup: true, differsFromBootValue: false, nearMissKeys: [] });
+    expect(r.entries).toEqual([{ masked: "a***@***.com", looksLikeEmail: true, hasQuotes: false, unusualCharacters: [] }]);
   });
 
   it("unset", () => {
@@ -65,9 +66,9 @@ describe("operator check", () => {
     expect(r).toMatchObject({ yourEmailMatches: false, differsFromBootValue: true });
   });
 
-  it("lists similar key NAMES only, escaped so stray spaces show", () => {
-    const r = operatorCheck(undefined, [], ME, ["ADMIN_EMAIL", "ADMIN_EMAILS ", "admin_emails", "ADMIN_EMAILS", "DATABASE_URL"]);
-    expect(r.similarKeys).toEqual(['"ADMIN_EMAIL"', '"ADMIN_EMAILS "', '"admin_emails"']);
+  it("lists only misspellings of ADMIN_EMAILS by name, escaped so stray spaces show", () => {
+    const keys = ["ADMIN_EMAIL", "ADMIN_EMAILS ", "admin_emails", "ADMIN-EMAILS", "ADMIN_EMAILS", "DATABASE_URL", "ADMIN_TOKEN", "STRIPE_ADMIN_KEY", "SUPERADMIN_EMAILS"];
+    expect(operatorCheck(undefined, [], ME, keys).nearMissKeys).toEqual(['"ADMIN-EMAILS"', '"ADMIN_EMAIL"', '"ADMIN_EMAILS "', '"admin_emails"']);
   });
 
   it("never returns the raw value anywhere", () => {
@@ -76,6 +77,7 @@ describe("operator check", () => {
     expect(json).not.toContain("secret.person");
     expect(json).not.toContain("private-domain");
     expect(json).not.toContain(ME);
+    expect(json).not.toContain("getensemblis");
   });
 
   it("describes an entry's characters by code point only", () => {

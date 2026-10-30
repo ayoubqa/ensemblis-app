@@ -54,8 +54,8 @@ export function AdminGate() {
 }
 
 /**
- * TEMPORARY: what the API itself sees for this account (GET /api/auth/operator-check) — which deployment
- * answered and the masked shape of its operator list. Remove with the endpoint.
+ * TEMPORARY: what the API itself sees for this account (GET /api/auth/operator-check) — whether the expected
+ * deployment answered and the masked shape of its operator list. Remove with the endpoint.
  */
 function OperatorDiagnostics() {
   const [check, setCheck] = useState<OperatorCheck | null>(null);
@@ -67,19 +67,19 @@ function OperatorDiagnostics() {
   if (!check) return <p className="tiny muted">Checking what the server sees…</p>;
   const { deployment: d, adminEmails: a } = check;
   const rows: [string, string][] = [
-    ["Server", [d.service, d.host].filter(Boolean).join(" · ") || "unknown"],
+    ["Expected API service", d.expectedService === null ? "not reported" : d.expectedService ? "yes" : "no"],
     ["Release", d.release ?? "not reported"],
     ["Started", d.startedAt],
     ["ADMIN_EMAILS defined", a.adminEmailsDefined ? "yes" : "no"],
     ["Entries", String(a.entryCount)],
     ...a.entries.map((e, i): [string, string] => [
       `Entry ${i + 1}`,
-      [e.masked, `${e.length} chars`, e.looksLikeEmail ? "plain address" : "not a plain address", e.hasQuotes ? "has quotes" : "", e.unusualCharacters.length ? `unusual: ${e.unusualCharacters.join(" ")}` : ""].filter(Boolean).join(" · "),
+      [e.masked, e.looksLikeEmail ? "plain address" : "not a plain address", e.hasQuotes ? "has quotes" : "", e.unusualCharacters.length ? `unusual: ${e.unusualCharacters.join(" ")}` : ""].filter(Boolean).join(" · "),
     ]),
     ["Your email matches", a.yourEmailMatches ? "yes" : "no"],
     ["Would match without quotes/invisible characters", a.yourEmailMatchesAfterCleanup ? "yes" : "no"],
     ["Changed since the server started", a.differsFromBootValue ? "yes" : "no"],
-    ["Similar variable names", a.similarKeys.length ? a.similarKeys.join(", ") : "none"],
+    ["Misspelt ADMIN_EMAILS names", a.nearMissKeys.length ? a.nearMissKeys.join(", ") : "none"],
   ];
   return (
     <dl className="tiny" data-testid="operator-diagnostics" style={{ textAlign: "left", marginTop: 12 }}>
