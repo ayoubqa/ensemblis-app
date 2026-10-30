@@ -1081,7 +1081,8 @@ export const api = {
   changePassword: (body: { currentPassword: string; newPassword: string }) => request<{ ok: true; token: string }>("/api/auth/password", { method: "POST", body: json(body) }),
   forgotPassword: (email: string) => request<{ ok: true }>("/api/auth/forgot", { method: "POST", body: json({ email }) }),
   resetPassword: (body: { token: string; password: string }) => request<{ token: string; user: User }>("/api/auth/reset", { method: "POST", body: json(body) }),
-  requestEmailVerification: () => request<{ ok: true; sent: boolean }>("/api/auth/verify-email/request", { method: "POST" }),
+  // Errors (429 too many links, 502 not sent) say why no email went out; alreadyVerified carries the fresh user.
+  requestEmailVerification: () => request<{ ok: true; sent: boolean; alreadyVerified?: true; user?: User }>("/api/auth/verify-email/request", { method: "POST" }),
   verifyEmail: (token: string) => request<{ ok: true; user: User }>("/api/auth/verify-email", { method: "POST", body: json({ token }) }),
   guestStart: (body: { acceptedTerms: true; turnstileToken?: string }) => request<{ token: string; user: User }>("/api/guest/start", { method: "POST", body: json(body) }),
   claimAccount: (body: { email: string; password: string; name: string; company?: string; acceptedTerms: true }) =>

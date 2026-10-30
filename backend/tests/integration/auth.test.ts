@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { config } from "../../src/config";
 import { prisma } from "../../src/db";
 import { consumeEmailVerification, consumePasswordReset, hashResetToken, hashVerifyToken } from "../../src/auth/routes";
 import { api, createUser } from "../helpers";
@@ -29,6 +30,65 @@ describe("authentication & authorization", () => {
     expect(ok.body.queue).toBeDefined();
     const other = await createUser({ verified: true });
     await api().get("/api/admin/overview").set(other.auth).expect(403);
+  });
+
+  describe("requesting a verification link says whether an email went out", () => {
+    const saved = { ...config.email };
+    let resendStatus = 200;
+    let mails: { to: string[] }[] = [];
+    beforeEach(() => {
+      config.email.resendApiKey = "re_test";
+      config.email.from = "Ensemblis <test@example.com>";
+      resendStatus = 200;
+      mails = [];
+      const realFetch = globalThis.fetch;
+      vi.spyOn(globalThis, "fetch").mockImplementation(async (url, init) => {
+        if (!String(url).startsWith("https://api.resend.com/")) return realFetch(url, init);
+        mails.push(JSON.parse(String(init?.body)));
+        return new Response(JSON.stringify(resendStatus === 200 ? { id: "e1" } : { name: "validation_error", message: "The example.com domain is not verified." }), { status: resendStatus });
+      });
+    });
+    afterEach(() => {
+      config.email.resendApiKey = saved.resendApiKey;
+      config.email.from = saved.from;
+      vi.restoreAllMocks();
+    });
+
+    it("sent: one email to the account's own address", async () => {
+      const { auth, user } = await createUser({ email: "owner@example.com" });
+      const r = await api().post("/api/auth/verify-email/request").set(auth).expect(200);
+      expect(r.body).toMatchObject({ ok: true, sent: true });
+      expect(mails.map((m) => m.to)).toEqual([[user.email]]);
+    });
+
+    it("a provider rejection is an error, not a silent success", async () => {
+      const { auth } = await createUser();
+      resendStatus = 403;
+      const r = await api().post("/api/auth/verify-email/request").set(auth).expect(502);
+      expect(r.body.error).toMatch(/couldn't be sent/);
+    });
+
+    it("more than three links an hour is refused with 429", async () => {
+      const { auth } = await createUser();
+      for (let i = 0; i < 3; i++) await api().post("/api/auth/verify-email/request").set(auth).expect(200);
+      await api().post("/api/auth/verify-email/request").set(auth).expect(429);
+      expect(mails).toHaveLength(3);
+    });
+
+    it("an already verified account gets no email and its current state back", async () => {
+      const { auth } = await createUser({ email: "owner@example.com", verified: true });
+      const r = await api().post("/api/auth/verify-email/request").set(auth).expect(200);
+      expect(r.body).toMatchObject({ ok: true, sent: false, alreadyVerified: true });
+      expect(r.body.user).toMatchObject({ emailVerified: true, isAdmin: true });
+      expect(mails).toHaveLength(0);
+    });
+
+    it("is still 503 when email is off, and still needs a session", async () => {
+      await api().post("/api/auth/verify-email/request").expect(401);
+      config.email.resendApiKey = "";
+      const { auth } = await createUser();
+      await api().post("/api/auth/verify-email/request").set(auth).expect(503);
+    });
   });
 
   it("email verification tokens are single-use", async () => {
