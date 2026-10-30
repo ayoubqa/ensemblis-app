@@ -662,6 +662,58 @@ export interface Billing {
   };
   transactions: Transaction[];
   nextCursor: string | null;
+  /** Of the balance: unused plan allowance (expires with its billing period) and everything else (never expires). */
+  credits?: { planCreditsCents: number; otherCreditsCents: number };
+  /** The wallet owner's plan; null for team members (the owner manages it) and accounts without a plan. */
+  subscription?: Subscription | null;
+}
+
+export type PlanId = "starter" | "growth" | "business";
+
+/** A monthly plan from the server's catalogue (GET /api/config). Prices in EUR cents. */
+export interface Plan {
+  id: PlanId;
+  name: string;
+  priceCents: number;
+  currency: "eur";
+  monthlyCredits: number;
+  runsPerDay: number;
+  /** Can be bought on this server right now. */
+  available: boolean;
+}
+
+/** checkout_* while Checkout is open or was left; otherwise Stripe's own status. */
+export type SubscriptionStatus =
+  | "checkout_pending"
+  | "checkout_expired"
+  | "checkout_failed"
+  | "incomplete"
+  | "incomplete_expired"
+  | "trialing"
+  | "active"
+  | "past_due"
+  | "unpaid"
+  | "canceled"
+  | "paused";
+
+export interface Subscription {
+  planId: PlanId | string;
+  planName: string;
+  priceCents: number | null;
+  monthlyCredits: number | null;
+  status: SubscriptionStatus;
+  /** The plan's limits apply right now (paid up). */
+  entitled: boolean;
+  runsPerDay: number;
+  cancelAtPeriodEnd: boolean;
+  currentPeriodEnd: string | null;
+  nextPlanId: string | null;
+  nextPlanName: string | null;
+  allowanceGranted: number;
+  allowanceRemaining: number;
+  allowancePeriodEnd: string | null;
+  paymentProblem: string | null;
+  endedAt: string | null;
 }
 
 export interface CreditPack {
@@ -840,6 +892,9 @@ export interface PublicConfig {
   emailEnabled: boolean;
   paymentsEnabled: boolean;
   creditPacks: CreditPack[];
+  /** Monthly plans can be bought on this server (subscriptions on and Stripe configured). */
+  subscriptionsEnabled?: boolean;
+  plans?: Plan[];
   guestTrialEnabled: boolean;
   guestCreditsCents: number;
   turnstileSiteKey: string | null;
@@ -1081,7 +1136,8 @@ export const api = {
   changePassword: (body: { currentPassword: string; newPassword: string }) => request<{ ok: true; token: string }>("/api/auth/password", { method: "POST", body: json(body) }),
   forgotPassword: (email: string) => request<{ ok: true }>("/api/auth/forgot", { method: "POST", body: json({ email }) }),
   resetPassword: (body: { token: string; password: string }) => request<{ token: string; user: User }>("/api/auth/reset", { method: "POST", body: json(body) }),
-  requestEmailVerification: () => request<{ ok: true; sent: boolean }>("/api/auth/verify-email/request", { method: "POST" }),
+  // Errors (429 too many links, 502 not sent) say why no email went out; alreadyVerified carries the fresh user.
+  requestEmailVerification: () => request<{ ok: true; sent: boolean; alreadyVerified?: true; user?: User }>("/api/auth/verify-email/request", { method: "POST" }),
   verifyEmail: (token: string) => request<{ ok: true; user: User }>("/api/auth/verify-email", { method: "POST", body: json({ token }) }),
   guestStart: (body: { acceptedTerms: true; turnstileToken?: string }) => request<{ token: string; user: User }>("/api/guest/start", { method: "POST", body: json(body) }),
   claimAccount: (body: { email: string; password: string; name: string; company?: string; acceptedTerms: true }) =>
@@ -1158,6 +1214,13 @@ export const api = {
   moreTransactions: (cursor: string) => request<{ transactions: Transaction[]; nextCursor: string | null }>(`/api/billing/transactions${qs({ cursor })}`),
   topUp: (amountCents: number) => request<{ billing: Billing; user: User }>("/api/billing/topup", { method: "POST", body: json({ amountCents }) }),
   createCheckout: (packId: string) => request<{ url: string }>("/api/billing/checkout", { method: "POST", body: json({ packId }) }),
+  /** Opens Stripe Checkout for a monthly plan. Only the plan id is sent: the server decides the price. */
+  startSubscription: (planId: PlanId) => request<{ url: string }>("/api/billing/subscription/checkout", { method: "POST", body: json({ planId }) }),
+  changePlan: (planId: PlanId) =>
+    request<{ change: "upgraded" | "downgrade_scheduled" | "scheduled_change_cancelled"; billing: Billing }>("/api/billing/subscription/change", { method: "POST", body: json({ planId }) }),
+  cancelSubscription: () => request<{ billing: Billing }>("/api/billing/subscription/cancel", { method: "POST" }),
+  resumeSubscription: () => request<{ billing: Billing }>("/api/billing/subscription/resume", { method: "POST" }),
+  billingPortal: () => request<{ url: string }>("/api/billing/subscription/portal", { method: "POST" }),
 
   // Legacy reports
   listLegacyReports: (cursor?: string) => request<{ tasks: LegacyTask[]; nextCursor: string | null }>(`/api/tasks${qs({ cursor, limit: 30 })}`),

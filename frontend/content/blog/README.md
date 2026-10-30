@@ -1,6 +1,6 @@
 # content/blog
 
-Articles for the Ensemblis Journal (`/blog`). One Markdown file per article; the file name is the URL slug.
+Articles for the Ensemblis Blog (`/blog`). One Markdown file per article; the file name is the URL slug.
 Copy `_template.md` to start. Files beginning with `_` and this README are ignored by the site.
 
 The full workflow — states, frontmatter, citations, callouts, images, scheduling, the editor's checklist —

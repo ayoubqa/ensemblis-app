@@ -9,7 +9,8 @@ import "./styles/console.css";
 import "./styles/operations.css";
 import "./styles/auth.css";
 import "./styles/site.css";
-import { inter, newsreader } from "./fonts";
+import "./styles/brand.css";
+import { newsreader, sans, wordmark } from "./fonts";
 import { AuthProvider } from "@/lib/auth-context";
 import { ThemeProvider, themeInitScript } from "@/lib/theme";
 import { Header, BottomNav } from "@/components/Header";
@@ -22,7 +23,6 @@ import { GuestBanner } from "@/components/GuestBanner";
 import { ConfigProvider } from "@/lib/config";
 import { demoInitScript } from "@/lib/demo-flags";
 import { OG_IMAGE, SITE } from "@/lib/site";
-import { visiblePosts } from "@/lib/blog/posts";
 import { SiteAnalytics } from "@/components/site/SiteAnalytics";
 
 const RELEASE = (process.env.VERCEL_GIT_COMMIT_SHA || "").slice(0, 7);
@@ -66,15 +66,14 @@ export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
   viewportFit: "cover",
-  colorScheme: "dark light",
+  colorScheme: "light dark",
+  // The command bar is Ink in both themes, so the browser chrome matches it.
   themeColor: "#07111F",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
-  // The Journal is promoted in the navigation only once it has a published article.
-  const journal = visiblePosts().length > 0;
   return (
-    <html lang="en" className={`${inter.variable} ${newsreader.variable}`} data-theme="dark" suppressHydrationWarning>
+    <html lang="en" className={`${sans.variable} ${newsreader.variable} ${wordmark.variable}`} data-theme="light" suppressHydrationWarning>
       <head>
         {/* Apply the saved theme before first paint (no flash). */}
         <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
@@ -91,10 +90,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                   Skip to content
                 </a>
                 <DemoBanner />
-                <Header journal={journal} />
+                <Header />
                 <GuestBanner />
                 <PageTransition>{children}</PageTransition>
-                <Footer journal={journal} />
+                <Footer />
                 <BottomNav />
                 <SiteAnalytics />
               </ShellProvider>

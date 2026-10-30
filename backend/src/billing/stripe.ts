@@ -6,6 +6,11 @@
 // the server config, never from the client). Stripe redirects the browser
 // back to /billing; the credits are added ONLY by the signed webhook
 // (checkout.session.completed with payment_status "paid"), exactly once.
+//
+// The same webhook carries monthly subscriptions (billing/subscriptions.ts).
+// The two never mix: a credit pack is a "payment" mode session with a
+// StripePayment row; a subscription is a "subscription" mode session whose
+// credits come only from its paid invoices.
 
 import { randomBytes } from "crypto";
 import type { Request, Response } from "express";
@@ -15,18 +20,11 @@ import { config } from "../config";
 import { formatCredits } from "./credits";
 import { HttpError } from "../lib/http";
 import { creditWallet, resolveWallet } from "../lib/wallet";
+import { log } from "../lib/log";
+import { stripeClient } from "./stripeClient";
+import { handleSubscriptionEvent } from "./subscriptions";
 
-let client: Stripe | null = null;
-
-export function stripeClient(): Stripe {
-  if (!client) client = new Stripe(config.stripe.secretKey, { maxNetworkRetries: 1, timeout: 20_000 });
-  return client;
-}
-
-/** Tests only: swap in a stub client. */
-export function setStripeClientForTests(c: Stripe | null) {
-  client = c;
-}
+export { setStripeClientForTests, stripeClient } from "./stripeClient";
 
 const eur = (cents: number) => `€${(cents / 100).toFixed(2)}`;
 
@@ -106,6 +104,7 @@ async function findPayment(session: Stripe.Checkout.Session) {
 
 /** Credits the wallet for a paid session exactly once. */
 export async function fulfillCheckoutSession(session: Stripe.Checkout.Session): Promise<"credited" | "already" | "ignored"> {
+  if (session.mode && session.mode !== "payment") return "ignored"; // subscriptions are paid by invoice, not here
   if (session.payment_status !== "paid") return "ignored";
   const payment = await findPayment(session);
   if (!payment) {
@@ -142,18 +141,28 @@ async function expireCheckoutSession(session: Stripe.Checkout.Session) {
   await prisma.stripePayment.updateMany({ where: { id: payment.id, status: "pending" }, data: { status: "expired" } });
 }
 
+/**
+ * Processes one verified event. Every handler is idempotent (Stripe delivers at least once, in any order);
+ * the StripeEvent row skips a redelivery of an event already processed and records what was handled.
+ */
 export async function handleStripeEvent(event: Stripe.Event): Promise<void> {
-  switch (event.type) {
-    case "checkout.session.completed":
-    case "checkout.session.async_payment_succeeded":
-      await fulfillCheckoutSession(event.data.object as Stripe.Checkout.Session);
-      return;
-    case "checkout.session.expired":
-      await expireCheckoutSession(event.data.object as Stripe.Checkout.Session);
-      return;
-    default:
-      return; // acknowledged, nothing to do
+  if (await prisma.stripeEvent.findUnique({ where: { id: event.id }, select: { id: true } })) return;
+  if (!(await handleSubscriptionEvent(event))) {
+    switch (event.type) {
+      case "checkout.session.completed":
+      case "checkout.session.async_payment_succeeded":
+        await fulfillCheckoutSession(event.data.object as Stripe.Checkout.Session);
+        break;
+      case "checkout.session.expired":
+        await expireCheckoutSession(event.data.object as Stripe.Checkout.Session);
+        break;
+      default:
+        break; // acknowledged, nothing to do
+    }
   }
+  await prisma.stripeEvent
+    .create({ data: { id: event.id, type: event.type, eventCreated: new Date(event.created * 1000) } })
+    .catch(() => undefined); // a concurrent delivery recorded it first
 }
 
 /**
@@ -178,12 +187,20 @@ export async function stripeWebhookHandler(req: Request, res: Response) {
     res.status(400).json({ error: "Invalid Stripe signature" });
     return;
   }
+  // Test and live mode never mix: an event from the other mode means the key and the webhook secret come from
+  // different modes. Refused visibly (Stripe shows the failed deliveries) instead of half-processed.
+  const liveKey = /^(sk|rk)_live_/.test(config.stripe.secretKey);
+  if (event.livemode !== liveKey) {
+    log.error("stripe.webhook_mode_mismatch", { eventId: event.id, type: event.type, eventLivemode: event.livemode, keyLivemode: liveKey });
+    res.status(400).json({ error: "This event's mode (test/live) doesn't match this server's Stripe key." });
+    return;
+  }
   try {
     await handleStripeEvent(event);
     res.json({ received: true });
   } catch (err) {
-    // 500 makes Stripe retry later; the pending->completed guard keeps it idempotent.
-    console.error(`[stripe] failed to process ${event.type} (${event.id}):`, err);
+    // 500 makes Stripe retry later; every handler is idempotent, so a retry is safe.
+    log.error("stripe.webhook_failed", { type: event.type, eventId: event.id, error: err instanceof Error ? err.message : String(err) });
     res.status(500).json({ error: "Webhook processing failed" });
   }
 }

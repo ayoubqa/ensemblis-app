@@ -178,7 +178,7 @@ export const FAQ: { q: string; a: string }[] = [
     a: "A decision-ready result: an executive summary that answers your objective, the findings, a recommendation, each success criterion measured as met, partially met or not met, the numbered evidence behind every claim, a verification report, and the limitations a person should check. You can export it as PDF or Word or share a read-only link.",
   },
   {
-    q: "How is Ensemblis different from ChatGPT or another AI assistant?",
+    q: "How is Ensemblis different from a general AI assistant?",
     a: "General assistants are excellent for quick answers and drafts, and some cite their sources. Ensemblis is built for work you will act on: you set success criteria first, approve a plan and its cost before anything runs, every claim is numbered to its evidence, a verification step checks the result against your criteria and says what it could not establish, and the work stops to ask when information is missing instead of guessing. If a quick answer is all you need, a general assistant is faster and cheaper.",
   },
   {
@@ -196,6 +196,10 @@ export const FAQ: { q: string; a: string }[] = [
   {
     q: "Can I trust the results?",
     a: "You can check them, which is the point. Every claim cites its evidence, a verification gate checks objective alignment, evidence support, success-criteria coverage, completeness and internal consistency, and limitations are stated. AI-generated work can still contain mistakes, so review the evidence before acting on it.",
+  },
+  {
+    q: "What if the research can't find enough?",
+    a: "The result says so instead of filling the gap. When a research step's searches fail, find nothing or fall back to a limited source, the step is marked in the plan, the issue is listed with the result, and the brief must name it under its limitations, so a person can check it before acting.",
   },
   {
     q: "What doesn't Ensemblis do?",

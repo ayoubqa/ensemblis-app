@@ -6,11 +6,11 @@ import { SITE, faqJsonLd, organizationJsonLd, pageMetadata, softwareApplicationJ
 
 const TITLE = `${SITE.name} — Business research and analysis you can verify`;
 const DESCRIPTION =
-  "Describe the outcome. We do the work. Ensemblis plans business research and analysis, shows the cost before anything runs, and checks every claim against cited evidence and your success criteria.";
+  "Describe the outcome. We do the work. Ensemblis plans business research and analysis, shows the cost before it runs and ties every claim to its source.";
 
 export const metadata = pageMetadata({ title: TITLE, description: DESCRIPTION, path: "/", absoluteTitle: true });
 
-// Re-checked hourly: the "From the Journal" row appears once an article is published.
+// Re-checked hourly: the "From the blog" row appears once an article is published.
 export const revalidate = 3600;
 
 export default function HomePage() {

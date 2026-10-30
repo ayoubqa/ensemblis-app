@@ -67,7 +67,7 @@
   font-size: 12px;
   font-weight: 650;
   letter-spacing: 0;
-  font-variant-numeric: tabular-nums;
+  font-variant-numeric: normal;
 }
 .op-count.is-warn {
   background: var(--warn-soft);
@@ -84,7 +84,7 @@
 .op-meta {
   font-size: 12.5px;
   color: var(--muted);
-  font-variant-numeric: tabular-nums;
+  font-variant-numeric: normal;
 }
 .op-firstrun {
   display: flex;
@@ -118,6 +118,58 @@
   font-size: 13px;
   line-height: 1.55;
   color: var(--muted);
+}
+.op-note.is-bad {
+  color: var(--bad);
+}
+.op-note b {
+  color: var(--ink-strong);
+}
+.op-note.is-bad b {
+  color: inherit;
+}
+/* Plan panel on Usage (app/usage/_components/PlanPanel.tsx). */
+.op-plan-top {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 8px 24px;
+  align-items: baseline;
+}
+.op-plan-name {
+  margin: 0 0 4px;
+  font-size: 18px;
+  font-weight: 650;
+  color: var(--ink-strong);
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.op-plan-credits {
+  margin-top: 18px;
+  display: grid;
+  gap: 8px;
+}
+.op-plan-credits .op-bar {
+  margin-top: 0;
+  width: 100%;
+}
+.op-plan-meter {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 4px 16px;
+}
+.op-plan-actions {
+  margin-top: 18px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+.op-plan-empty p {
+  margin: 0;
 }
 .op-note a,
 .op-link {
@@ -285,7 +337,7 @@ a.op-kpi:focus-visible {
   letter-spacing: -0.02em;
   line-height: 1.12;
   color: var(--ink-strong);
-  font-variant-numeric: tabular-nums;
+  font-variant-numeric: normal;
   overflow-wrap: anywhere;
 }
 .op-kpi-v small {
@@ -382,7 +434,7 @@ a.op-kpi:focus-visible {
   font-weight: 700;
   letter-spacing: -0.01em;
   color: var(--ink-strong);
-  font-variant-numeric: tabular-nums;
+  font-variant-numeric: normal;
 }
 .op-attn-stat span {
   font-size: 12px;
@@ -1331,7 +1383,7 @@ details.op-more > summary:focus-visible {
   font-size: 15px;
   font-weight: 650;
   color: var(--ink-strong);
-  font-variant-numeric: tabular-nums;
+  font-variant-numeric: normal;
   text-align: right;
 }
 .op-amt.is-in {
@@ -1360,7 +1412,7 @@ details.op-more > summary:focus-visible {
   font-weight: 700;
   letter-spacing: -0.02em;
   color: var(--ink-strong);
-  font-variant-numeric: tabular-nums;
+  font-variant-numeric: normal;
 }
 .op-fund .btn {
   margin-top: 12px;
@@ -1405,7 +1457,7 @@ details.op-more > summary:focus-visible {
 .op-tx td.op-tx-amt,
 .op-tx th.op-tx-amt {
   text-align: right;
-  font-variant-numeric: tabular-nums;
+  font-variant-numeric: normal;
 }
 .op-tx td.op-tx-amt {
   font-weight: 650;
@@ -1943,7 +1995,7 @@ details.op-more > summary:focus-visible {
   letter-spacing: -0.02em;
   line-height: 1.15;
   color: var(--ink-strong);
-  font-variant-numeric: tabular-nums;
+  font-variant-numeric: normal;
   overflow-wrap: anywhere;
 }
 .op-tile-v small {
@@ -2016,7 +2068,7 @@ details.op-more > summary:focus-visible {
   font-size: 18px;
   font-weight: 650;
   color: var(--ink-strong);
-  font-variant-numeric: tabular-nums;
+  font-variant-numeric: normal;
 }
 .op-econ-grid dd small {
   font-size: 12.5px;

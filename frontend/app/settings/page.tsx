@@ -432,6 +432,7 @@ function AccountCard({ user }: { user: User }) {
 // ------------------------------------------------------------- email verification
 function EmailVerification({ user }: { user: User }) {
   const toast = useToast();
+  const { setUser } = useAuth();
   const { loaded, config } = useConfig();
   const [busy, setBusy] = useState(false);
   const [sent, setSent] = useState(false);
@@ -446,8 +447,13 @@ function EmailVerification({ user }: { user: User }) {
     setBusy(true);
     try {
       const r = await api.requestEmailVerification();
-      setSent(true);
-      toast(r.sent ? "Verification link sent — check your inbox" : "Verification requested", { icon: "mail" });
+      if (r.alreadyVerified && r.user) {
+        setUser(r.user);
+        toast("Your email is already verified", { icon: "check" });
+      } else if (r.sent) {
+        setSent(true);
+        toast(`Verification link sent to ${user.email} — check your inbox and spam folder`, { icon: "mail" });
+      }
     } catch (e) {
       toastApiError(toast, e, "Couldn't send the verification email");
     } finally {

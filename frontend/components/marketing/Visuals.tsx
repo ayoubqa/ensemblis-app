@@ -87,7 +87,7 @@ export function OperatingLayer() {
             </li>
           ))}
         </ul>
-        <div className="mk-evidence-row" aria-label="Evidence">
+        <div className="mk-evidence-row" role="group" aria-label="Evidence">
           {[1, 2, 3, 4, 5].map((n) => (
             <span key={n} className="mk-cite">
               [{n}]

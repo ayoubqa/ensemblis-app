@@ -1,12 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
+import { Suspense, useCallback, useEffect, useState } from "react";
 import { api, type Billing, type Transaction } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { useConfig } from "@/lib/config";
 import { toastApiError } from "@/lib/errors";
-import { credits, creditsSigned, dateTime, num, plural } from "@/lib/format";
+import { credits, creditsNum, creditsSigned, dateTime, num, plural } from "@/lib/format";
 import { ROUTES } from "@/lib/routes";
 import {
   EmptyState,
@@ -19,6 +19,7 @@ import {
 } from "@/components";
 import { AddFunds } from "./_components/BuyCredits";
 import { CheckoutBanner } from "./_components/CheckoutBanner";
+import { PlanPanel } from "./_components/PlanPanel";
 
 export default function UsagePage() {
   return (
@@ -49,7 +50,11 @@ const TYPE_TONE: Record<Transaction["type"], "gray" | "ok" | "accent"> = {
 const typeLabel = (t: Transaction) =>
   t.type === "ADJUSTMENT" && t.reason === "opening_balance"
     ? "Opening balance"
-    : (TYPE_LABEL[t.type] ?? t.type);
+    : t.reason === "subscription_allowance"
+      ? "Plan credits"
+      : t.reason === "allowance_expired"
+        ? "Expired"
+        : (TYPE_LABEL[t.type] ?? t.type);
 
 /** Ledger descriptions are stored by the server; show them without repeating the type or legacy wording. */
 function describe(t: Transaction): string {
@@ -158,9 +163,11 @@ function Usage() {
             {credits(b.balanceCents)}
           </b>
           <span className="op-kpi-m">
-            {owner
-              ? "Available for executions"
-              : "Managed by your organization owner"}
+            {b.credits && b.credits.planCreditsCents > 0
+              ? `${creditsNum(b.credits.planCreditsCents)} plan credits · ${creditsNum(b.credits.otherCreditsCents)} other credits`
+              : owner
+                ? "Available for executions"
+                : "Managed by your organization owner"}
           </span>
           {(canPay || canDemo) && (
             <span className="op-kpi-a">
@@ -192,6 +199,10 @@ function Usage() {
           <span className="op-kpi-m">all time, including earlier reports</span>
         </div>
       </div>
+
+      <Suspense fallback={null}>
+        <PlanPanel billing={b} config={config} onBilling={setB} />
+      </Suspense>
 
       <section className="op-sec" aria-labelledby="h-how">
         <div className="op-sec-head">

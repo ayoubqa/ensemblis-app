@@ -17,6 +17,9 @@ export interface EmailMessage {
 const RESEND_URL = `${(process.env.RESEND_BASE_URL?.trim() || "https://api.resend.com").replace(/\/+$/, "")}/emails`;
 const TIMEOUT_MS = 10_000;
 
+/** Replaces email addresses with "<address>" (for logging provider error messages). */
+export const redactAddresses = (s: string) => s.replace(/[^\s<>"'(),;:]+@[^\s<>"'(),;:]+/g, "<address>");
+
 /** Sends one email. Resolves true when Resend accepted it, false otherwise (incl. when email is off). */
 export async function sendEmail(msg: EmailMessage): Promise<boolean> {
   if (!config.email.enabled) return false;
@@ -39,9 +42,14 @@ export async function sendEmail(msg: EmailMessage): Promise<boolean> {
     });
     ok = res.ok;
     if (!ok) {
-      // Only Resend's error name: subjects carry objective titles and error bodies can echo addresses.
-      const body = (await res.json().catch(() => null)) as { name?: unknown } | null;
-      log.warn("email.send_failed", { status: res.status, error: typeof body?.name === "string" ? body.name.slice(0, 80) : undefined });
+      // Resend's error name and message ("The example.com domain is not verified…") say what to fix. Never the
+      // subject (it carries objective titles); addresses in the message are redacted.
+      const body = (await res.json().catch(() => null)) as { name?: unknown; message?: unknown } | null;
+      log.warn("email.send_failed", {
+        status: res.status,
+        error: typeof body?.name === "string" ? body.name.slice(0, 80) : undefined,
+        detail: typeof body?.message === "string" ? redactAddresses(body.message).slice(0, 200) : undefined,
+      });
     }
   } catch (err) {
     log.warn("email.send_failed", { error: err instanceof Error ? err.name : "unknown" });
