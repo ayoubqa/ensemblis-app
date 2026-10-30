@@ -90,6 +90,9 @@ model User {
   // v4
   emailVerifiedAt DateTime? // set when the user proves they own the address (verification link or password reset)
 
+  /// Stripe Customer for subscriptions (billing/subscriptions.ts). Set once, by the server.
+  stripeCustomerId String? @unique
+
   tasks              Task[]
   agents             Agent[] // agents this user has published (developer persona)
   workflows          Workflow[]
@@ -102,6 +105,7 @@ model User {
   attachments        TaskAttachment[]
   passwordResets     PasswordReset[]
   stripePayments     StripePayment[]
+  subscriptions      Subscription[]
   // v4
   ownedOrganization  Organization?       @relation("OrgOwner")
   objectivesCreated  Objective[]         @relation("ObjectiveCreator")
@@ -270,11 +274,16 @@ model Transaction {
   balanceAfter   Int?
   /// At most one row per key (e.g. "charge:<executionId>"): a retried or duplicated request can't apply twice.
   idempotencyKey String?         @unique
+  /// Part of this movement that changed a subscription's allowance (signed like amountCents). Null: none.
+  allowanceCents Int?
+  subscription   Subscription?   @relation(fields: [subscriptionId], references: [id], onDelete: SetNull)
+  subscriptionId String?
 
   @@index([userId, createdAt])
   @@index([actorUserId, createdAt])
   @@index([type, createdAt])
   @@index([executionId])
+  @@index([subscriptionId])
 }
 
 // A user's saved agents ("my workforce").
@@ -411,6 +420,56 @@ model StripePayment {
   status      String    @default("pending") // pending | completed | expired
   createdAt   DateTime  @default(now())
   completedAt DateTime?
+}
+
+/// A monthly plan paid through Stripe Billing (billing/subscriptions.ts). One row per checkout attempt; at most
+/// one live row per wallet. Entitlements and the allowance follow PAID periods (invoice.paid), never a redirect.
+model Subscription {
+  id                      String        @id @default(cuid())
+  user                    User          @relation(fields: [walletUserId], references: [id], onDelete: Cascade)
+  /// The wallet the allowance is credited to (the organization owner).
+  walletUserId            String
+  /// Plan of the current paid period (billing/plans.ts id): the allowance and limits come from it.
+  planId                  String
+  /// Plan Stripe will bill at the next renewal, when it differs (a scheduled downgrade).
+  nextPlanId              String?
+  /// checkout_pending | checkout_expired | checkout_failed, then Stripe's own status: incomplete | active |
+  /// past_due | unpaid | canceled | incomplete_expired | paused | trialing
+  status                  String
+  stripeCheckoutSessionId String?       @unique
+  checkoutUrl             String?
+  stripeCustomerId        String?
+  stripeSubscriptionId    String?       @unique
+  stripePriceId           String?
+  cancelAtPeriodEnd       Boolean       @default(false)
+  currentPeriodStart      DateTime?
+  currentPeriodEnd        DateTime?
+  canceledAt              DateTime?
+  endedAt                 DateTime?
+  /// Unused allowance of the paid period (part of User.credits; spent first, expires at allowancePeriodEnd).
+  allowanceCredits        Int           @default(0)
+  /// Allowance granted for that period.
+  allowanceGranted        Int           @default(0)
+  allowancePeriodStart    DateTime?
+  allowancePeriodEnd      DateTime?
+  /// Short reason of the last failed payment (no card details).
+  lastPaymentError        String?
+  /// When the Stripe state above was read: an older read never overwrites a newer one.
+  stripeSyncedAt          DateTime?
+  createdAt               DateTime      @default(now())
+  updatedAt               DateTime      @updatedAt
+  transactions            Transaction[]
+
+  @@index([walletUserId, createdAt])
+  @@index([allowancePeriodEnd])
+}
+
+/// Stripe webhook events already processed (deduplication and audit). Processing itself is idempotent too.
+model StripeEvent {
+  id           String   @id // evt_...
+  type         String
+  eventCreated DateTime
+  processedAt  DateTime @default(now())
 }
 
 // Metering for the owner dashboard and budget guards.

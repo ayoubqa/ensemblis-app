@@ -9,7 +9,8 @@
 //
 //   node scripts/e2e-stack.mjs        (run from backend/, after `npm run build`)
 //
-// Env: E2E_DATABASE_URL, E2E_API_PORT (4100), E2E_WEB_ORIGIN (http://localhost:3100),
+// Env: E2E_DATABASE_URL, E2E_API_PORT (4100), E2E_WEB_ORIGIN (http://localhost:3100), E2E_STRIPE=1 (subscriptions
+//      against a local Stripe stub),
 //      SEARCH_STUB_MODE (ok | 401 | 500 | empty; default ok),
 //      VERIFY_RETRY_DELAY_MS (default here 1000: the "could not be verified" path re-checks quickly)
 
@@ -37,6 +38,27 @@ if (prodLike) {
 const { startSearchStub } = await import("./search-stub.mjs");
 const search = await startSearchStub(0);
 console.log(`[e2e-stack] web search → search stub ${search.url} (mode ${search.mode}; fixed fixtures, not live results)`);
+
+// Subscriptions (E2E_STRIPE=1 only): a local Stripe stub (scripts/stripe-stub.mjs) — never the real API, never a
+// real key. Off by default: with Stripe configured the app offers card payments, which the other specs don't expect.
+const stripeE2E = process.env.E2E_STRIPE === "1";
+let stripeEnv = {};
+if (stripeE2E) {
+  const { startStripeStub, STUB_PRICE_IDS } = await import("./stripe-stub.mjs");
+  const webhookSecret = "whsec_stub_not_a_secret";
+  const stripe = await startStripeStub(0, { webhookUrl: `http://127.0.0.1:${port}/api/billing/stripe/webhook`, webhookSecret });
+  stripeEnv = {
+    STRIPE_API_BASE: stripe.url,
+    STRIPE_SECRET_KEY: "sk_test_stub_not_a_key",
+    STRIPE_WEBHOOK_SECRET: webhookSecret,
+    SUBSCRIPTIONS_ENABLED: "true",
+    STRIPE_PRICE_STARTER: STUB_PRICE_IDS.starter,
+    STRIPE_PRICE_GROWTH: STUB_PRICE_IDS.growth,
+    STRIPE_PRICE_BUSINESS: STUB_PRICE_IDS.business,
+    RATE_LIMIT_CHECKOUT_PER_MIN: "1000",
+  };
+  console.log(`[e2e-stack] subscriptions → Stripe stub ${stripe.url} (test stub: no card is charged, nothing reaches Stripe)`);
+}
 
 const env = {
   ...process.env,
@@ -67,6 +89,7 @@ const env = {
   RATE_LIMIT_LOGIN_PER_15MIN: "1000",
   RATE_LIMIT_GLOBAL_PER_15MIN: "100000",
   LOG_LEVEL: process.env.LOG_LEVEL || "warn",
+  ...stripeEnv,
   ...(prodLike
     ? { NODE_ENV: "production", AI_PROVIDER: "openai", OPENAI_BASE_URL: stubUrl, OPENAI_API_KEY: "stub-key", OPENAI_MODEL: "openai/gpt-oss-120b", OPENAI_FAST_MODEL: "openai/gpt-oss-20b", OPENAI_REASONING_EFFORT: "low" }
     : {}),

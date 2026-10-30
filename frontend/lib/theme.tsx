@@ -13,7 +13,7 @@ export const THEME_KEY = "ensemblis_theme";
  * <html data-theme> always holds the RESOLVED theme ("light" | "dark");
  * <html data-theme-pref> holds the preference ("light" | "dark" | "system").
  */
-export const themeInitScript = `(function(){try{var p=null;try{p=localStorage.getItem('${THEME_KEY}')}catch(e){}if(p!=='light'&&p!=='dark'&&p!=='system')p='dark';var d=p==='dark'||(p==='system'&&window.matchMedia&&matchMedia('(prefers-color-scheme: dark)').matches);var r=document.documentElement;r.setAttribute('data-theme',d?'dark':'light');r.setAttribute('data-theme-pref',p);}catch(e){}})();`;
+export const themeInitScript = `(function(){try{var p=null;try{p=localStorage.getItem('${THEME_KEY}')}catch(e){}if(p!=='light'&&p!=='dark'&&p!=='system')p='light';var d=p==='dark'||(p==='system'&&window.matchMedia&&matchMedia('(prefers-color-scheme: dark)').matches);var r=document.documentElement;r.setAttribute('data-theme',d?'dark':'light');r.setAttribute('data-theme-pref',p);}catch(e){}})();`;
 
 interface ThemeCtx {
   /** User preference */
@@ -40,13 +40,13 @@ function apply(pref: ThemePref): ResolvedTheme {
 }
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
-  // Default: the dark navy theme. "system" is an explicit choice.
-  const [theme, setThemeState] = useState<ThemePref>("dark");
-  const [resolved, setResolved] = useState<ResolvedTheme>("dark");
+  // Default: the light working-paper theme. Dark and "system" are explicit choices.
+  const [theme, setThemeState] = useState<ThemePref>("light");
+  const [resolved, setResolved] = useState<ResolvedTheme>("light");
 
   useEffect(() => {
     const p = storage.get(THEME_KEY);
-    const pref: ThemePref = p === "light" || p === "dark" || p === "system" ? p : "dark";
+    const pref: ThemePref = p === "light" || p === "dark" || p === "system" ? p : "light";
     setThemeState(pref);
     setResolved(apply(pref));
   }, []);

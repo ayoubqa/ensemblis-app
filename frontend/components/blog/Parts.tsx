@@ -1,4 +1,4 @@
-// Small server components shared by the Journal pages.
+// Small server components shared by the blog pages.
 import Link from "next/link";
 import { authorByKey } from "@/lib/blog/authors";
 import { LAYER_LABEL, categoryByKey } from "@/lib/blog/taxonomy";

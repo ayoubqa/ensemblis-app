@@ -49,6 +49,21 @@ export async function recordUnrecordedOpeningBalances(db: Db = prisma): Promise<
     ON CONFLICT ("idempotencyKey") DO NOTHING`;
 }
 
+/**
+ * Subscriptions whose unused allowance disagrees with the ledger (allowanceCredits = SUM(allowanceCents)), or
+ * exceeds the wallet's balance (the allowance is part of it). Read-only: a mismatch is reported, never "fixed".
+ */
+export async function reconcileAllowances(db: Db = prisma, limit = 50): Promise<{ id: string; allowance: number; ledgerSum: number; balance: number }[]> {
+  return db.$queryRaw<{ id: string; allowance: number; ledgerSum: number; balance: number }[]>`
+    SELECT s."id", s."allowanceCredits" AS "allowance", COALESCE(t."sum", 0)::int AS "ledgerSum", u."credits" AS "balance"
+    FROM "Subscription" s
+    JOIN "User" u ON u."id" = s."walletUserId"
+    LEFT JOIN (SELECT "subscriptionId", SUM("allowanceCents")::int AS "sum" FROM "Transaction" WHERE "subscriptionId" IS NOT NULL GROUP BY "subscriptionId") t
+      ON t."subscriptionId" = s."id"
+    WHERE s."allowanceCredits" <> COALESCE(t."sum", 0) OR s."allowanceCredits" > u."credits" OR s."allowanceCredits" < 0
+    LIMIT ${limit}`;
+}
+
 /** Hourly from maintenance: repair the unambiguous gap, then report anything that still disagrees. */
 export async function checkLedger(): Promise<void> {
   const recorded = await recordUnrecordedOpeningBalances();
@@ -60,5 +75,9 @@ export async function checkLedger(): Promise<void> {
       mismatches: mismatchCount,
       sample: mismatches.map((m) => `${m.walletUserId}:${m.balance}/${m.ledgerSum}`).join(","),
     });
+  }
+  const allowances = await reconcileAllowances(prisma, 5);
+  if (allowances.length > 0) {
+    log.warn("ledger.allowance_mismatch", { sample: allowances.map((a) => `${a.id}:${a.allowance}/${a.ledgerSum}/${a.balance}`).join(",") });
   }
 }

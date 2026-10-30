@@ -50,7 +50,7 @@
   font-size: 10.5px;
   font-weight: 700;
   line-height: 1;
-  font-variant-numeric: tabular-nums;
+  font-variant-numeric: normal;
   color: var(--accent) !important;
   background: var(--accent-soft);
   border: 1px solid var(--accent-line);
@@ -214,7 +214,7 @@
   display: grid;
   place-items: center;
   border: 2px solid var(--surface);
-  font-variant-numeric: tabular-nums;
+  font-variant-numeric: normal;
 }
 .srcHead {
   display: flex;

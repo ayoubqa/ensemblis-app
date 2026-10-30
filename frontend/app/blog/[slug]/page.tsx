@@ -70,7 +70,7 @@ export default function ArticlePage({ params }: { params: { slug: string } }) {
             blogPostingJsonLd(post),
             breadcrumbJsonLd([
               { name: "Home", path: "/" },
-              { name: "Journal", path: BLOG.path },
+              { name: "Blog", path: BLOG.path },
               ...(category ? [{ name: category.name, path: categoryPath(category.key) }] : []),
               { name: post.title, path: postPath(post.slug) },
             ]),
@@ -83,12 +83,12 @@ export default function ArticlePage({ params }: { params: { slug: string } }) {
         </p>
       )}
 
-      <header className="ed-art-head dk" style={{ "--cat": accentOf(post.category) } as React.CSSProperties}>
+      <header className="ed-art-head" style={{ "--cat": accentOf(post.category) } as React.CSSProperties}>
         <div className="ed-art-plate" aria-hidden="true">
           <TracePlate seed={post.slug} accent={accentOf(post.category)} />
         </div>
         <div className="wrap ed-art-head-in">
-          <Breadcrumbs items={[{ name: "Journal", href: BLOG.path }, ...(category ? [{ name: category.name, href: categoryPath(category.key) }] : []), { name: post.title }]} />
+          <Breadcrumbs items={[{ name: "Blog", href: BLOG.path }, ...(category ? [{ name: category.name, href: categoryPath(category.key) }] : []), { name: post.title }]} />
           <p className="ed-item-top">
             <CategoryLabel category={post.category} />
           </p>

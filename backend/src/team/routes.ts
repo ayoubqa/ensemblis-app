@@ -10,6 +10,8 @@ import { requireAuth, requireRegistered, AuthedRequest } from "../auth/middlewar
 import { ah, HttpError, parse } from "../lib/http";
 import { teamJoinLimiter } from "../lib/rateLimits";
 import { loadPublicUser } from "../lib/serializers";
+import { planById } from "../billing/plans";
+import { LIVE_STATUSES, closeOpenCheckouts } from "../billing/subscriptions";
 
 const router = Router();
 
@@ -248,6 +250,15 @@ router.post(
     const { token } = parse(joinSchema, req.body);
     const userId = req.userId!;
     if (await membershipOf(userId)) throw new HttpError(409, "You're already in a team. Leave it first to join another.");
+    // A member spends the team's credits, not their own: a plan that keeps renewing on their own account would
+    // be paid for and unusable. Cancelling first (it then ends with the paid month) lets them join.
+    const plan = await prisma.subscription.findFirst({
+      where: { walletUserId: userId, stripeSubscriptionId: { not: null }, status: { in: LIVE_STATUSES }, cancelAtPeriodEnd: false },
+      select: { planId: true },
+    });
+    if (plan) {
+      throw new HttpError(409, `You have the ${planById(plan.planId)?.name ?? "current"} plan on your own account, and a team member spends the team's credits instead. Cancel your plan in Usage first, then join the team.`);
+    }
     const invite = await prisma.teamInvite.findUnique({ where: { token } });
     if (!invite) throw new HttpError(404, "This invite link doesn't exist");
     const reason = inviteInvalidReason(invite);
@@ -271,6 +282,7 @@ router.post(
       if (isUniqueViolation(err)) throw new HttpError(409, "You're already in a team. Leave it first to join another.");
       throw err;
     }
+    await closeOpenCheckouts(userId); // a plan link opened before joining can't be paid any more
     res.json({ team: await loadTeamDetail(invite.teamId, userId), user: await loadPublicUser(userId) });
   })
 );
