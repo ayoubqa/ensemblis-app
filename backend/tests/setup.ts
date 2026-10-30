@@ -7,7 +7,7 @@ const TABLES = [
   "MemoryItem", "ValueRecord", "Transaction", "UsageEvent", "Execution", "SuccessCriterion", "Objective", "ContextDocument",
   "CompanyContext", "Organization", "Job", "EmailVerification", "TaskSource", "TaskStep", "TaskRevision", "TaskAttachment",
   "GalleryItem", "Task", "Workflow", "WorkforceMember", "Agent", "TeamInvite", "TeamMember", "Team", "TeamSeat",
-  "PasswordReset", "StripePayment", "User",
+  "PasswordReset", "StripePayment", "Subscription", "StripeEvent", "User",
 ];
 
 beforeEach(async () => {

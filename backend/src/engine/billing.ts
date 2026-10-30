@@ -5,14 +5,17 @@
 //     needed), for the planned estimate; inside the same transaction as the
 //     status flip and the daily-cap check, so it can't double-charge;
 //   - refund: on failure (everything not yet refunded), on cancellation (the
-//     work that never ran), always capped at what was charged.
+//     work that never ran), always capped at what was charged. Plan credits
+//     the charge took from a subscription allowance come back as plan credits
+//     (while that billing period lasts), the rest as ordinary credits.
 // The wallet is the organization owner's balance (the existing team-wallet rule).
 
 import type { Prisma } from "@prisma/client";
 import { config } from "../config";
 import { HttpError } from "../lib/http";
 import { assertDailyQuotaInTx } from "../lib/usageLimits";
-import { creditWallet, debitWallet, type WalletRef } from "../lib/wallet";
+import { creditWallet, debitWallet, expireRefundedAllowance, lockWallet, type WalletRef } from "../lib/wallet";
+import { entitlementsFor } from "../billing/entitlements";
 import { formatCredits, LEDGER_REASONS } from "../billing/credits";
 
 type Tx = Prisma.TransactionClient;
@@ -43,9 +46,11 @@ export async function chargeExecution(
   tx: Tx,
   args: { executionId: string; orgId: string; actorUserId: string; amountCents: number; title: string }
 ): Promise<WalletRef> {
-  await assertDailyQuotaInTx(tx, args.actorUserId);
-  await assertGuestAllowance(tx, args.actorUserId);
   const wallet = await orgWallet(tx, args.orgId, args.actorUserId);
+  // The paying wallet's plan sets the per-user daily limit (never below the prepaid one); global caps still apply.
+  const { runsPerDay } = await entitlementsFor(tx, wallet.walletUserId);
+  await assertDailyQuotaInTx(tx, args.actorUserId, { runsPerDay });
+  await assertGuestAllowance(tx, args.actorUserId);
   await debitWallet(tx, {
     wallet,
     actorUserId: args.actorUserId,
@@ -83,6 +88,34 @@ export async function refundExecution(tx: Tx, executionId: string, amountCents: 
     if (!org) return 0;
     walletUserId = org.ownerId;
   }
+  // Which part of this refund is plan credits. The charge spent allowance first, so refunds give the other
+  // credits back first (last spent, first returned); the remainder goes back to the allowance it came from.
+  const charge = await tx.transaction.findUnique({
+    where: { idempotencyKey: `charge:${executionId}` },
+    select: { allowanceCents: true, subscriptionId: true, createdAt: true },
+  });
+  const fromAllowance = Math.max(0, -(charge?.allowanceCents ?? 0));
+  const otherCharged = ex.costCents - fromAllowance;
+  const otherShare = Math.min(amount, Math.max(0, otherCharged - Math.min(ex.refundedCents, otherCharged)));
+  const allowanceShare = charge?.subscriptionId ? amount - otherShare : 0;
+  let restore: { subscriptionId: string; cents: number } | null = null;
+  let expired = 0;
+  if (allowanceShare > 0 && charge?.subscriptionId) {
+    await lockWallet(tx, walletUserId);
+    const sub = await tx.subscription.findUnique({
+      where: { id: charge.subscriptionId },
+      select: { walletUserId: true, allowancePeriodStart: true, allowancePeriodEnd: true },
+    });
+    // Back into the same paid period's allowance only while that period lasts; otherwise it has expired.
+    const samePeriod =
+      !!sub &&
+      sub.walletUserId === walletUserId &&
+      !!sub.allowancePeriodEnd &&
+      sub.allowancePeriodEnd > new Date() &&
+      (!sub.allowancePeriodStart || charge.createdAt >= sub.allowancePeriodStart);
+    if (samePeriod) restore = { subscriptionId: charge.subscriptionId, cents: allowanceShare };
+    else expired = allowanceShare;
+  }
   await creditWallet(tx, {
     walletUserId,
     actorUserId: null,
@@ -91,7 +124,11 @@ export async function refundExecution(tx: Tx, executionId: string, amountCents: 
     description: (detail ? `Refund: ${detail}` : LEDGER_REASONS[reason]).slice(0, 200),
     executionId,
     reason,
+    allowance: restore,
   });
+  if (expired > 0 && charge?.subscriptionId) {
+    await expireRefundedAllowance(tx, { walletUserId, subscriptionId: charge.subscriptionId, cents: expired, executionId });
+  }
   await tx.execution.update({ where: { id: executionId }, data: { refundedCents: { increment: amount } } });
   return amount;
 }

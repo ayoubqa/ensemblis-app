@@ -1,9 +1,11 @@
 import Link from "next/link";
+import { Suspense } from "react";
 import { JsonLd } from "@/components/JsonLd";
 import { Icon } from "@/components/Icon";
 import { BetaFacts } from "@/components/site/BetaFacts";
 import { CostEstimator } from "@/components/site/CostEstimator";
 import { ExecutionLedger } from "@/components/site/ExecutionLedger";
+import { PlanCards } from "@/components/site/PlanCards";
 import { StartLink } from "@/components/site/StartLink";
 import { EXAMPLE } from "@/app/_home/content";
 import { CAPABILITIES, EXAMPLE_PLAN, EXAMPLE_PLAN_TOTAL, PLAN_COST, STEP_PRICES, TEAM_NAMES, VERIFICATION_CREDITS, WORK_STEPS, type Team } from "@/lib/offer";
@@ -20,8 +22,8 @@ const FAQ = [
     a: "No. Payments are switched off during the private beta: every account starts with free credits, and there is no card to enter.",
   },
   {
-    q: "Why credits instead of a monthly price?",
-    a: "Because the cost of a piece of work depends on what it needs. A three-step objective costs less than a seven-step one, and you see the exact total before you approve it.",
+    q: "Why is the work priced in credits?",
+    a: "Because the cost of a piece of work depends on what it needs. A three-step objective costs less than a seven-step one, and you see the exact total before you approve it. A monthly plan, where one is offered, adds a credit allowance each month; it doesn't change what a piece of work costs.",
   },
   {
     q: "What happens if a step fails?",
@@ -66,6 +68,10 @@ export default function PricingPage() {
           </div>
         </div>
       </section>
+
+      <Suspense fallback={null}>
+        <PlanCards />
+      </Suspense>
 
       <section className="st-sec" aria-labelledby="pr-how">
         <div className="wrap st-price-rules">

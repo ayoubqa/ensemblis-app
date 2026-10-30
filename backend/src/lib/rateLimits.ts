@@ -41,6 +41,6 @@ export const resetPasswordLimiter = limiter(15 * MIN, 20, "Too many attempts. Pl
 /** Burst guard in front of the per-IP-per-day guest trial limit (which lives in the database). */
 export const guestStartLimiter = limiter(60 * MIN, 10, "Too many trial requests from your network. Please try again in an hour.");
 
-export const checkoutLimiter = limiter(MIN, 10, "Too many checkout attempts. Please wait a minute and try again.");
+export const checkoutLimiter = limiter(MIN, r.checkoutPerMin, "Too many checkout attempts. Please wait a minute and try again.");
 
 export const teamJoinLimiter = limiter(15 * MIN, 30, "Too many attempts. Please wait 15 minutes and try again.");

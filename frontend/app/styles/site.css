@@ -1323,6 +1323,82 @@ a.ed-cat:hover {
   display: flex;
   justify-content: space-between;
 }
+/* Monthly plans (components/site/PlanCards.tsx): three cards from the server catalogue. */
+.st-plans {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 20px;
+}
+.st-plan {
+  display: flex;
+  flex-direction: column;
+}
+.st-plan h3 {
+  margin: 0;
+  font-size: 20px;
+  color: var(--ink-strong);
+}
+.st-plan.is-current {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+.st-plan-price {
+  margin: 10px 0 4px;
+  color: var(--muted);
+}
+.st-plan-price b {
+  font-size: 34px;
+  font-weight: 700;
+  color: var(--ink-strong);
+  letter-spacing: -0.01em;
+}
+.st-plan .st-beta {
+  flex: 1;
+  margin-bottom: 22px;
+}
+.st-plan-cta .btn {
+  width: 100%;
+  justify-content: center;
+}
+.st-plan-note,
+.st-plan-error {
+  margin: 0 0 20px;
+  padding: 12px 16px;
+  border-radius: 12px;
+  background: var(--accent-soft);
+  color: var(--ink);
+}
+.st-plan-error {
+  margin: 20px 0 0;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  background: var(--bad-soft);
+  color: var(--bad);
+}
+.st-plan-rules {
+  list-style: none;
+  padding: 0;
+  margin: 28px 0 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px 40px;
+  color: var(--muted);
+  line-height: 1.55;
+}
+.st-plan-rules b {
+  color: var(--ink-strong);
+}
+@media (max-width: 900px) {
+  .st-plans,
+  .st-plan-rules {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 .st-split {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr);

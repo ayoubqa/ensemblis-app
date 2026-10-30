@@ -1,7 +1,7 @@
 // Periodic housekeeping, run by the worker (never by more than the processes
 // that run a worker): recovery sweep, recurring objectives, legacy run
-// refunds, expired guest trials, unused legacy attachments, old jobs, and the
-// hourly ledger check (lib/ledger.ts).
+// refunds, expired subscription allowances, expired guest trials, unused
+// legacy attachments, old jobs, and the hourly ledger check (lib/ledger.ts).
 
 import { log } from "../lib/log";
 import { cleanupExpiredGuests } from "../guest/cleanup";
@@ -11,6 +11,7 @@ import { schedulerTick } from "../workflows/schedule";
 import { pruneJobs } from "./queue";
 import { recoverExecutions } from "./recovery";
 import { checkLedger } from "../lib/ledger";
+import { sweepSubscriptions } from "../billing/subscriptions";
 
 let running = false;
 let lastHourly = 0;
@@ -29,6 +30,8 @@ export async function maintenance(): Promise<void> {
     await step("recovery", () => recoverExecutions());
     if (process.env.DISABLE_SCHEDULER !== "true") await step("scheduler", () => schedulerTick());
     await step("legacy", () => sweepLegacyRuns());
+    // Unused plan credits expire at the end of their paid period (spending also expires them first).
+    await step("subscriptions", () => sweepSubscriptions());
     if (Date.now() - lastHourly > 3600_000) {
       lastHourly = Date.now();
       await step("guests", () => cleanupExpiredGuests());

@@ -67,7 +67,9 @@ applies only if you add a standalone worker:
 | `ADMIN_EMAILS` | ✔ | – | operators; must also verify their email (see §6) |
 | `TAVILY_API_KEY` | ✔ | ✔ | web search — **required for research briefs, lead lists and any web-research step**; without it search falls back to Wikipedia only: the define page warns "Limited evidence", every research step is recorded `degraded`, the result's Evidence panel and Limitations say only encyclopedia summaries were available, and the API logs a boot warning |
 | `RESEND_API_KEY`, `EMAIL_FROM` | ✔ | ✔ | optional email: verification, notifications, password reset |
-| `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` | ✔ | – | optional real payments |
+| `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` | ✔ | – | optional real payments (credit packs; also required for monthly plans) |
+| `SUBSCRIPTIONS_ENABLED`, `STRIPE_PRICE_STARTER`, `STRIPE_PRICE_GROWTH`, `STRIPE_PRICE_BUSINESS` | ✔ | – | optional monthly plans (off by default); see §2b. Optional `STRIPE_PRODUCT_*`, `STRIPE_PORTAL_CONFIGURATION_ID`. The worker never calls Stripe and needs none of these |
+| `SUBSCRIPTION_PAST_DUE_ACCESS`, `PLAN_*_RUNS_PER_DAY` | ✔ | ✔ | only if changed from the defaults (`keep`; 5/15/40): the worker applies plan limits when executions start, so keep the **same values on both** |
 | `TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET_KEY` | ✔ | – | optional bot check |
 | `SIGNUP_INVITE_CODE` | ✔ | – | optional invite-only sign-up |
 
@@ -130,6 +132,94 @@ labelled "Local model endpoint" on every result it produced (with `E2E_STUB=1`:
 start with it when `NODE_ENV=production` **or** on Render (`RENDER` is set) —
 and on Render the API also refuses a missing or placeholder `JWT_SECRET` even
 if `NODE_ENV` was forgotten. The provider refuses the mock again at call time.
+
+### 2b. Monthly plans (Stripe Billing)
+
+Plans are **off** until `SUBSCRIPTIONS_ENABLED=true`, Stripe is configured and each plan has a Stripe Price
+ID. While off, the pricing page shows no plans and nothing below runs. Set this up in **Stripe test mode**
+first; switching to live keys is a separate, deliberate step.
+
+**Catalogue (one place: `backend/src/config.ts` → `subscriptions.plans`, read by `billing/plans.ts`).**
+The defaults are proposals and can be changed with environment variables. The frontend shows what
+`GET /api/config` returns.
+
+| Plan | Price | Monthly credits | Executions per person per day | Env overrides |
+|---|---|---|---|---|
+| Starter | €29 | 3,000 | 5 | `PLAN_STARTER_PRICE_CENTS`, `PLAN_STARTER_CREDITS`, `PLAN_STARTER_RUNS_PER_DAY` |
+| Growth | €99 | 15,000 | 15 | `PLAN_GROWTH_…` |
+| Business | €299 | 60,000 | 40 | `PLAN_BUSINESS_…` |
+
+The daily limit is never below `MAX_TASKS_PER_USER_PER_DAY`. Server-wide caps, the credit check and the
+execution cost guards apply to every plan.
+
+**Stripe setup (test mode).**
+1. Products → create one product per plan with a **recurring monthly EUR price** of exactly the amount above.
+   Checkout refuses a Price whose amount, currency or interval differs from the catalogue, and logs
+   `subscription.price_mismatch`. Put the IDs in `STRIPE_PRICE_STARTER`, `STRIPE_PRICE_GROWTH` and
+   `STRIPE_PRICE_BUSINESS`. Optionally also set `STRIPE_PRODUCT_*`, which checkout then also checks.
+2. Developers → Webhooks: use the same endpoint as credit packs, `https://<api>/api/billing/stripe/webhook`.
+   Add the events `checkout.session.completed`, `checkout.session.async_payment_succeeded`,
+   `checkout.session.async_payment_failed`, `checkout.session.expired`, `customer.subscription.created`,
+   `customer.subscription.updated`, `customer.subscription.deleted`, `customer.subscription.paused`,
+   `customer.subscription.resumed`, `customer.subscription.pending_update_applied`,
+   `customer.subscription.pending_update_expired`, `invoice.paid` and `invoice.payment_failed`.
+   - That list is `STRIPE_WEBHOOK_EVENTS` in `backend/src/billing/subscriptions.ts`.
+   - Its signing secret is `STRIPE_WEBHOOK_SECRET`.
+   - The handler re-reads every object through the API, so the endpoint's API version doesn't matter.
+     `2025-02-24.acacia`, the SDK's version, is the one tested.
+   - An event from the other mode (a live event on a test key, or the reverse) is answered 400 and ignored,
+     so a test endpoint and a live endpoint can't cross.
+3. Settings → Billing → Customer portal:
+   - enable payment-method updates, invoice history and "cancel at end of billing period";
+   - leave plan switching **off**, because the app's Upgrade and Downgrade buttons apply the policy below.
+   - Optionally put a specific configuration in `STRIPE_PORTAL_CONFIGURATION_ID`.
+4. Settings → Subscriptions and emails → failed payments: choose the retry schedule, and what happens when
+   retries are exhausted ("cancel the subscription" is the simplest).
+5. Set `SUBSCRIPTIONS_ENABLED=true` and the Stripe values on the **API**, then redeploy.
+   - The worker needs none of them. Only `SUBSCRIPTION_PAST_DUE_ACCESS` and `PLAN_*_RUNS_PER_DAY`, if
+     changed, must match the API.
+   - The boot log warns about a missing Price ID, or a live key with plans on.
+   - Check `GET /api/config`: `subscriptionsEnabled: true`, and every plan `available: true`.
+6. Run the whole test-mode validation in
+   [`docs/billing/stripe-test-mode-validation.md`](docs/billing/stripe-test-mode-validation.md) on a
+   non-production environment, and record the results there. It covers checkout with 3-D Secure and a
+   declined card, redelivery, cancel and keep, upgrade (paid and declined), downgrade, the portal, and
+   renewals on test clocks (paid, failed, recovered, retries exhausted).
+   - `npm run ops:stripe-test -- setup` (backend) creates or reuses the test-mode products, prices, portal
+     configuration and optionally the endpoint. It refuses live keys.
+   - `npm run ops:stripe-test -- check` verifies them against the catalogue.
+   - Production keeps `SUBSCRIPTIONS_ENABLED` unset until that run has passed.
+
+**What the app does (policies).**
+
+| Situation | Behaviour |
+|---|---|
+| Checkout | Server-side Checkout Session in `subscription` mode for the catalogue's Price. The client sends only a plan id. Redirect URLs are fixed: `/usage?subscription=success` and `/pricing?subscription=cancelled`. One open checkout per account; asking again reuses it. Accounts that already have a plan get 409. |
+| Returning from Stripe | Nothing is granted. Usage polls until the server has the paid subscription, otherwise it says the payment is still being confirmed. |
+| First invoice paid (`invoice.paid`) | The plan's monthly credits are granted once per invoice (ledger key `allowance:<invoiceId>`), and the plan's limits apply. An invoice "paid" with nothing charged (a trial or a 100% coupon set up in Stripe) grants no credits; the event is logged as `subscription.invoice_nothing_paid`. |
+| Renewal paid | Unused plan credits from the last period expire (`allowance_expired`), then the new allowance is granted. |
+| Payment failed | No new allowance. The status becomes `past_due` and Usage asks the customer to update their card. The plan's limits stay while Stripe retries (`SUBSCRIPTION_PAST_DUE_ACCESS=keep`; `revoke` drops them). Other credits stay usable. |
+| Cancel | At the end of the paid period. Plan credits already paid for stay usable until that period ends. No refund, no extra grant. Immediate cancellation isn't offered in the app; if it is done in Stripe, the paid allowance still runs to its period end. |
+| Upgrade | Immediate. Stripe charges the prorated difference, and the change applies only if that payment succeeds (`pending_if_incomplete`). When it is paid, credits are added: the difference × the share of the period left. Never a second full allowance. |
+| Downgrade | From the next renewal. The current plan and allowance stay until then, and the change can be undone. |
+| Plan credits vs other credits | One balance (`User.credits`). The unused allowance is tracked on the subscription; plan credits are spent first. Bought, starting and demo credits never expire. A refund puts plan credits back while their period lasts. After it ends, they are refunded and expire at once (two ledger rows). |
+| Webhooks | Signature verified on the raw body; an event from the other Stripe mode is answered 400. Duplicates are skipped (`StripeEvent`) and every handler is idempotent. Objects are re-read from Stripe, and an older read never overwrites a newer one. A processing error answers 500, so Stripe retries. Credit-pack sessions (`payment` mode) and subscriptions never trigger each other's credits. |
+| Invoice for an unknown Price | Answered 500 and logged (`subscription.invoice_unknown_price`, `stripe.webhook_failed`), so nothing is granted and Stripe keeps retrying. Fix the `STRIPE_PRICE_*` setting; the next retry grants the allowance once. |
+| Changing a plan's price | The app knows one Price per plan, the one in `STRIPE_PRICE_*`. Existing subscriptions stay on their old Price. **Before** pointing `STRIPE_PRICE_*` at a new Price, move them to it in Stripe (with no proration, it applies from their next renewal); otherwise their renewals hit the row above. Keeping old customers on an old price isn't supported yet. |
+| Stripe unavailable | Checkout, cancel, keep and plan changes answer 503 with "try again" (`subscription.stripe_failed` in the log), and the app's plan stays as it was. If Stripe did apply the change and only the answer was lost, its webhook brings the change in. A retry reuses the idempotency key, so nothing is applied twice. |
+| Joining a team | A team member spends the team's credits, so an account with a renewing plan can't join a team (409) until it cancels the plan; the paid month still runs out. Joining also closes the account's open plan checkout links. |
+| Reconciliation | The hourly ledger check also compares every subscription's unused allowance with its ledger rows (`ledger.allowance_mismatch`). |
+
+**Not covered by the app (do these in Stripe, deliberately):**
+- refunding a subscription payment, which doesn't remove the granted credits;
+- disputes;
+- tax collection (Stripe Tax is not enabled);
+- coupons (Checkout doesn't accept promotion codes).
+
+**Local and E2E testing without Stripe.** `E2E_STRIPE=1 npm run e2e -- subscription` (frontend) runs the
+whole journey in a browser against `backend/scripts/stripe-stub.mjs`. That is a local stand-in for the API calls
+used, plus a labelled test checkout page. It signs webhooks like Stripe. It is not Stripe: it proves the app's
+side of the integration, not Stripe's behaviour.
 
 ## 3. Before merging: rehearse on a copy of production (recommended, ~10 min)
 

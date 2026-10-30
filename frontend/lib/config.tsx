@@ -38,6 +38,8 @@ export const FALLBACK_CONFIG: PublicConfig = {
   emailEnabled: false,
   paymentsEnabled: false,
   creditPacks: [],
+  subscriptionsEnabled: false,
+  plans: [],
   guestTrialEnabled: false,
   guestCreditsCents: 0,
   turnstileSiteKey: null,
