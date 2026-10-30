@@ -187,6 +187,14 @@ export async function stripeWebhookHandler(req: Request, res: Response) {
     res.status(400).json({ error: "Invalid Stripe signature" });
     return;
   }
+  // Test and live mode never mix: an event from the other mode means the key and the webhook secret come from
+  // different modes. Refused visibly (Stripe shows the failed deliveries) instead of half-processed.
+  const liveKey = /^(sk|rk)_live_/.test(config.stripe.secretKey);
+  if (event.livemode !== liveKey) {
+    log.error("stripe.webhook_mode_mismatch", { eventId: event.id, type: event.type, eventLivemode: event.livemode, keyLivemode: liveKey });
+    res.status(400).json({ error: "This event's mode (test/live) doesn't match this server's Stripe key." });
+    return;
+  }
   try {
     await handleStripeEvent(event);
     res.json({ received: true });

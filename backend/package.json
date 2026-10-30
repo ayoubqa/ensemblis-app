@@ -15,6 +15,7 @@
     "prisma:generate": "prisma generate",
     "prisma:studio": "prisma studio",
     "ops:verify-email": "tsx src/ops/verifyEmail.ts",
+    "ops:stripe-test": "tsx src/ops/stripeTestMode.ts",
     "eval:scorecard": "tsx src/ops/scorecard.ts",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src tests",

@@ -369,7 +369,8 @@ export function productionConfigWarnings(role: "api" | "worker" = "api"): string
   if (config.stripe.apiBase) {
     warnings.push("STRIPE_API_BASE is set: Stripe API calls go to a local stub, not Stripe. It is for tests and the E2E stack; unset it in production.");
   }
-  if (config.subscriptions.enabled) {
+  // Stripe calls and webhooks happen on the API only: the worker needs no Stripe settings.
+  if (role === "api" && config.subscriptions.enabled) {
     if (!config.stripe.enabled) {
       warnings.push("SUBSCRIPTIONS_ENABLED=true but STRIPE_SECRET_KEY or STRIPE_WEBHOOK_SECRET is missing: plans are shown as not available.");
     } else {

@@ -34,6 +34,23 @@ import { entitledStatuses, entitlementsForPlan } from "./entitlements";
 import { planAvailable, planById, planByPriceId, subscriptionsAvailable, type Plan } from "./plans";
 import { stripeClient } from "./stripeClient";
 
+/** Every event type the webhook endpoint must be sent: the subscription lifecycle and credit packs (the checkout.session ones). */
+export const STRIPE_WEBHOOK_EVENTS = [
+  "checkout.session.completed",
+  "checkout.session.async_payment_succeeded",
+  "checkout.session.async_payment_failed",
+  "checkout.session.expired",
+  "customer.subscription.created",
+  "customer.subscription.updated",
+  "customer.subscription.deleted",
+  "customer.subscription.paused",
+  "customer.subscription.resumed",
+  "customer.subscription.pending_update_applied",
+  "customer.subscription.pending_update_expired",
+  "invoice.paid",
+  "invoice.payment_failed",
+] as const;
+
 /** Stripe statuses of a subscription that still exists (a wallet may have at most one). */
 export const LIVE_STATUSES = ["incomplete", "trialing", "active", "past_due", "unpaid", "paused"];
 /** Checkout links expire after this long (Stripe's minimum is 30 minutes). */
@@ -80,6 +97,17 @@ async function assertWalletOwner(userId: string) {
 
 const verifiedPrices = new Map<string, number>();
 
+/** Why a Stripe Price can't be sold as `plan` (empty when it matches): monthly, EUR, exactly the catalogue amount. */
+export function priceProblems(plan: Pick<Plan, "priceCents" | "stripeProductId">, price: Pick<Stripe.Price, "active" | "currency" | "unit_amount" | "type" | "recurring" | "product">): string[] {
+  const problems: string[] = [];
+  if (!price.active) problems.push("price is archived");
+  if (price.currency !== "eur") problems.push(`currency ${price.currency}`);
+  if (price.unit_amount !== plan.priceCents) problems.push(`amount ${price.unit_amount} instead of ${plan.priceCents}`);
+  if (price.type !== "recurring" || price.recurring?.interval !== "month" || (price.recurring?.interval_count ?? 1) !== 1) problems.push("not billed monthly");
+  if (plan.stripeProductId && idOf(price.product as string | Stripe.Product) !== plan.stripeProductId) problems.push("different product");
+  return problems;
+}
+
 /** The Stripe Price must bill exactly what the catalogue says, monthly, in EUR. Throws (and logs) otherwise. */
 async function verifyPrice(plan: Plan): Promise<void> {
   const at = verifiedPrices.get(plan.stripePriceId);
@@ -91,12 +119,7 @@ async function verifyPrice(plan: Plan): Promise<void> {
     log.error("subscription.price_unreadable", { planId: plan.id, error: err instanceof Error ? err.message : String(err) });
     throw new HttpError(503, "We couldn't reach the payment provider. Please try again in a moment.");
   }
-  const problems: string[] = [];
-  if (!price.active) problems.push("price is archived");
-  if (price.currency !== "eur") problems.push(`currency ${price.currency}`);
-  if (price.unit_amount !== plan.priceCents) problems.push(`amount ${price.unit_amount} instead of ${plan.priceCents}`);
-  if (price.type !== "recurring" || price.recurring?.interval !== "month" || (price.recurring?.interval_count ?? 1) !== 1) problems.push("not billed monthly");
-  if (plan.stripeProductId && idOf(price.product as string | Stripe.Product) !== plan.stripeProductId) problems.push("different product");
+  const problems = priceProblems(plan, price);
   if (problems.length) {
     log.error("subscription.price_mismatch", { planId: plan.id, priceId: plan.stripePriceId, problems });
     throw new HttpError(503, "This plan can't be bought right now. Please try again later.");
@@ -187,6 +210,12 @@ export async function createSubscriptionCheckout(userId: string, planId: string)
     log.info("subscription.checkout_started", { walletUserId: userId, planId: plan.id, subscriptionId: row.id });
     return session.url;
   });
+}
+
+/** Closes this account's open checkout links, if any (e.g. when it joins a team and stops using its own wallet). */
+export async function closeOpenCheckouts(userId: string): Promise<void> {
+  const open = await prisma.subscription.findMany({ where: { walletUserId: userId, status: "checkout_pending" } });
+  for (const row of open) await abandonCheckout(row);
 }
 
 /** A newer checkout replaces an open one for another plan: the old link is closed so it can't be paid too. */
@@ -367,7 +396,13 @@ async function onInvoicePaid(invoiceId: string) {
   const inv = (await stripeClient().invoices.retrieve(invoiceId)) as AnyInvoice;
   const row = await rowForInvoice(inv);
   if (!row) return;
-  await applyPaidInvoice(row.id, inv);
+  const result = await applyPaidInvoice(row.id, inv);
+  if (result === "unknown_plan") {
+    // One of our subscriptions was billed on a Price the catalogue doesn't know (a missing or changed
+    // STRIPE_PRICE_*): fail, so Stripe retries the event (for up to 3 days) and the credits arrive once the
+    // configuration is fixed, instead of the paid month being recorded as handled without them.
+    throw new Error(`invoice ${inv.id} bills a price that is not in the plan catalogue; fix STRIPE_PRICE_* and Stripe will retry`);
+  }
   await syncSubscription(row.stripeSubscriptionId ?? invoiceSubscriptionId(inv)!);
 }
 
@@ -452,6 +487,16 @@ async function manageableSubscription(userId: string) {
   return row as SubscriptionRow & { stripeSubscriptionId: string };
 }
 
+/** A Stripe call made for the customer: a failure is a clear 503. A retry reuses the idempotency key, so a change Stripe already made isn't made twice. */
+async function viaStripe<T>(what: string, ctx: Record<string, unknown>, fn: () => Promise<T>): Promise<T> {
+  try {
+    return await fn();
+  } catch (err) {
+    log.error("subscription.stripe_failed", { what, ...ctx, error: err instanceof Error ? err.message : String(err) });
+    throw new HttpError(503, "We couldn't make this change with the payment provider, so your plan may not have changed. Please try again in a moment.");
+  }
+}
+
 const updateKey = (row: SubscriptionRow, what: string) => `subscription_${row.id}_${what}_${row.stripeSyncedAt?.getTime() ?? 0}`;
 
 /** Cancel at the end of the paid period (true), or keep the plan after all (false). */
@@ -461,7 +506,9 @@ export async function setCancelAtPeriodEnd(userId: string, cancel: boolean): Pro
     const row = await manageableSubscription(userId);
     if (!["active", "trialing", "past_due"].includes(row.status)) throw new HttpError(409, "This plan can't be changed right now.");
     const readAt = new Date();
-    const s = (await stripeClient().subscriptions.update(row.stripeSubscriptionId, { cancel_at_period_end: cancel }, { idempotencyKey: updateKey(row, cancel ? "cancel" : "resume") })) as AnySub;
+    const s = (await viaStripe(cancel ? "cancel" : "resume", { subscriptionId: row.id }, () =>
+      stripeClient().subscriptions.update(row.stripeSubscriptionId, { cancel_at_period_end: cancel }, { idempotencyKey: updateKey(row, cancel ? "cancel" : "resume") })
+    )) as AnySub;
     await applyState(row.id, s, readAt);
     log.info(cancel ? "subscription.cancel_requested" : "subscription.resumed", { subscriptionId: row.id });
   });
@@ -481,14 +528,17 @@ export async function changePlan(userId: string, planId: string): Promise<{ chan
     const current = planById(row.planId);
     if (!current) throw new HttpError(409, "Your current plan is no longer offered. Contact support to change it.");
     const stripe = stripeClient();
-    const live = (await stripe.subscriptions.retrieve(row.stripeSubscriptionId)) as AnySub;
+    const ctx = { subscriptionId: row.id, to: target.id };
+    const live = (await viaStripe("read", ctx, () => stripe.subscriptions.retrieve(row.stripeSubscriptionId))) as AnySub;
     const item = live.items.data[0];
     if (!item) throw new HttpError(409, "This plan can't be changed right now.");
     const readAt = new Date();
 
     if (row.nextPlanId) {
       if (target.id !== current.id) throw new HttpError(409, `A change to ${planById(row.nextPlanId)?.name ?? "another plan"} is already scheduled. Keep your current plan first.`);
-      const s = (await stripe.subscriptions.update(row.stripeSubscriptionId, { items: [{ id: item.id, price: current.stripePriceId }], proration_behavior: "none" }, { idempotencyKey: updateKey(row, `keep_${current.id}`) })) as AnySub;
+      const s = (await viaStripe("keep", ctx, () =>
+        stripe.subscriptions.update(row.stripeSubscriptionId, { items: [{ id: item.id, price: current.stripePriceId }], proration_behavior: "none" }, { idempotencyKey: updateKey(row, `keep_${current.id}`) })
+      )) as AnySub;
       await applyState(row.id, s, readAt);
       return { change: "scheduled_change_cancelled" };
     }
@@ -497,10 +547,12 @@ export async function changePlan(userId: string, planId: string): Promise<{ chan
 
     if (target.monthlyCredits > current.monthlyCredits) {
       // Charged now for the rest of the period; Stripe applies the change only once that payment succeeds.
-      const s = (await stripe.subscriptions.update(
-        row.stripeSubscriptionId,
-        { items: [{ id: item.id, price: target.stripePriceId }], proration_behavior: "always_invoice", payment_behavior: "pending_if_incomplete" },
-        { idempotencyKey: updateKey(row, `to_${target.id}`) }
+      const s = (await viaStripe("upgrade", ctx, () =>
+        stripe.subscriptions.update(
+          row.stripeSubscriptionId,
+          { items: [{ id: item.id, price: target.stripePriceId }], proration_behavior: "always_invoice", payment_behavior: "pending_if_incomplete" },
+          { idempotencyKey: updateKey(row, `to_${target.id}`) }
+        )
       )) as AnySub;
       if (s.pending_update) {
         throw new HttpError(402, `Your card couldn't be charged for the upgrade to ${target.name}, so your plan hasn't changed. Update your payment method in Billing, then try again.`);
@@ -509,7 +561,9 @@ export async function changePlan(userId: string, planId: string): Promise<{ chan
       log.info("subscription.upgrade_requested", { subscriptionId: row.id, from: current.id, to: target.id });
       return { change: "upgraded" };
     }
-    const s = (await stripe.subscriptions.update(row.stripeSubscriptionId, { items: [{ id: item.id, price: target.stripePriceId }], proration_behavior: "none" }, { idempotencyKey: updateKey(row, `to_${target.id}`) })) as AnySub;
+    const s = (await viaStripe("downgrade", ctx, () =>
+      stripe.subscriptions.update(row.stripeSubscriptionId, { items: [{ id: item.id, price: target.stripePriceId }], proration_behavior: "none" }, { idempotencyKey: updateKey(row, `to_${target.id}`) })
+    )) as AnySub;
     await applyState(row.id, s, readAt);
     log.info("subscription.downgrade_scheduled", { subscriptionId: row.id, from: current.id, to: target.id });
     return { change: "downgrade_scheduled" };

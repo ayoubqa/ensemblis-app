@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { prisma } from "../../src/db";
 import { config } from "../../src/config";
 import { setStripeClientForTests } from "../../src/billing/stripe";
-import { resetSubscriptionCachesForTests, sweepSubscriptions } from "../../src/billing/subscriptions";
+import { priceProblems, resetSubscriptionCachesForTests, sweepSubscriptions } from "../../src/billing/subscriptions";
 import { entitlementsFor } from "../../src/billing/entitlements";
 import { reconcileAllowances } from "../../src/lib/ledger";
 import { debitWallet } from "../../src/lib/wallet";
@@ -530,5 +530,82 @@ describe("lifecycle", () => {
     expect(m.subscription).toBeNull();
     expect(m.credits).toEqual({ planCreditsCents: 15000, otherCreditsCents: 1000 });
     await api().post("/api/billing/subscription/cancel").set(member.auth).expect(403);
+  });
+});
+
+describe("hardening", () => {
+  it("an invoice on a Price the catalogue doesn't know is retried, not dropped: the credits arrive once the config is fixed", async () => {
+    const { auth, user } = await createUser({ credits: 0 });
+    const r = await startCheckout(auth, "starter").expect(200);
+    const events = fake.completeCheckout(sessionIdOf(r.body.url));
+    await deliverAll(events.slice(0, 2)); // linked and active
+    const starter = config.subscriptions.plans.find((p) => p.id === "starter")!;
+    starter.stripePriceId = "price_renamed_by_mistake"; // e.g. STRIPE_PRICE_STARTER set to a different Price
+    expect((await deliver(events[2])).status).toBe(500);
+    expect(await grants(user.id)).toHaveLength(0);
+    expect(await prisma.stripeEvent.findUnique({ where: { id: events[2].id } })).toBeNull(); // not marked handled
+    starter.stripePriceId = PRICE_IDS.starter; // fixed
+    await deliverAll([events[2]]); // Stripe's retry
+    expect(await balance(user.id)).toBe(3000);
+    expect(await grants(user.id)).toHaveLength(1);
+  });
+
+  it("refuses events from the other Stripe mode (a live event on a test key, or the reverse)", async () => {
+    const { auth, user } = await createUser({ credits: 0 });
+    const r = await startCheckout(auth, "starter").expect(200);
+    const events = fake.completeCheckout(sessionIdOf(r.body.url));
+    for (const e of events) {
+      const res = await deliver({ ...e, livemode: true });
+      expect(res.status).toBe(400);
+      expect(res.body.error).toMatch(/mode/);
+    }
+    expect(await balance(user.id)).toBe(0);
+    expect(await prisma.stripeEvent.count()).toBe(0);
+    expect((await row(user.id)).status).toBe("checkout_pending");
+  });
+
+  it("when Stripe doesn't answer a cancel or a plan change, the customer gets a clear retryable error and nothing changes", async () => {
+    const { auth, user } = await createUser({ credits: 0 });
+    await subscribe(auth, "starter");
+    fake.failNext.add("subscriptions.update");
+    expect((await api().post("/api/billing/subscription/cancel").set(auth).expect(503)).body.error).toMatch(/couldn't make this change with the payment provider/);
+    expect((await row(user.id)).cancelAtPeriodEnd).toBe(false);
+    fake.failNext.add("subscriptions.retrieve");
+    expect((await api().post("/api/billing/subscription/change").set(auth).send({ planId: "growth" }).expect(503)).body.error).toMatch(/couldn't make this change with the payment provider/);
+    expect((await row(user.id)).planId).toBe("starter");
+    await api().post("/api/billing/subscription/cancel").set(auth).expect(200); // the retry works
+    expect((await row(user.id)).cancelAtPeriodEnd).toBe(true);
+  });
+
+  it("someone paying for a plan can't join a team (they would pay for credits they can't spend) until they cancel it", async () => {
+    const owner = await createUser();
+    await api().post("/api/team").set(owner.auth).send({ name: "Acme" }).expect(201);
+    const { token } = (await api().post("/api/team/invites").set(owner.auth).expect(201)).body.invite;
+    const { auth } = await createUser();
+    await subscribe(auth, "starter");
+    expect((await api().post("/api/team/join").set(auth).send({ token }).expect(409)).body.error).toMatch(/Starter plan on your own account/);
+    await api().post("/api/billing/subscription/cancel").set(auth).expect(200);
+    await api().post("/api/team/join").set(auth).send({ token }).expect(200);
+  });
+
+  it("joining a team closes a plan checkout that was opened before, so it can't be paid afterwards", async () => {
+    const owner = await createUser();
+    await api().post("/api/team").set(owner.auth).send({ name: "Acme" }).expect(201);
+    const { token } = (await api().post("/api/team/invites").set(owner.auth).expect(201)).body.invite;
+    const { auth, user } = await createUser();
+    const r = await startCheckout(auth, "growth").expect(200);
+    await api().post("/api/team/join").set(auth).send({ token }).expect(200);
+    expect((await row(user.id)).status).toBe("checkout_expired");
+    expect(fake.sessions.get(sessionIdOf(r.body.url))?.status).toBe("expired");
+  });
+
+  it("checks a Stripe Price against the plan: amount, EUR, monthly, active, product", () => {
+    const plan = { priceCents: 2900, stripeProductId: "" };
+    const good = { active: true, currency: "eur", unit_amount: 2900, type: "recurring", recurring: { interval: "month", interval_count: 1 }, product: "prod_1" } as never;
+    expect(priceProblems(plan, good)).toEqual([]);
+    const bad = { active: false, currency: "usd", unit_amount: 2500, type: "recurring", recurring: { interval: "year", interval_count: 1 }, product: "prod_2" } as never;
+    expect(priceProblems({ ...plan, stripeProductId: "prod_1" }, bad)).toEqual(["price is archived", "currency usd", "amount 2500 instead of 2900", "not billed monthly", "different product"]);
+    expect(priceProblems(plan, { ...(good as object), recurring: { interval: "month", interval_count: 3 } } as never)).toEqual(["not billed monthly"]);
+    expect(priceProblems(plan, { ...(good as object), type: "one_time", recurring: null } as never)).toEqual(["not billed monthly"]);
   });
 });
