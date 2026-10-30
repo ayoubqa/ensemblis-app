@@ -233,7 +233,7 @@ NOT RUN: not executed. Nothing executed failed. One defect was found from the re
 | J7 | PASS (Stripe and app replay), by a different path | Card tokens are switched off on this account (end of life), so the "switch to `0341` in the portal" step was replaced:<br>- customer `cus_VXNU5uWoZ2tshZ` uses `pm_card_chargeCustomerFail`, plus a 100% first-month coupon;<br>- its first invoice `in_1UWIjTJxdXxCrKwIETAqNCdS` is "paid" with **€0**, and the replay granted **nothing** for it;<br>- the upgrade answered **200 with `pending_update` set** (items unchanged, expiry about 23h), and invoice `in_1UWIjnJxdXxCrKwIw7JbIRX6` is open, €99.00 due.<br>**Replay:** the app answers **402** "couldn't be charged… plan hasn't changed", and plan and credits are unchanged.<br>Stripe will retry that invoice (`next_payment_attempt` is set). A later success was not tested. |
 | J8 | PASS (Stripe and app replay) | Downgrade with `proration_behavior: none`: the price changed, no invoice was created and the period is unchanged. The replay keeps Growth with `nextPlanId` Starter. Keep restores the Growth price, again with no invoice. |
 | J9 | PARTIAL | The portal configuration matches the policy (plan switching off, cancel at period end, card updates, invoices). A session `bps_1UWIm3JxdXxCrKwIYDYTR2D4` was created with the fixed return URL. The hosted portal page was NOT RUN. |
-| J10–J14 | NOT RUN | The connector can create test clocks but not advance them. J1's subscription is on `clock_1UWIdyJxdXxCrKwIAk0mkzip`, ready to advance from the Dashboard.<br>The app expires allowances by its own clock, not the test clock, so period-end expiry (J13, J14) won't show on a clock run. |
+| J10–J14 | NOT RUN (prepared) | The connector can create test clocks but not advance them. Three clocks are set up, each frozen at 30 Oct 2026, ready to advance from the Dashboard (table below).<br>The app expires allowances by its own clock, not the test clock, so period-end expiry (J13, J14) won't show in the app on a clock run. Stripe's side will. |
 | J15 | NOT RUN | Not attempted (credit packs are unchanged by this PR). |
 | J16 | n/a for Stripe | App rule; covered by `subscriptions.test.ts`. |
 | X1–X4 | NOT RUN against a real endpoint | Covered by the automated tests: bad signature, Price mismatch (`priceProblems` also passes on the real prices), reconciliation. |
@@ -254,8 +254,16 @@ NOT RUN: not executed. Nothing executed failed. One defect was found from the re
   Dashboard gets that version. That's fine for the app, which re-reads objects through its pinned SDK;
   pinning `2025-02-24.acacia` on the endpoint (as `setup` does) keeps payloads and re-reads the same.
 
+**Prepared test clocks.** In Dashboard → Billing → Test clocks, advance each clock to the times below. The results can then be read through the connector.
+
+| Clock | Subscription | Advance to | Expected in Stripe |
+|---|---|---|---|
+| J10, paid renewal: `clock_1UWIdyJxdXxCrKwIAk0mkzip` | `sub_1UWIfkJxdXxCrKwIAk8SgdTr` (Growth, visa) | 29 Nov 2026 + 2 h | A `subscription_cycle` invoice paid €99.00. |
+| J11/J13, failed renewal: `clock_1UWJ1IJxdXxCrKwIr0tfGw8t` | `sub_1UWJ1eJxdXxCrKwI2cDPFUAA` (Starter, free first month, card that fails) | 29 Nov 2026 + 2 h, then past the last retry | First `invoice.payment_failed` and `past_due`. Then, per the account's retry settings, `customer.subscription.deleted`. |
+| J14, cancel at period end: `clock_1UWJ1LJxdXxCrKwIFlCfAi6s` | `sub_1UWJ1jJxdXxCrKwII9fSxoba` (Starter, `cancel_at_period_end`) | 29 Nov 2026 + 2 h | `customer.subscription.deleted`, and no renewal invoice. |
+
 **To finish the run:**
-- The renewals (J10–J14): advance `clock_1UWIdyJxdXxCrKwIAk0mkzip` in the Dashboard. I can read the results through the connector.
+- The renewals (J10–J14): advance the clocks above.
 - The hosted pages (J1 payment, J3, J4 decline screen, J9 portal): need a browser that can reach `checkout.stripe.com` / `billing.stripe.com`.
 - A real delivery (J2 and route A): needs an API with the test key, plus either an endpoint or the relay.
 
