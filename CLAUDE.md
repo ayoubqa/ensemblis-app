@@ -57,6 +57,9 @@ failures from a concurrent run are not real.
   - Never mark something verified, passed or achieved without the check having run.
 - **Costs come from `PROVIDER_PRICING` and are never guessed.**
   - An unpriced event stays null.
+  - The cost guard (`engine/costGuard.ts`) never counts what it can't price as free. It names it as unpriced, and by
+    default (`COST_GUARD_UNPRICED=stop`) stops the run. Its estimates are kept apart from measured costs and never
+    recorded as costs.
   - Customer-facing text never shows provider costs, keys, HTTP errors or environment variable names.
 - **Credits are whole units** stored in the historical `*Cents` columns (100 credits = €1 list value).
   - One ledger: `Transaction`, with `reason`, `balanceAfter` and `idempotencyKey`. Don't add a second ledger.

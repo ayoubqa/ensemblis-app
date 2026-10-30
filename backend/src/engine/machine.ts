@@ -761,14 +761,20 @@ async function finalize(ex: Execution, model: ModelAssessment | null, accepted: 
     data: { status: outcome.status },
   });
 
-  const learned = await learnFromExecution({
-    executionId: ex.id,
-    orgId: ex.orgId,
-    objectiveTitle: objective.title,
-    statement: objective.statement,
-    contextNotes: objective.contextNotes,
-    outcomeSummary: outcome.summary,
-  });
+  // The memory call is the run's last model call. The result is already measured, so a run at its cost limit
+  // (or whose cost can't be checked) completes without it instead of failing.
+  const overLimit = await costLimitReached(ex, [], "memory");
+  if (overLimit) log.warn("execution.memory_skipped", { executionId: ex.id, reason: "cost_guard" });
+  const learned = overLimit
+    ? []
+    : await learnFromExecution({
+        executionId: ex.id,
+        orgId: ex.orgId,
+        objectiveTitle: objective.title,
+        statement: objective.statement,
+        contextNotes: objective.contextNotes,
+        outcomeSummary: outcome.summary,
+      });
   if (learned.length) {
     const active = learned.filter((m) => m.status === "ACTIVE").length;
     await emit(prisma, {

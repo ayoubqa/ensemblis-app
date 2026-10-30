@@ -103,10 +103,58 @@ Credits and cost accounting (API only; defaults shown — none needs setting for
 |---|---|---|
 | `CREDITS_PER_EUR` | `100` | Internal value of a credit (1 credit = €0.01 at the default) for accounting and pricing. Balances are stored as whole credits and are **not** rewritten when it changes; every existing balance was issued at 100 per €1, so changing it revalues them internally (the API logs a warning). Leave it at 100 unless you deliberately re-denominate. |
 | `MAX_TOKENS_PER_EXECUTION` | `600000` | Runaway guard: an execution whose model calls have used this many tokens stops before its next step (or verification) and fails, which refunds its credits. `0` turns it off. A normal execution uses well under 100,000. |
-| `MAX_COST_SHARE_OF_PRICE` | `0.3` | **Monetary guard** (`engine/costGuard.ts`): an execution's provider cost (model calls and paid searches at `PROVIDER_PRICING` prices) may use at most this share of its price (its credits at `CREDITS_PER_EUR`). Before every step attempt and before verification, the guard adds what the run has spent to a conservative estimate of the work still to do. If that total would pass the limit, the run stops before spending more and is refunded. `0` turns this limit off. **Only applies while the models in use are priced.** Unpriced models are reported (`execution.cost_unpriced` log) and the token ceiling still applies. |
+| `MAX_COST_SHARE_OF_PRICE` | `0.3` | **Monetary guard** (`engine/costGuard.ts`): an execution's provider cost (model calls and paid searches at `PROVIDER_PRICING` prices) may use at most this share of its price (its credits at `CREDITS_PER_EUR`). Before every step attempt, before verification and before the memory call, the guard adds what the run has spent to a conservative estimate of the work still to do. If that total would pass the limit, the run stops before spending more and is refunded. `0` turns this limit off. **Inactive while `PROVIDER_PRICING` is unset**; with it set, anything in use without a price follows `COST_GUARD_UNPRICED`. What each case does, and why this is not a hard cap: [the monetary guard](#the-monetary-guard-what-each-configuration-does) below. |
 | `MAX_COST_PER_EXECUTION_EUR` | `0` (off) | An absolute cap in euros, applied together with the share above; the smaller limit wins. |
-| `COST_ESTIMATE_INPUT_TOKENS` | `16000` | Input size the guard assumes for each model call still to come. Output is assumed at the model's cap (`OPENAI_MAX_TOKENS`, 8192 by default; 4096 for Claude). The estimate is deliberately pessimistic, and actual costs replace it as calls complete. |
-| `PROVIDER_PRICING` | unset | JSON price table for **internal** cost accounting (owner dashboard, `/api/admin/economics`): per-million-token prices per model, per-call prices per paid tool, and exchange rates to EUR — e.g. `{"models":{"openai/gpt-oss-120b":{"inputPerMTok":…,"outputPerMTok":…,"currency":"USD"}},"tools":{"search:tavily":{"perCall":…,"currency":"USD"}},"fx":{"USD":…}}`. Take the numbers from the providers' current price pages. Unset or invalid: usage is still recorded, but costs stay unpriced (never guessed). |
+| `COST_GUARD_UNPRICED` | `stop` | What a run does when part of its cost can't be priced: a model or paid search in use with no price in `PROVIDER_PRICING`, or a currency with no exchange rate. `stop` stops it before spending more and refunds it ("this run's cost couldn't be checked"). `allow` lets it go on, checking only the priced part as a lower bound (the behaviour before this setting existed), and logs `execution.cost_unpriced`. Any other value means `stop`. Has no effect while `PROVIDER_PRICING` is unset. |
+| `COST_ESTIMATE_INPUT_TOKENS` | `16000` | Input size the guard assumes for each model call still to come (2,000 for the query writer, whose prompt is clipped). Output is assumed at each call's own cap: a step at `OPENAI_MAX_TOKENS` (8192 by default; 4096 for Claude), the query writer 2,048, verification 3,000 + 2,500 plus one repair call each at 1.5×, the memory call 1,500. The estimate is deliberately pessimistic, and actual costs replace it as calls complete. |
+| `PROVIDER_PRICING` | unset | JSON price table for **internal** cost accounting (owner dashboard, `/api/admin/economics`): per-million-token prices per model, per-call prices per paid tool, and exchange rates to EUR — e.g. `{"models":{"openai/gpt-oss-120b":{"inputPerMTok":…,"outputPerMTok":…,"currency":"USD"}},"tools":{"search:tavily":{"perCall":…,"currency":"USD"}},"fx":{"USD":…}}`. Take the numbers from the providers' current price pages, and price **both** model tiers (`OPENAI_MODEL` and `OPENAI_FAST_MODEL`, or their defaults), `search:tavily` when live search is on, and an `fx` rate for every currency used. Unset: usage is still recorded, costs stay unpriced (never guessed) and the monetary guard is inactive. Set but invalid or incomplete: the same, except that with a limit in force the guard follows `COST_GUARD_UNPRICED`. The API and worker log what is missing on boot. |
+
+#### The monetary guard: what each configuration does
+
+Check the boot log (`[config] WARNING` on the API, `config.warning` on the worker) after setting or
+changing any of these. Whether production has `PROVIDER_PRICING` set has not been verified from this
+repository; until it is, assume the guard is inactive there.
+
+| Configuration | What happens to a run | Where it shows |
+|---|---|---|
+| `MAX_COST_SHARE_OF_PRICE=0` and `MAX_COST_PER_EXECUTION_EUR=0` | The guard is off and is never consulted. Only the token ceiling bounds a run. | Boot warning |
+| `PROVIDER_PRICING` unset | The guard is inactive: nothing can be priced, so it checks nothing and runs go on. The token ceiling still applies. | Boot warning |
+| `PROVIDER_PRICING` invalid (bad JSON or schema) | Nothing is priced. With `stop`, every run stops before its first step and is refunded; with `allow`, runs go on. | Boot warning with the problem; `execution.cost_unchecked` per run |
+| A model in use (main or fast tier) has no price | Every run makes main and fast calls, so with `stop` every run stops before its first step and is refunded. | Boot warning naming `model <provider>:<model>`; `execution.cost_unchecked` lists it under `unpriced` |
+| Live search on, `search:tavily` has no price | With `stop`, a run stops before a step that would search, or once it has made an unpriced search. Wikipedia is free by design and never counted. | Boot warning naming `search:tavily`; `execution.cost_unchecked` |
+| A price's currency has no `fx` rate | Treated as unpriced. | `fx <CUR>` in the warning and log |
+| The guard itself fails (for example the usage read errors) while a limit applies | The run stops before spending more and is refunded through the usual failure path. | `execution.cost_guard_error` (error level) |
+| Spent plus estimated remaining passes the limit | The run stops before spending more and is refunded. This applies even when something else is unpriced, because the priced part is already a lower bound. | `execution.cost_limit` |
+| Over the limit just before the memory call | The run completes without the memory call. Its result is already verified and measured. | `execution.memory_skipped` |
+
+A run stopped by the guard follows the existing failure path (`failExecution`): its steps are
+marked failed or skipped, its approvals are cancelled, and its whole charge is refunded once in the same
+ledger. No new status or ledger type is used.
+
+**Before deploying this change.** If production sets `PROVIDER_PRICING` but leaves out a model, the
+fast-tier model, Tavily or an exchange rate, runs will start stopping with "this run's cost couldn't be
+checked". Read the boot warning first, then either complete the table or set `COST_GUARD_UNPRICED=allow`
+for the old lower-bound behaviour. The real-model smoke workflow prices both Groq models, Tavily and USD, so
+it is not affected.
+
+**This is a pre-call check, not a hard spending cap.** The guard can only stop a run between units of
+work. The limit can still be passed because:
+
+- One model call can cost more than its estimate. Output is capped, but input above
+  `COST_ESTIMATE_INPUT_TOKENS` is not.
+- Calls inside one unit are not checked separately: a step's query writer, searches and step call, or
+  verification's assessor, claim check and their repair calls.
+- Planning (the planner call and its repair) runs before the first check. It is counted as spent from the
+  first check on.
+- HTTP retries are estimated. For a call that eventually succeeds, each extra attempt is counted at its
+  input price as an upper bound. A call that fails after retrying is counted once, at its estimated tokens.
+- Token counts the provider doesn't report (the mock, some failures) are estimated at about four
+  characters per token.
+- A usage row that fails to write is logged (`[usage] could not record usage event`) and that call is
+  missing from what was spent.
+- The guard is only as accurate as `PROVIDER_PRICING`. Stale prices make it wrong in the same direction.
+- Model calls outside an execution, such as objective suggestions, are under neither this guard nor the token
+  ceiling.
 
 **Credits.** Customers see balances, budgets, estimates, charges and refunds in
 credits. No balance is converted: the stored integer was already one cent of

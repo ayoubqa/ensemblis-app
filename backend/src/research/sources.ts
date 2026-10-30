@@ -169,6 +169,9 @@ export function summarizeAttempts(attempts: SearchAttempt[]): { status: Exclude<
   return { status: "ok", reason: null, providersUsed };
 }
 
+/** Output cap of the query-writer call (fast tier). */
+export const QUERY_MAX_TOKENS = 2048;
+
 async function writeQueries(req: ResearchRequest, backend: "tavily" | "wikipedia"): Promise<{ queries: string[]; by: "model" | "heuristic" }> {
   const style =
     backend === "wikipedia"
@@ -185,7 +188,7 @@ async function writeQueries(req: ResearchRequest, backend: "tavily" | "wikipedia
       model: "fast",
       purpose: "queries",
       executionId: req.executionId ?? null,
-      maxTokens: 2048,
+      maxTokens: QUERY_MAX_TOKENS,
       temperature: 0.2,
       timeoutMs: 45_000,
     });

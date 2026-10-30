@@ -55,6 +55,11 @@ export function pricingTable(): { table: PricingTable; problem: string | null } 
   return cached;
 }
 
+/** True when PROVIDER_PRICING is set at all (even if invalid): the operator meant costs to be priced. */
+export function pricingConfigured(): boolean {
+  return !!process.env.PROVIDER_PRICING?.trim();
+}
+
 export interface PricedCost {
   /** Millionths of `currency`. */
   micros: number;

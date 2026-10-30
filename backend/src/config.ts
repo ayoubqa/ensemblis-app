@@ -80,13 +80,17 @@ export const config = {
   maxTokensPerExecution: int("MAX_TOKENS_PER_EXECUTION", 600_000, 0),
   // Monetary guard (engine/costGuard.ts): an execution's provider cost — model calls and paid searches,
   // at PROVIDER_PRICING prices — may not exceed the smaller of these limits; it stops before the step that
-  // would go over and is refunded. Only applies while the models in use are priced. 0 = that limit is off.
+  // would go over and is refunded. Inactive while PROVIDER_PRICING is unset (warned on boot). 0 = that limit is off.
   costGuard: {
     maxEur: decimal("MAX_COST_PER_EXECUTION_EUR", 0, 0),
     // Share of the execution's price (its credits, at CREDITS_PER_EUR) that provider cost may use.
     maxShareOfPrice: decimal("MAX_COST_SHARE_OF_PRICE", 0.3, 0),
     // Conservative input size assumed for each model call still to come (output is assumed at the model's cap).
     estimatedInputTokensPerCall: int("COST_ESTIMATE_INPUT_TOKENS", 16_000, 1_000),
+    // What a run does when part of its cost can't be priced (a model, a paid search or an exchange rate is missing
+    // from PROVIDER_PRICING): "stop" (default) stops it before spending more and refunds it; "allow" lets it go on,
+    // checking only the part that is priced. Anything other than "allow" means "stop".
+    unpriced: (process.env.COST_GUARD_UNPRICED?.trim().toLowerCase() === "allow" ? "allow" : "stop") as "stop" | "allow",
   },
 
   // Daily task caps — the "kill switch" protecting the AI bill. Every task run

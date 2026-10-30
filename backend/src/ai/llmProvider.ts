@@ -902,7 +902,8 @@ export async function runLLM(systemPrompt: string, userContent: string, opts: LL
               : await runWithOllama(systemPrompt, userContent, opts, sink);
       const latencyMs = Date.now() - started;
       log.info("llm.call", { ...meta, model: result.model, latencyMs, tokensIn: result.tokensIn, tokensOut: result.tokensOut, tokensEstimated: result.tokensEstimated });
-      void recordUsage({
+      // Awaited (recordUsage never throws): the budget guards check before the next call and must see this one.
+      await recordUsage({
         kind: "llm",
         provider,
         model: result.model,
@@ -917,14 +918,14 @@ export async function runLLM(systemPrompt: string, userContent: string, opts: LL
         estimated: result.tokensEstimated,
         cachedTokensIn: result.cachedTokensIn ?? null,
         attempts: result.attempts ?? null,
-      }).catch(() => undefined);
+      });
       return { ...result, latencyMs };
     } catch (err) {
       const latencyMs = Date.now() - started;
       const message = err instanceof Error ? err.message : String(err);
       log.warn("llm.call_failed", { ...meta, model: modelFor(provider, tier), latencyMs, error: message });
       // A failed call's token counts are always estimates (the provider never reported usage).
-      void recordUsage({
+      await recordUsage({
         kind: "llm",
         provider,
         model: modelFor(provider, tier),
@@ -938,7 +939,7 @@ export async function runLLM(systemPrompt: string, userContent: string, opts: LL
         purpose: meta.purpose,
         estimated: true,
         error: message,
-      }).catch(() => undefined);
+      });
       throw err;
     }
   });

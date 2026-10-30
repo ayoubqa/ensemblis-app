@@ -27,6 +27,8 @@ export const CLAIM_CHECK_MAX = 20;
 export const CLAIM_WINDOW_CHARS = 1200;
 /** The system prompt starts with this (the OpenAI test stub routes it to the 'verify_claims' purpose). */
 export const CLAIM_CHECK_PROMPT_PREFIX = "You check whether cited sources support claims";
+/** Output cap of the claim-check call (main tier). */
+export const CLAIM_CHECK_MAX_TOKENS = 2500;
 /** Starts the warning added when only the text match judged claim support. */
 export const TEXT_MATCH_ONLY = "Claim support checked by text match only";
 
@@ -158,7 +160,7 @@ export async function checkClaimSupport(args: { executionId: string | null; clai
   const limitedNote = beyond > 0 ? `${TEXT_MATCH_ONLY} for ${beyond} more claim${beyond === 1 ? "" : "s"} (the AI claim check covers the first ${CLAIM_CHECK_MAX}).` : null;
   let res;
   try {
-    res = await runStructured(SYSTEM, user, schema, { model: "main", purpose: "verify_claims", executionId: args.executionId, temperature: 0, maxTokens: 2500 });
+    res = await runStructured(SYSTEM, user, schema, { model: "main", purpose: "verify_claims", executionId: args.executionId, temperature: 0, maxTokens: CLAIM_CHECK_MAX_TOKENS });
   } catch (err) {
     res = { ok: false as const, error: err instanceof Error ? err.message : String(err), attempts: 1, errorKind: null };
   }

@@ -20,6 +20,9 @@ export type StructuredRun<T> =
 
 const messageOf = (err: unknown) => (err instanceof Error ? err.message : String(err));
 
+/** Output cap of the one repair call runStructured makes after an unusable reply. */
+export const repairMaxTokens = (maxTokens: number) => Math.min(8192, Math.round(maxTokens * 1.5));
+
 export async function runStructured<T>(
   system: string,
   user: string,
@@ -40,7 +43,7 @@ export async function runStructured<T>(
   log.warn("llm.structured_retry", { purpose: opts.purpose, executionId: opts.executionId ?? undefined, error: first });
   const repair = `${user}\n\n<previous_reply_problem trust="internal">\nYour previous reply could not be used: ${first}.\nReply again with ONLY the complete JSON object in the required shape — no prose, no code fences, nothing after the closing brace. Keep text fields short.\n</previous_reply_problem>`;
   try {
-    const { text } = await runLLM(system, repair, { ...opts, maxTokens: Math.min(8192, Math.round(opts.maxTokens * 1.5)) });
+    const { text } = await runLLM(system, repair, { ...opts, maxTokens: repairMaxTokens(opts.maxTokens) });
     const parsed = parseStructured(text, schema);
     if (parsed.ok) return { ok: true, data: parsed.data, attempts: 2, firstError: first };
     return { ok: false, error: `${parsed.error} (after one retry; first reply: ${first})`, attempts: 2, errorKind: null };
