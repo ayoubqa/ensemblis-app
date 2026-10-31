@@ -78,9 +78,10 @@ export const config = {
   // Runaway guard: an execution whose model calls have used this many tokens
   // stops (and is refunded like any failed execution). 0 = off.
   maxTokensPerExecution: int("MAX_TOKENS_PER_EXECUTION", 600_000, 0),
-  // Monetary guard (engine/costGuard.ts): an execution's provider cost — model calls and paid searches,
-  // at PROVIDER_PRICING prices — may not exceed the smaller of these limits; it stops before the step that
-  // would go over and is refunded. Inactive while PROVIDER_PRICING is unset (warned on boot). 0 = that limit is off.
+  // Monetary guard (engine/costGuard.ts): before each step, verification and the memory call, an execution's
+  // provider cost so far plus an estimate of the rest — model calls and paid searches, at PROVIDER_PRICING
+  // prices — is checked against the smaller of these limits; over it, the run stops and is refunded. A pre-call
+  // check, not a hard cap. Inactive while PROVIDER_PRICING is unset (warned on boot). 0 = that limit is off.
   costGuard: {
     maxEur: decimal("MAX_COST_PER_EXECUTION_EUR", 0, 0),
     // Share of the execution's price (its credits, at CREDITS_PER_EUR) that provider cost may use.

@@ -17,6 +17,8 @@ import {
   spentSoFar,
 } from "../../src/engine/costGuard";
 import { failExecution } from "../../src/engine/lifecycle";
+import { reconcileAllowances } from "../../src/lib/ledger";
+import { creditWallet } from "../../src/lib/wallet";
 import { ASSESSOR_MAX_TOKENS } from "../../src/engine/verification/assessor";
 import { CLAIM_CHECK_MAX_TOKENS } from "../../src/engine/verification/claimCheck";
 import { MEMORY_MAX_TOKENS } from "../../src/engine/learning";
@@ -252,6 +254,24 @@ describe("cost guard: executions", () => {
     await expectRefundedOnce(user.id, executionId);
   });
 
+  for (const [what, value] of [
+    ["not valid JSON", "{not json"],
+    ["valid JSON in the wrong shape", JSON.stringify({ models: { mock: { inputPerMTok: -1, outputPerMTok: 1 } } })],
+  ] as const) {
+    it(`a PROVIDER_PRICING that is ${what} prices nothing: the run stops before its first step and is refunded`, async () => {
+      const { auth, user } = await createUser({ credits: 5000 });
+      await fillContext(auth);
+      const { executionId } = await defineObjective(auth);
+      process.env.PROVIDER_PRICING = value;
+      await approveAndRun(auth);
+      const ex = await getExecution(auth, executionId);
+      expect(ex.status).toBe("FAILED");
+      expect(ex.errorMessage).toBe(COST_UNCHECKED_MESSAGE);
+      expect(await prisma.usageEvent.count({ where: { executionId, purpose: "step" } })).toBe(0);
+      await expectRefundedOnce(user.id, executionId);
+    });
+  }
+
   it("an unpriced paid search already made stops the run; COST_GUARD_UNPRICED=allow lets it go on", async () => {
     const { auth, user } = await createUser({ credits: 5000 });
     await fillContext(auth);
@@ -425,6 +445,36 @@ describe("cost guard: stopping mid-run", () => {
     expect(ex.steps.every((s: { status: string }) => s.status === "COMPLETED")).toBe(true);
     expect(await prisma.usageEvent.count({ where: { executionId, purpose: { in: ["verify", "verify_claims", "memory"] } } })).toBe(0);
     await expectRefundedOnce(user.id, executionId);
+  });
+
+  it("a run paid with plan credits that the guard stops gives them back to the plan's allowance", async () => {
+    const { auth, user } = await createUser({ credits: 0 });
+    const day = 86_400_000;
+    const sub = await prisma.subscription.create({
+      data: { walletUserId: user.id, planId: "growth", status: "active", stripeSubscriptionId: "sub_guard_test", allowancePeriodStart: new Date(Date.now() - day), allowancePeriodEnd: new Date(Date.now() + 20 * day) },
+    });
+    await prisma.$transaction((tx) =>
+      creditWallet(tx, { walletUserId: user.id, actorUserId: null, type: "GRANT", amountCents: 15_000, description: "Growth plan", reason: "subscription_allowance", idempotencyKey: "allowance:in_guard_test", allowance: { subscriptionId: sub.id, cents: 15_000 } })
+    );
+    await fillContext(auth);
+    const { executionId } = await defineObjective(auth);
+    priceRisesDuring("first step");
+    await approveAndRun(auth);
+    const ex = await getExecution(auth, executionId);
+    expect(ex.status).toBe("FAILED");
+    expect(ex.errorMessage).toBe(COST_LIMIT_MESSAGE);
+    expect(ex.costCents).toBeGreaterThan(0);
+    expect(ex.refundedCents).toBe(ex.costCents);
+    // The charge came out of the allowance and the refund put it back there, once.
+    const rows = await ledger(user.id);
+    expect(rows.map((t) => [t.reason, t.allowanceCents])).toEqual([
+      ["subscription_allowance", 15_000],
+      ["execution_charge", -ex.costCents],
+      ["execution_failed", ex.costCents],
+    ]);
+    expect(await balance(user.id)).toBe(15_000);
+    expect((await prisma.subscription.findUniqueOrThrow({ where: { id: sub.id } })).allowanceCredits).toBe(15_000);
+    expect(await reconcileAllowances()).toEqual([]);
   });
 
   it("over the limit after verification: the result is kept and the memory call is skipped", async () => {

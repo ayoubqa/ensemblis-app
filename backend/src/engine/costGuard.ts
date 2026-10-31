@@ -1,6 +1,7 @@
-// Monetary budget for one execution: what its model calls and paid searches cost the provider
-// may not exceed the run's limit. The token ceiling (budget.ts) bounds tokens; this bounds money,
-// across the whole workflow — planning, every step attempt (retries included), revisions,
+// Monetary budget for one execution: before each unit of work, what its model calls and paid searches
+// have cost the provider, plus a conservative estimate of the rest, is checked against the run's limit.
+// The token ceiling (budget.ts) bounds tokens; this checks money across the whole workflow — planning
+// (counted, though it runs before the first check), every step attempt (retries included), revisions,
 // verification and the memory call — not one model call.
 //
 //   limit     = the smaller of MAX_COST_PER_EXECUTION_EUR and MAX_COST_SHARE_OF_PRICE × the
@@ -191,7 +192,7 @@ export function remainingWork(steps: Pick<ExecutionStep, "status" | "capability"
 }
 
 export const COST_LIMIT_MESSAGE =
-  "Stopped before going over this run's cost limit: the work still to do was estimated to need more AI capacity than this plan allows. Its credits are refunded. Try a narrower objective, or one with fewer steps.";
+  "Stopped at this run's cost limit: the work still to do was estimated to need more AI capacity than this plan allows. Its credits are refunded. Try a narrower objective, or one with fewer steps.";
 
 /** The run's cost could not be checked (something is unpriced, or the guard failed): it stops rather than spend unchecked. */
 export const COST_UNCHECKED_MESSAGE = "Stopped before spending more: this run's cost couldn't be checked against its limit. Its credits are refunded. Try again later.";
