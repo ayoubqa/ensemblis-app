@@ -36,6 +36,7 @@ import { DEFAULT_CRITERIA, planObjective, type Plan, type PlanBlockedKind } from
 import { titleFor } from "./objectives";
 import { formatCredits, refundExecution } from "./billing";
 import { tokenCeilingReached } from "./budget";
+import { costLimitReached } from "./costGuard";
 import { verifyExecution } from "./verification/service";
 import type { ModelAssessment } from "./verification/checks";
 import type { Prisma } from "@prisma/client";
@@ -411,7 +412,8 @@ async function advancePhase(ex: Execution): Promise<TickResult> {
 }
 
 async function runOneStep(ex: Execution, step: ExecutionStep, steps: ExecutionStep[]): Promise<TickResult> {
-  const ceiling = await tokenCeilingReached(ex.id);
+  // Both budgets are checked before anything more is spent: tokens, then money (the remaining plan included).
+  const ceiling = (await tokenCeilingReached(ex.id)) ?? (await costLimitReached(ex, steps, "step"));
   if (ceiling) {
     await failExecution(ex.id, ceiling);
     return {};
@@ -624,7 +626,7 @@ async function verifyPhase(ex: Execution): Promise<TickResult> {
     return {};
   }
 
-  const ceiling = await tokenCeilingReached(ex.id);
+  const ceiling = (await tokenCeilingReached(ex.id)) ?? (await costLimitReached(ex, [], "verification"));
   if (ceiling) {
     await failExecution(ex.id, ceiling);
     return {};
@@ -759,14 +761,20 @@ async function finalize(ex: Execution, model: ModelAssessment | null, accepted: 
     data: { status: outcome.status },
   });
 
-  const learned = await learnFromExecution({
-    executionId: ex.id,
-    orgId: ex.orgId,
-    objectiveTitle: objective.title,
-    statement: objective.statement,
-    contextNotes: objective.contextNotes,
-    outcomeSummary: outcome.summary,
-  });
+  // The memory call is the run's last model call. The result is already measured, so a run at its cost limit
+  // (or whose cost can't be checked) completes without it instead of failing.
+  const overLimit = await costLimitReached(ex, [], "memory");
+  if (overLimit) log.warn("execution.memory_skipped", { executionId: ex.id, reason: "cost_guard" });
+  const learned = overLimit
+    ? []
+    : await learnFromExecution({
+        executionId: ex.id,
+        orgId: ex.orgId,
+        objectiveTitle: objective.title,
+        statement: objective.statement,
+        contextNotes: objective.contextNotes,
+        outcomeSummary: outcome.summary,
+      });
   if (learned.length) {
     const active = learned.filter((m) => m.status === "ACTIVE").length;
     await emit(prisma, {

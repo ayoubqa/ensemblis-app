@@ -607,7 +607,8 @@ try {
   // Usage from the metering table: model calls by purpose, web searches by provider.
   const { PrismaClient } = require("@prisma/client");
   const prisma = new PrismaClient({ datasources: { db: { url: db } } });
-  const rows = await prisma.usageEvent.findMany({ select: { kind: true, model: true, provider: true, purpose: true, tokensIn: true, tokensOut: true, ok: true, latencyMs: true, estimated: true, error: true } });
+  const rows = await prisma.usageEvent.findMany({ select: { kind: true, model: true, provider: true, purpose: true, tokensIn: true, tokensOut: true, ok: true, latencyMs: true, estimated: true, error: true, costMicros: true, costCurrency: true } });
+  const executions = await prisma.execution.findMany({ orderBy: { createdAt: "asc" }, select: { id: true, status: true, verificationStatus: true, createdAt: true, startedAt: true, completedAt: true, costCents: true, refundedCents: true } });
   await prisma.$disconnect();
   const llm = rows.filter((r) => r.kind === "llm");
   const sum = (xs, k) => xs.reduce((x, r) => x + (r[k] || 0), 0);
@@ -646,6 +647,18 @@ try {
     byPurpose: [...byPurpose.values()],
     searches: [...searches.values()],
     estimatedProviderCostUsd: pin && pout ? Number(((sum(llm, "tokensIn") * pin + sum(llm, "tokensOut") * pout) / 1e6).toFixed(4)) : null,
+    // What the app itself recorded at PROVIDER_PRICING prices (null when unpriced), by currency — the figures the cost guard uses.
+    recordedCost: rows.reduce((m, r) => (r.costMicros != null && r.costCurrency ? { ...m, [r.costCurrency]: Number(((m[r.costCurrency] ?? 0) + r.costMicros / 1e6).toFixed(6)) } : m), {}),
+    unpricedEvents: rows.filter((r) => r.ok && r.costMicros == null && (r.kind === "llm" || (r.kind === "search" && r.provider === "tavily"))).length,
+    // Wall-clock per execution (start → end) and its credits, so latency and charge are on record next to cost.
+    executions: executions.map((e) => ({
+      status: e.status,
+      verification: e.verificationStatus,
+      planningSeconds: e.startedAt ? Math.round((e.startedAt.getTime() - e.createdAt.getTime()) / 1000) : null,
+      runSeconds: e.startedAt && e.completedAt ? Math.round((e.completedAt.getTime() - e.startedAt.getTime()) / 1000) : null,
+      creditsCharged: e.costCents,
+      creditsRefunded: e.refundedCents,
+    })),
   };
   console.log(`\nUsage: ${JSON.stringify(report.usage)}`);
 } catch (err) {
@@ -690,6 +703,10 @@ try {
     for (const g of report.usage.searches) md.push(`| ${g.provider} | ${g.calls} | ${g.ok} | ${g.failed} | ${g.errors.join("; ")} |`);
     if (!report.usage.searches.length) md.push("| (none) | 0 | 0 | 0 | |");
     if (report.usage.estimatedProviderCostUsd !== null) md.push("", `Estimated provider cost: $${report.usage.estimatedProviderCostUsd} (an estimate from SMOKE_PRICE_*, not a bill).`);
+    const recorded = Object.entries(report.usage.recordedCost);
+    md.push("", `Cost recorded by the app (PROVIDER_PRICING list prices, not a bill): ${recorded.length ? recorded.map(([c, v]) => `${v} ${c}`).join(" + ") : "nothing priced"}${report.usage.unpricedEvents ? ` · ${report.usage.unpricedEvents} unpriced event(s)` : ""}.`);
+    md.push("", "| Execution | Status | Verification | Planning (s) | Run (s) | Credits charged / refunded |", "|---|---|---|---|---|---|");
+    report.usage.executions.forEach((e, i) => md.push(`| ${i + 1} | ${e.status} | ${e.verification ?? "–"} | ${e.planningSeconds ?? "–"} | ${e.runSeconds ?? "–"} | ${e.creditsCharged} / ${e.creditsRefunded} |`));
   }
   md.push("", "```json", JSON.stringify(report.usage, null, 2), "```");
   fs.writeFileSync(path.join(dir, `${stamp}.md`), md.join("\n"));

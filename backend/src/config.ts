@@ -18,6 +18,18 @@ function int(name: string, fallback: number, min = 0): number {
   return Math.floor(n);
 }
 
+/** Like int(), for amounts with decimals (euros, shares). */
+function decimal(name: string, fallback: number, min = 0): number {
+  const raw = process.env[name];
+  if (raw === undefined || raw.trim() === "") return fallback;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < min) {
+    console.warn(`[config] Ignoring invalid ${name}="${raw}" — using ${fallback}`);
+    return fallback;
+  }
+  return n;
+}
+
 function bool(name: string, fallback: boolean): boolean {
   const raw = process.env[name]?.trim().toLowerCase();
   if (!raw) return fallback;
@@ -66,6 +78,21 @@ export const config = {
   // Runaway guard: an execution whose model calls have used this many tokens
   // stops (and is refunded like any failed execution). 0 = off.
   maxTokensPerExecution: int("MAX_TOKENS_PER_EXECUTION", 600_000, 0),
+  // Monetary guard (engine/costGuard.ts): before each step, verification and the memory call, an execution's
+  // provider cost so far plus an estimate of the rest — model calls and paid searches, at PROVIDER_PRICING
+  // prices — is checked against the smaller of these limits; over it, the run stops and is refunded. A pre-call
+  // check, not a hard cap. Inactive while PROVIDER_PRICING is unset (warned on boot). 0 = that limit is off.
+  costGuard: {
+    maxEur: decimal("MAX_COST_PER_EXECUTION_EUR", 0, 0),
+    // Share of the execution's price (its credits, at CREDITS_PER_EUR) that provider cost may use.
+    maxShareOfPrice: decimal("MAX_COST_SHARE_OF_PRICE", 0.3, 0),
+    // Conservative input size assumed for each model call still to come (output is assumed at the model's cap).
+    estimatedInputTokensPerCall: int("COST_ESTIMATE_INPUT_TOKENS", 16_000, 1_000),
+    // What a run does when part of its cost can't be priced (a model, a paid search or an exchange rate is missing
+    // from PROVIDER_PRICING): "stop" (default) stops it before spending more and refunds it; "allow" lets it go on,
+    // checking only the part that is priced. Anything other than "allow" means "stop".
+    unpriced: (process.env.COST_GUARD_UNPRICED?.trim().toLowerCase() === "allow" ? "allow" : "stop") as "stop" | "allow",
+  },
 
   // Daily task caps — the "kill switch" protecting the AI bill. Every task run
   // (create, retry, workflow run, scheduled run) counts once.

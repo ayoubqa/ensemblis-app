@@ -68,6 +68,9 @@ const KIND_LABEL: Record<string, string> = {
 
 const errorText = (message: string) => clip(redact(message.replace(/\s+/g, " ").trim()), 500);
 
+/** Output cap of the assessor call (main tier). */
+export const ASSESSOR_MAX_TOKENS = 3000;
+
 export async function assessResult(args: {
   executionId: string;
   objectiveTitle: string;
@@ -114,7 +117,7 @@ export async function assessResult(args: {
     block("claims", claimsSummary || "(no checkable claims)", "internal"),
   ].join("\n\n");
   try {
-    const res = await runStructured(system, user, schema, { model: "main", purpose: "verify", executionId: args.executionId, temperature: 0, maxTokens: 3000 });
+    const res = await runStructured(system, user, schema, { model: "main", purpose: "verify", executionId: args.executionId, temperature: 0, maxTokens: ASSESSOR_MAX_TOKENS });
     if (!res.ok) return { assessment: null, error: errorText(res.error) || "The AI verifier returned no usable assessment.", provider, model };
     const d = res.data;
     return {

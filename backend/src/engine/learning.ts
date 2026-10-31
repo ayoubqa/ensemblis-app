@@ -27,6 +27,9 @@ const schema = z.object({
   ).default([]),
 });
 
+/** Output cap of the memory call (fast tier), made once a run's outcome is recorded. */
+export const MEMORY_MAX_TOKENS = 1500;
+
 export async function learnFromExecution(args: {
   executionId: string;
   orgId: string;
@@ -51,7 +54,7 @@ export async function learnFromExecution(args: {
     block("result", args.outcomeSummary, "internal"),
   ].join("\n\n");
   try {
-    const { text } = await runLLM(system, user, { model: "fast", purpose: "memory", executionId: args.executionId, temperature: 0, maxTokens: 1500, timeoutMs: 45_000 });
+    const { text } = await runLLM(system, user, { model: "fast", purpose: "memory", executionId: args.executionId, temperature: 0, maxTokens: MEMORY_MAX_TOKENS, timeoutMs: 45_000 });
     const parsed = parseStructured(text, schema);
     if (!parsed.ok) return [];
     const proposals: ProposedMemory[] = parsed.data.memories.map((m) => ({ kind: m.kind, content: m.content, rationale: m.rationale, sensitive: m.sensitivity === "high" }));

@@ -32,6 +32,7 @@ import { aiProviderLabel } from "./ai/llmProvider";
 import { maintenance } from "./engine/maintenance";
 import { queueStats } from "./engine/queue";
 import { Worker } from "./engine/worker";
+import { costGuardWarnings } from "./engine/costGuard";
 
 const app = express();
 
@@ -129,6 +130,7 @@ async function start() {
   }
   for (const w of productionConfigWarnings()) console.warn(`[config] WARNING: ${w}`);
   for (const w of corsConfigWarnings()) console.warn(`[config] WARNING: ${w}`);
+  for (const w of costGuardWarnings()) console.warn(`[config] WARNING: ${w}`);
 
   const server = app.listen(port, () => {
     log.info("api.listening", { port, ai: aiProviderLabel(), embeddedWorker: embeddedWorkerEnabled(), corsOrigins: config.corsOrigins });

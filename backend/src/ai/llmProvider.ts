@@ -585,7 +585,7 @@ async function runWithOpenAI(systemPrompt: string, userContent: string, opts: LL
   const baseUrl = openaiBaseUrl();
   const model = openaiModel(opts.model ?? "main");
   // Reasoning models (gpt-oss, o-series) spend part of this budget "thinking" before answering.
-  const maxTokens = opts.maxTokens || Number(process.env.OPENAI_MAX_TOKENS) || 8192;
+  const maxTokens = opts.maxTokens || defaultMaxOutputTokens("openai");
   const reasoningEffort = process.env.OPENAI_REASONING_EFFORT?.trim() || "";
   const requestBody = JSON.stringify(
     openaiRequestBody({ baseUrl, model, system: systemPrompt, user: userContent, maxTokens, temperature: opts.temperature, reasoningEffort })
@@ -807,7 +807,7 @@ async function runWithAnthropic(systemPrompt: string, userContent: string, opts:
     const stream = anthropic.messages.stream(
       {
         model,
-        max_tokens: opts.maxTokens || 4096,
+        max_tokens: opts.maxTokens || defaultMaxOutputTokens("anthropic"),
         system: systemPrompt,
         messages: [{ role: "user", content: userContent }],
         ...(opts.temperature !== undefined ? { temperature: opts.temperature } : {}),
@@ -902,7 +902,8 @@ export async function runLLM(systemPrompt: string, userContent: string, opts: LL
               : await runWithOllama(systemPrompt, userContent, opts, sink);
       const latencyMs = Date.now() - started;
       log.info("llm.call", { ...meta, model: result.model, latencyMs, tokensIn: result.tokensIn, tokensOut: result.tokensOut, tokensEstimated: result.tokensEstimated });
-      void recordUsage({
+      // Awaited (recordUsage never throws): the budget guards check before the next call and must see this one.
+      await recordUsage({
         kind: "llm",
         provider,
         model: result.model,
@@ -917,14 +918,14 @@ export async function runLLM(systemPrompt: string, userContent: string, opts: LL
         estimated: result.tokensEstimated,
         cachedTokensIn: result.cachedTokensIn ?? null,
         attempts: result.attempts ?? null,
-      }).catch(() => undefined);
+      });
       return { ...result, latencyMs };
     } catch (err) {
       const latencyMs = Date.now() - started;
       const message = err instanceof Error ? err.message : String(err);
       log.warn("llm.call_failed", { ...meta, model: modelFor(provider, tier), latencyMs, error: message });
       // A failed call's token counts are always estimates (the provider never reported usage).
-      void recordUsage({
+      await recordUsage({
         kind: "llm",
         provider,
         model: modelFor(provider, tier),
@@ -938,7 +939,7 @@ export async function runLLM(systemPrompt: string, userContent: string, opts: LL
         purpose: meta.purpose,
         estimated: true,
         error: message,
-      }).catch(() => undefined);
+      });
       throw err;
     }
   });
@@ -965,6 +966,12 @@ export function aiConfigProblem(): string | null {
     return "The AI provider isn't configured: ANTHROPIC_API_KEY is missing on the server.";
   }
   return null;
+}
+
+/** The output-token cap of a call that sets none (OPENAI_MAX_TOKENS, 8192 by default; 4096 for Claude). Ollama uses the model's own limit. */
+export function defaultMaxOutputTokens(provider: string): number {
+  if (provider === "anthropic") return 4096;
+  return Number(process.env.OPENAI_MAX_TOKENS) || 8192;
 }
 
 /** The provider and model a call of this tier would use right now (as runLLM records them). */

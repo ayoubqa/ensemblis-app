@@ -69,6 +69,13 @@ jobs:
           TAVILY_API_KEY: ${{ inputs.e_expect == 'neg-b-search-key' && 'tvly-invalid' || secrets.SMOKE_TAVILY_API_KEY }}
           SEARCH_PROVIDER: ${{ inputs.e_expect == 'neg-c-search-off' && 'off' || '' }}
           SEARCH_DAILY_BUDGET: "200"
+          # List prices for this test run only (not production config), so the run records its cost and the
+          # monetary guard is exercised. Groq gpt-oss: provider pages checked 2026-10-23 (PR #4's table);
+          # Tavily basic search = 1 credit, pay-as-you-go $0.008/credit (docs.tavily.com, checked 2026-10-29).
+          # Re-check before relying on them; a Claude run shows as unpriced here.
+          PROVIDER_PRICING: '{"models":{"openai/gpt-oss-120b":{"inputPerMTok":0.15,"cachedInputPerMTok":0.075,"outputPerMTok":0.6,"currency":"USD"},"openai/gpt-oss-20b":{"inputPerMTok":0.075,"cachedInputPerMTok":0.037,"outputPerMTok":0.3,"currency":"USD"}},"tools":{"search:tavily":{"perCall":0.008,"currency":"USD"}},"fx":{"USD":0.8925}}'
+          SMOKE_PRICE_IN_PER_M: "0.15"
+          SMOKE_PRICE_OUT_PER_M: "0.6"
           SMOKE_SCENARIOS: ${{ inputs.scenarios }}
           SMOKE_E_EXPECT: ${{ (inputs.e_expect == 'neg-a-model-key' || inputs.e_expect == 'neg-c-search-off') && 'blocked' || inputs.e_expect == 'neg-b-search-key' && 'degraded' || 'run' }}
           SMOKE_FULL: ${{ inputs.full && '1' || '0' }}
