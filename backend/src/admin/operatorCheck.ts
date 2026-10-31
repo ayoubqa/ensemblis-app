@@ -17,7 +17,27 @@ const INVISIBLE_ALL = new RegExp(`[${INVISIBLE_CHARS}]`, "g");
 const QUOTE_CHARS = "\"'\\u2018\\u2019\\u201c\\u201d`";
 const QUOTES = new RegExp(`[${QUOTE_CHARS}]`);
 const QUOTES_ALL = new RegExp(`[${QUOTE_CHARS}]`, "g");
-const PASTED_PREFIX = /^(admin[\s_-]*emails?\s*=\s*|mailto:)/i;
+const PASTED_PREFIX = /^(admin[\s_-]*emails?\s*=|mailto:)\s*/i;
+const ANGLE_BRACKETS = /^<\s*(.*?)\s*>$/;
+
+/**
+ * Peels formatting off an entry in any order and nesting ("<mailto:…>", "ADMIN_EMAILS=<…>", "mailto: …"),
+ * trimming after each step. Formatting only: it never touches the address's own characters, so formatting alone
+ * can never read as look-alike letters.
+ */
+function unwrap(s: string): { bare: string; prefix: boolean; brackets: boolean } {
+  let bare = s.trim();
+  let prefix = false;
+  let brackets = false;
+  for (let changed = true; changed; ) {
+    changed = false;
+    const unprefixed = bare.replace(PASTED_PREFIX, "").trim();
+    if (unprefixed !== bare) [bare, prefix, changed] = [unprefixed, true, true];
+    const inside = ANGLE_BRACKETS.exec(bare);
+    if (inside) [bare, brackets, changed] = [inside[1].trim(), true, true];
+  }
+  return { bare, prefix, brackets };
+}
 
 /** Latin look-alikes (Cyrillic, Greek) — only to recognise the caller's entry, never to authorise. */
 const CONFUSABLES: Record<string, string> = {
@@ -65,17 +85,16 @@ export function findYourEntry(entries: string[], yourEmail: string): YourEntry |
     // A ";" or space instead of "," leaves several addresses in one entry: look inside it too.
     const parts = [entry, ...entry.split(/[;\s]+/).filter((p) => p && p !== entry)];
     for (const part of parts) {
-      const cleaned = clean(part);
-      const unprefixed = cleaned.replace(PASTED_PREFIX, "");
-      const bare = unprefixed.replace(/^<(.*)>$/, "$1");
+      const { bare, prefix, brackets } = unwrap(clean(part));
       if (skeleton(bare) !== mine) continue;
       const unusual = [...new Set([...part].filter((ch) => INVISIBLE.test(ch) || ch.charCodeAt(0) > 0x7e || ch.charCodeAt(0) < 0x20).map(codePoint))];
       const issues: EntryIssue[] = [];
       if (QUOTES.test(part)) issues.push("quotes");
       if (INVISIBLE.test(part)) issues.push("invisible_characters");
+      // Only the address itself, after all formatting is peeled off, can carry look-alike letters.
       if (bare.toLowerCase() !== yourEmail.trim().toLowerCase()) issues.push("look_alike_characters");
-      if (unprefixed !== cleaned) issues.push("pasted_prefix");
-      if (bare !== unprefixed) issues.push("angle_brackets");
+      if (prefix) issues.push("pasted_prefix");
+      if (brackets) issues.push("angle_brackets");
       if (part !== entry) issues.push("wrong_separator");
       return { issues, unusualCharacters: unusual };
     }

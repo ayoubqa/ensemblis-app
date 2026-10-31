@@ -65,6 +65,68 @@ describe("operator check: only the caller's own entry", () => {
     });
   });
 
+  describe("formatting is never mistaken for look-alike letters", () => {
+    // Every combination of the formatting a paste can add around the plain ASCII address.
+    const quotes: [string, string][] = [["", ""], ['"', '"'], ["'", "'"], ["“", "”"]];
+    const prefixes = ["", "mailto:", "MAILTO:", "mailto: ", "ADMIN_EMAILS=", "ADMIN_EMAILS = ", "admin_emails=", "ADMIN_EMAIL="];
+    const brackets: [string, string][] = [["", ""], ["<", ">"], ["< ", " >"]];
+    const combos: { raw: string; expected: string[] }[] = [];
+    for (const [qo, qc] of quotes)
+      for (const p of prefixes)
+        for (const [bo, bc] of brackets) {
+          // Prefix outside the brackets, and inside them ("<mailto:…>").
+          for (const inner of [false, true]) {
+            const body = inner ? `${bo}${p}${ME}${bc}` : `${p}${bo}${ME}${bc}`;
+            const expected = [qo ? "quotes" : "", p ? "pasted_prefix" : "", bo ? "angle_brackets" : ""].filter(Boolean);
+            combos.push({ raw: `${qo}${body}${qc}`, expected });
+          }
+        }
+
+    it(`all ${combos.length} combinations: found, exact issues, never look_alike_characters`, () => {
+      for (const { raw, expected } of combos) {
+        const r = check(raw);
+        expect(r.yourEntry, raw).not.toBeNull();
+        expect(r.yourEntry!.issues, raw).toEqual(expected);
+        expect(r.yourEntry!.issues, raw).not.toContain("look_alike_characters");
+        expect(r.yourEntry!.issues, raw).not.toContain("wrong_separator");
+      }
+    });
+
+    it.each([
+      ["mailto: admin@getensemblis.com", ["pasted_prefix"]],
+      ["< admin@getensemblis.com >", ["angle_brackets"]],
+      ["<mailto:admin@getensemblis.com>", ["pasted_prefix", "angle_brackets"]],
+      ["ADMIN_EMAILS=<admin@getensemblis.com>", ["pasted_prefix", "angle_brackets"]],
+      ['<"admin@getensemblis.com">', ["quotes", "angle_brackets"]],
+    ])("regression: %j → %j (was misread as a separator, or not found)", (raw, issues) => {
+      expect(check(raw).yourEntry).toEqual({ issues, unusualCharacters: raw.includes("“") ? ["U+201C", "U+201D"] : [] });
+    });
+  });
+
+  describe("formatting combined with genuine look-alike letters", () => {
+    it.each([
+      ["mailto:аdmin@getensemblis.com", ["look_alike_characters", "pasted_prefix"], ["U+0430"]],
+      ["mailto: аdmin@getensemblis.com", ["look_alike_characters", "pasted_prefix"], ["U+0430"]],
+      ["ADMIN_EMAILS=аdmin@getensemblis.com", ["look_alike_characters", "pasted_prefix"], ["U+0430"]],
+      ["<аdmin@getensemblis.com>", ["look_alike_characters", "angle_brackets"], ["U+0430"]],
+      ["<mailto:admin@gеtensemblis.com>", ["look_alike_characters", "pasted_prefix", "angle_brackets"], ["U+0435"]],
+      ['"аdmin@getensemblis.com"', ["quotes", "look_alike_characters"], ["U+0430"]],
+      ["“mailto:аdmin@getensemblis.com”", ["quotes", "look_alike_characters", "pasted_prefix"], ["U+201C", "U+0430", "U+201D"]],
+      ['"ADMIN_EMAILS=<аdmin@gеtensemblis.com>"', ["quotes", "look_alike_characters", "pasted_prefix", "angle_brackets"], ["U+0430", "U+0435"]],
+      ["<аdmin@getensemblis.com​>", ["invisible_characters", "look_alike_characters", "angle_brackets"], ["U+0430", "U+200B"]],
+      ["x@y.io; mailto:аdmin@getensemblis.com", ["look_alike_characters", "pasted_prefix", "wrong_separator"], ["U+0430"]],
+      ["ａdmin@getensemblis.com", ["look_alike_characters"], ["U+FF41"]], // fullwidth "a" (NFKC)
+    ])("%j → %j", (raw, issues, unusual) => {
+      const r = check(raw);
+      expect(r.yourEmailMatches).toBe(false); // the live rule stays exact
+      expect(r.yourEntry).toEqual({ issues, unusualCharacters: unusual });
+    });
+  });
+
+  it("formatting with nothing inside is not your entry", () => {
+    for (const raw of ["mailto:", "<>", "ADMIN_EMAILS=", '""', "<mailto:>"]) expect(check(raw).yourEntry, raw).toBeNull();
+  });
+
   it("a typo is reported only as a yes/no close match, never as an entry", () => {
     const r = check("admin@getensemblis.co");
     expect(r).toMatchObject({ yourEmailMatches: false, yourEntry: null, closeMatch: true });
