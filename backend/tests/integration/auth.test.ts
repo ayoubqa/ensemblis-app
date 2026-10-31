@@ -100,7 +100,7 @@ describe("authentication & authorization", () => {
       await api().get("/api/auth/operator-check").set(guest.auth).expect(403);
     });
 
-    it("an ordinary verified user: not an operator, sees only the masked shape of the list", async () => {
+    it("an ordinary verified user: not an operator, and learns nothing about the operator list", async () => {
       const { auth } = await createUser({ email: "someone@example.org", verified: true });
       const r = await api().get("/api/auth/operator-check").set(auth).expect(200);
       expect(r.headers["cache-control"]).toBe("no-store");
@@ -108,11 +108,19 @@ describe("authentication & authorization", () => {
       expect(Object.keys(r.body).sort()).toEqual(["account", "adminEmails", "deployment"]);
       expect(Object.keys(r.body.deployment).sort()).toEqual(["expectedService", "release", "startedAt"]);
       expect(r.body.deployment.expectedService).toBeNull(); // not on Render in tests
-      expect(r.body.adminEmails).toMatchObject({ adminEmailsDefined: true, entryCount: 1, yourEmailMatches: false, differsFromBootValue: false });
-      expect(r.body.adminEmails.entries).toEqual([{ masked: "o***@***.com", looksLikeEmail: true, hasQuotes: false, unusualCharacters: [] }]);
+      expect(r.body.adminEmails).toEqual({
+        adminEmailsDefined: true,
+        hasEntries: true,
+        yourEmailMatches: false,
+        yourEntry: null,
+        closeMatch: false,
+        differsFromBootValue: false,
+        nearMissKeys: [],
+      });
       // Never the operator's address, nor any environment value.
       const body = JSON.stringify(r.body);
       expect(body).not.toContain("owner@example.com");
+      expect(body).not.toMatch(/owner|\*\*\*|entryCount|masked/);
       expect(body).not.toContain(process.env.DATABASE_URL ?? "postgresql://");
       expect(body).not.toContain(process.env.JWT_SECRET ?? "no-jwt-secret-set");
     });
@@ -121,7 +129,7 @@ describe("authentication & authorization", () => {
       const { auth } = await createUser({ email: "owner@example.com", verified: true });
       const r = await api().get("/api/auth/operator-check").set(auth).expect(200);
       expect(r.body.account.isAdmin).toBe(true);
-      expect(r.body.adminEmails).toMatchObject({ yourEmailMatches: true, yourEmailMatchesAfterCleanup: true });
+      expect(r.body.adminEmails).toMatchObject({ yourEmailMatches: true, yourEntry: { issues: [], unusualCharacters: [] } });
       expect((await api().get("/api/auth/me").set(auth).expect(200)).body.user.isAdmin).toBe(true);
       await api().get("/api/admin/overview").set(auth).expect(200);
     });
@@ -130,7 +138,7 @@ describe("authentication & authorization", () => {
       const { auth } = await createUser({ email: "someone-else@example.org", verified: true });
       const r = await api().get("/api/auth/operator-check?email=owner@example.com").set(auth).send({ email: "owner@example.com" }).expect(200);
       expect(r.body.account.email).toBe("someone-else@example.org");
-      expect(r.body.adminEmails.yourEmailMatches).toBe(false);
+      expect(r.body.adminEmails).toMatchObject({ yourEmailMatches: false, yourEntry: null, closeMatch: false });
     });
 
     it("is read-only: no other method is routed", async () => {

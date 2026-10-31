@@ -397,8 +397,8 @@ router.post(
 );
 
 // TEMPORARY (remove once production operator access is confirmed): why the signed-in account is or isn't an
-// operator. Verified, non-guest accounts only; reports the caller's own status, the masked shape of ADMIN_EMAILS
-// and whether the expected deployment answered — never the raw value or anything about another account. Read-only:
+// operator. Verified, non-guest accounts only; reports the caller's own status, what is wrong with the caller's
+// own ADMIN_EMAILS entry (the list itself is never returned) and whether the expected deployment answered — never the raw value or anything about another account. Read-only:
 // it changes nothing and grants nothing (requireAdmin still guards /api/admin). See admin/operatorCheck.ts.
 const operatorCheckLimiter = limiter(60 * 60_000, 20, "Too many operator checks. Please try again later.");
 

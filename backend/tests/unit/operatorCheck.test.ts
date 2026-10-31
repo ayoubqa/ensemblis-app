@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { parseAdminEmails } from "../../src/config";
-import { describeEntry, maskEmail, operatorCheck } from "../../src/admin/operatorCheck";
+import { isAdminEmail, parseAdminEmails } from "../../src/config";
+import { findYourEntry, operatorCheck } from "../../src/admin/operatorCheck";
 
 const ME = "admin@getensemblis.com";
+const check = (raw: string | undefined, envKeys: string[] = []) => operatorCheck(raw, parseAdminEmails(raw), ME, envKeys);
 
 describe("ADMIN_EMAILS parsing (the live rule)", () => {
   it("splits on commas, trims and lower-cases", () => {
@@ -21,66 +22,87 @@ describe("ADMIN_EMAILS parsing (the live rule)", () => {
   });
 });
 
-describe("operator check", () => {
-  it("masks entries so they are recognisable but not readable", () => {
-    expect(maskEmail(ME)).toBe("a***@***.com");
-    expect(maskEmail("jo@ex.co.uk")).toBe("j***@***.uk");
-    expect(maskEmail("no-at-sign")).toBe("n***");
-    expect(maskEmail("")).toBe("***");
+describe("operator check: only the caller's own entry", () => {
+  it("an exact match", () => {
+    expect(check(ME)).toEqual({
+      adminEmailsDefined: true,
+      hasEntries: true,
+      yourEmailMatches: true,
+      yourEntry: { issues: [], unusualCharacters: [] },
+      closeMatch: false,
+      differsFromBootValue: false,
+      nearMissKeys: [],
+    });
   });
 
-  it("a clean match", () => {
-    const r = operatorCheck(ME, [ME], ME, ["ADMIN_EMAILS", "PATH"]);
-    expect(r).toMatchObject({ adminEmailsDefined: true, entryCount: 1, yourEmailMatches: true, yourEmailMatchesAfterCleanup: true, differsFromBootValue: false, nearMissKeys: [] });
-    expect(r.entries).toEqual([{ masked: "a***@***.com", looksLikeEmail: true, hasQuotes: false, unusualCharacters: [] }]);
+  it("unset, and blank", () => {
+    expect(check(undefined)).toMatchObject({ adminEmailsDefined: false, hasEntries: false, yourEmailMatches: false, yourEntry: null, closeMatch: false });
+    expect(check(" , ")).toMatchObject({ adminEmailsDefined: true, hasEntries: false, yourEntry: null });
   });
 
-  it("unset", () => {
-    expect(operatorCheck(undefined, [], ME, [])).toMatchObject({ adminEmailsDefined: false, entryCount: 0, yourEmailMatches: false });
-  });
-
-  it("flags a zero-width character and says cleanup would match", () => {
-    const raw = "admin@getensemblis.com​";
-    const r = operatorCheck(raw, parseAdminEmails(raw), ME, []);
+  it.each([
+    ['"admin@getensemblis.com"', ["quotes"], []],
+    ["“admin@getensemblis.com”", ["quotes"], ["U+201C", "U+201D"]],
+    ["admin@getensemblis.com​", ["invisible_characters"], ["U+200B"]],
+    ["admin@get‍ensemblis.com", ["invisible_characters"], ["U+200D"]],
+    ["аdmin@getensemblis.com", ["look_alike_characters"], ["U+0430"]],
+    ["admin@gеtеnsemblis.com", ["look_alike_characters"], ["U+0435"]],
+    ["ADMIN_EMAILS=admin@getensemblis.com", ["pasted_prefix"], []],
+    ["mailto:admin@getensemblis.com", ["pasted_prefix"], []],
+    ["<admin@getensemblis.com>", ["angle_brackets"], []],
+    ["other@x.io; admin@getensemblis.com", ["wrong_separator"], []],
+  ])("finds your entry in %j and says what's wrong", (raw, issues, unusual) => {
+    const r = check(raw);
     expect(r.yourEmailMatches).toBe(false);
-    expect(r.yourEmailMatchesAfterCleanup).toBe(true);
-    expect(r.entries[0]).toMatchObject({ looksLikeEmail: false, unusualCharacters: ["U+200B"] });
+    expect(r.yourEntry).toEqual({ issues, unusualCharacters: unusual });
+    expect(r.closeMatch).toBe(false);
   });
 
-  it("flags quotes", () => {
-    const raw = '"admin@getensemblis.com"';
-    const r = operatorCheck(raw, parseAdminEmails(raw), ME, []);
-    expect(r).toMatchObject({ yourEmailMatches: false, yourEmailMatchesAfterCleanup: true });
-    expect(r.entries[0].hasQuotes).toBe(true);
+  it("several problems at once", () => {
+    expect(check('"ADMIN_EMAILS=аdmin@getensemblis.com​"').yourEntry).toEqual({
+      issues: ["quotes", "invisible_characters", "look_alike_characters", "pasted_prefix"],
+      unusualCharacters: ["U+0430", "U+200B"],
+    });
   });
 
-  it("flags a look-alike letter, which cleanup does not (and must not) fix", () => {
-    const raw = "аdmin@getensemblis.com";
-    const r = operatorCheck(raw, parseAdminEmails(raw), ME, []);
-    expect(r).toMatchObject({ yourEmailMatches: false, yourEmailMatchesAfterCleanup: false });
-    expect(r.entries[0].unusualCharacters).toEqual(["U+0430"]);
+  it("a typo is reported only as a yes/no close match, never as an entry", () => {
+    const r = check("admin@getensemblis.co");
+    expect(r).toMatchObject({ yourEmailMatches: false, yourEntry: null, closeMatch: true });
+    expect(check("someone.else@other-company.io")).toMatchObject({ yourEntry: null, closeMatch: false });
+  });
+
+  it("never describes another operator's entry, and never returns a list, mask or count", () => {
+    const raw = '"other.operator@private.example", аlice@private.example, admin@getensemblis.com​';
+    const r = check(raw);
+    expect(r.yourEntry).toEqual({ issues: ["invisible_characters"], unusualCharacters: ["U+200B"] }); // only mine
+    expect(Object.keys(r).sort()).toEqual(["adminEmailsDefined", "closeMatch", "differsFromBootValue", "hasEntries", "nearMissKeys", "yourEmailMatches", "yourEntry"]);
+    const json = JSON.stringify(r);
+    for (const leak of ["other", "operator", "private", "alice", "lice", "U+0430", "***", "getensemblis", "admin@"]) expect(json).not.toContain(leak);
+  });
+
+  it("another operator's problems stay invisible when you are listed correctly", () => {
+    const r = check('"broken@x.io", admin@getensemblis.com');
+    expect(r.yourEntry).toEqual({ issues: [], unusualCharacters: [] });
+    expect(JSON.stringify(r)).not.toContain("quotes");
+  });
+
+  it("someone whose address merely contains yours is not 'your entry'", () => {
+    expect(findYourEntry(["superadmin@getensemblis.com", "admin@getensemblis.com.evil.io"], ME)).toBeNull();
+  });
+
+  it("recognising look-alikes never changes the live rule", () => {
+    // findYourEntry recognises the entry for the report; isAdminEmail (authorisation) stays exact.
+    expect(findYourEntry(["аdmin@getensemblis.com"], ME)).not.toBeNull();
+    expect(parseAdminEmails("аdmin@getensemblis.com")).not.toContain(ME);
+    expect(isAdminEmail("аdmin@getensemblis.com")).toBe(false);
   });
 
   it("reports a value that changed since boot (the process authorises with the boot value)", () => {
-    const r = operatorCheck(ME, [], ME, []);
-    expect(r).toMatchObject({ yourEmailMatches: false, differsFromBootValue: true });
+    expect(operatorCheck(ME, [], ME, [])).toMatchObject({ yourEmailMatches: false, differsFromBootValue: true, yourEntry: { issues: [] } });
   });
 
   it("lists only misspellings of ADMIN_EMAILS by name, escaped so stray spaces show", () => {
     const keys = ["ADMIN_EMAIL", "ADMIN_EMAILS ", "admin_emails", "ADMIN-EMAILS", "ADMIN_EMAILS", "DATABASE_URL", "ADMIN_TOKEN", "STRIPE_ADMIN_KEY", "SUPERADMIN_EMAILS"];
-    expect(operatorCheck(undefined, [], ME, keys).nearMissKeys).toEqual(['"ADMIN-EMAILS"', '"ADMIN_EMAIL"', '"ADMIN_EMAILS "', '"admin_emails"']);
-  });
-
-  it("never returns the raw value anywhere", () => {
-    const raw = "secret.person@private-domain.example, admin@getensemblis.com";
-    const json = JSON.stringify(operatorCheck(raw, parseAdminEmails(raw), ME, ["ADMIN_EMAILS"]));
-    expect(json).not.toContain("secret.person");
-    expect(json).not.toContain("private-domain");
-    expect(json).not.toContain(ME);
-    expect(json).not.toContain("getensemblis");
-  });
-
-  it("describes an entry's characters by code point only", () => {
-    expect(describeEntry("a b@c.d").unusualCharacters).toEqual(["U+00A0"]);
+    expect(check(undefined, keys).nearMissKeys).toEqual(['"ADMIN-EMAILS"', '"ADMIN_EMAIL"', '"ADMIN_EMAILS "', '"admin_emails"']);
   });
 });

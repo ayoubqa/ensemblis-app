@@ -55,8 +55,28 @@ export function AdminGate() {
 
 /**
  * TEMPORARY: what the API itself sees for this account (GET /api/auth/operator-check) — whether the expected
- * deployment answered and the masked shape of its operator list. Remove with the endpoint.
+ * deployment answered and what is wrong with THIS account's entry. The operator list itself is never shown.
+ * Remove with the endpoint.
  */
+const ISSUE_TEXT: Record<NonNullable<OperatorCheck["adminEmails"]["yourEntry"]>["issues"][number], string> = {
+  quotes: "wrapped in quotes",
+  invisible_characters: "contains invisible characters",
+  look_alike_characters: "uses look-alike (non-Latin) letters",
+  pasted_prefix: "starts with a pasted ADMIN_EMAILS= or mailto:",
+  angle_brackets: "wrapped in < >",
+  wrong_separator: "separated with ; or a space instead of a comma",
+};
+
+function yourEntryText(a: OperatorCheck["adminEmails"]): string {
+  if (a.yourEntry) {
+    if (!a.yourEntry.issues.length) return "present, exactly your address";
+    const chars = a.yourEntry.unusualCharacters.length ? ` (${a.yourEntry.unusualCharacters.join(" ")})` : "";
+    return `present but ${a.yourEntry.issues.map((i) => ISSUE_TEXT[i]).join(", ")}${chars}`;
+  }
+  if (a.closeMatch) return "not found; one entry is a near-miss of your address (a typo?)";
+  return "nothing resembling your address";
+}
+
 function OperatorDiagnostics() {
   const [check, setCheck] = useState<OperatorCheck | null>(null);
   const [error, setError] = useState<unknown>(null);
@@ -70,14 +90,9 @@ function OperatorDiagnostics() {
     ["Expected API service", d.expectedService === null ? "not reported" : d.expectedService ? "yes" : "no"],
     ["Release", d.release ?? "not reported"],
     ["Started", d.startedAt],
-    ["ADMIN_EMAILS defined", a.adminEmailsDefined ? "yes" : "no"],
-    ["Entries", String(a.entryCount)],
-    ...a.entries.map((e, i): [string, string] => [
-      `Entry ${i + 1}`,
-      [e.masked, e.looksLikeEmail ? "plain address" : "not a plain address", e.hasQuotes ? "has quotes" : "", e.unusualCharacters.length ? `unusual: ${e.unusualCharacters.join(" ")}` : ""].filter(Boolean).join(" · "),
-    ]),
-    ["Your email matches", a.yourEmailMatches ? "yes" : "no"],
-    ["Would match without quotes/invisible characters", a.yourEmailMatchesAfterCleanup ? "yes" : "no"],
+    ["ADMIN_EMAILS defined", a.adminEmailsDefined ? (a.hasEntries ? "yes" : "yes, but empty") : "no"],
+    ["Your entry", yourEntryText(a)],
+    ["Your email matches (live rule)", a.yourEmailMatches ? "yes" : "no"],
     ["Changed since the server started", a.differsFromBootValue ? "yes" : "no"],
     ["Misspelt ADMIN_EMAILS names", a.nearMissKeys.length ? a.nearMissKeys.join(", ") : "none"],
   ];

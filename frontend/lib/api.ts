@@ -945,12 +945,16 @@ export interface AdminEconomics {
 export interface OperatorCheck {
   account: { email: string; emailVerified: boolean; isAdmin: boolean };
   deployment: { release: string | null; expectedService: boolean | null; startedAt: string };
+  // Only about the caller's own entry: ADMIN_EMAILS itself is never listed, masked or counted.
   adminEmails: {
     adminEmailsDefined: boolean;
-    entryCount: number;
-    entries: { masked: string; looksLikeEmail: boolean; hasQuotes: boolean; unusualCharacters: string[] }[];
+    hasEntries: boolean;
     yourEmailMatches: boolean;
-    yourEmailMatchesAfterCleanup: boolean;
+    yourEntry: {
+      issues: ("quotes" | "invisible_characters" | "look_alike_characters" | "pasted_prefix" | "angle_brackets" | "wrong_separator")[];
+      unusualCharacters: string[];
+    } | null;
+    closeMatch: boolean;
     differsFromBootValue: boolean;
     nearMissKeys: string[];
   };
