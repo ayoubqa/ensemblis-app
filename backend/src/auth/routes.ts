@@ -15,6 +15,7 @@ import { forgotPasswordLimiter, loginLimiter, resetPasswordLimiter, signupLimite
 import { sendEmail } from "../email/send";
 import { passwordResetEmail, verifyEmailEmail } from "../email/templates";
 import { limiter } from "../lib/rateLimits";
+import { operatorCheck } from "../admin/operatorCheck";
 
 const router = Router();
 
@@ -392,6 +393,36 @@ router.post(
     if (result === "not_eligible") throw new HttpError(403, "Guest trial accounts can't verify an email address. Create a free account first.");
     if (result === "email_off") throw new HttpError(503, "Email isn't configured on this server, so addresses can't be verified yet.");
     res.json({ ok: true, sent: result === "sent", ...(result === "already_verified" ? { alreadyVerified: true, user: await loadPublicUser(req.userId!) } : {}) });
+  })
+);
+
+// TEMPORARY (remove once production operator access is confirmed): why the signed-in account is or isn't an
+// operator. Verified, non-guest accounts only; reports the caller's own status, what is wrong with the caller's
+// own ADMIN_EMAILS entry (the list itself is never returned) and whether the expected deployment answered — never the raw value or anything about another account. Read-only:
+// it changes nothing and grants nothing (requireAdmin still guards /api/admin). See admin/operatorCheck.ts.
+const operatorCheckLimiter = limiter(60 * 60_000, 20, "Too many operator checks. Please try again later.");
+
+router.get(
+  "/operator-check",
+  requireAuth,
+  operatorCheckLimiter,
+  ah<AuthedRequest>(async (req, res) => {
+    const user = await loadPublicUser(req.userId!);
+    if (user.isGuest || !user.emailVerified) throw new HttpError(403, "Verify your email address first (Settings → Account).");
+    res.set("Cache-Control", "no-store");
+    const service = process.env.RENDER_SERVICE_NAME?.trim();
+    res.json({
+      account: { email: user.email, emailVerified: user.emailVerified, isAdmin: user.isAdmin },
+      deployment: {
+        // Already public on /health/live.
+        release: process.env.RENDER_GIT_COMMIT?.trim().slice(0, 7) || null,
+        // Whether this process is the render.yaml API service — a yes/no, not the name (null off Render).
+        expectedService: service ? service === "ensemblis-api" : null,
+        // When this process loaded its environment: a change saved after this hasn't been read.
+        startedAt: new Date(Date.now() - process.uptime() * 1000).toISOString(),
+      },
+      adminEmails: operatorCheck(process.env.ADMIN_EMAILS, config.adminEmails, user.email, Object.keys(process.env)),
+    });
   })
 );
 

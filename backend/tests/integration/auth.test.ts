@@ -91,6 +91,76 @@ describe("authentication & authorization", () => {
     });
   });
 
+  describe("operator check (temporary diagnostic)", () => {
+    it("needs a session, a verified address and a non-guest account", async () => {
+      await api().get("/api/auth/operator-check").expect(401);
+      const unverified = await createUser();
+      await api().get("/api/auth/operator-check").set(unverified.auth).expect(403);
+      const guest = await createUser({ isGuest: true, verified: true });
+      await api().get("/api/auth/operator-check").set(guest.auth).expect(403);
+    });
+
+    it("an ordinary verified user: not an operator, and learns nothing about the operator list", async () => {
+      const { auth } = await createUser({ email: "someone@example.org", verified: true });
+      const r = await api().get("/api/auth/operator-check").set(auth).expect(200);
+      expect(r.headers["cache-control"]).toBe("no-store");
+      expect(r.body.account).toEqual({ email: "someone@example.org", emailVerified: true, isAdmin: false });
+      expect(Object.keys(r.body).sort()).toEqual(["account", "adminEmails", "deployment"]);
+      expect(Object.keys(r.body.deployment).sort()).toEqual(["expectedService", "release", "startedAt"]);
+      expect(r.body.deployment.expectedService).toBeNull(); // not on Render in tests
+      expect(r.body.adminEmails).toEqual({
+        adminEmailsDefined: true,
+        hasEntries: true,
+        yourEmailMatches: false,
+        yourEntry: null,
+        closeMatch: false,
+        differsFromBootValue: false,
+        nearMissKeys: [],
+      });
+      // Never the operator's address, nor any environment value.
+      const body = JSON.stringify(r.body);
+      expect(body).not.toContain("owner@example.com");
+      expect(body).not.toMatch(/owner|\*\*\*|entryCount|masked/);
+      expect(body).not.toContain(process.env.DATABASE_URL ?? "postgresql://");
+      expect(body).not.toContain(process.env.JWT_SECRET ?? "no-jwt-secret-set");
+    });
+
+    it("the operator: matches, and isAdmin agrees with /api/auth/me and /api/admin", async () => {
+      const { auth } = await createUser({ email: "owner@example.com", verified: true });
+      const r = await api().get("/api/auth/operator-check").set(auth).expect(200);
+      expect(r.body.account.isAdmin).toBe(true);
+      expect(r.body.adminEmails).toMatchObject({ yourEmailMatches: true, yourEntry: { issues: [], unusualCharacters: [] } });
+      expect((await api().get("/api/auth/me").set(auth).expect(200)).body.user.isAdmin).toBe(true);
+      await api().get("/api/admin/overview").set(auth).expect(200);
+    });
+
+    it("only ever checks the caller: an email in the query or body is ignored", async () => {
+      const { auth } = await createUser({ email: "someone-else@example.org", verified: true });
+      const r = await api().get("/api/auth/operator-check?email=owner@example.com").set(auth).send({ email: "owner@example.com" }).expect(200);
+      expect(r.body.account.email).toBe("someone-else@example.org");
+      expect(r.body.adminEmails).toMatchObject({ yourEmailMatches: false, yourEntry: null, closeMatch: false });
+    });
+
+    it("is read-only: no other method is routed", async () => {
+      const { auth } = await createUser({ verified: true });
+      await api().post("/api/auth/operator-check").set(auth).expect(404);
+    });
+
+    it("grants nothing: an ordinary user who calls it is still refused by /api/admin", async () => {
+      const { auth } = await createUser({ verified: true });
+      await api().get("/api/auth/operator-check").set(auth).expect(200);
+      await api().get("/api/admin/overview").set(auth).expect(403);
+    });
+
+    // Last in this block: it spends the per-IP hourly allowance (20) shared with the tests above.
+    it("is rate limited server-side", async () => {
+      const { auth } = await createUser({ verified: true });
+      let status = 200;
+      for (let i = 0; i < 25 && status !== 429; i++) status = (await api().get("/api/auth/operator-check").set(auth)).status;
+      expect(status).toBe(429);
+    });
+  });
+
   it("email verification tokens are single-use", async () => {
     const { user, auth } = await createUser();
     await prisma.emailVerification.create({ data: { userId: user.id, tokenHash: hashVerifyToken("tok-1234567890"), expiresAt: new Date(Date.now() + 3600_000) } });
